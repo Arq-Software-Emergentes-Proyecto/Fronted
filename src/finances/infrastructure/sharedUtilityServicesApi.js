@@ -87,6 +87,62 @@ async function distributeAcrossDepartments(amount) {
   return { residentCount, perResidentShare }
 }
 
+/** Undo a shared-service split on unpaid receipts for the same month. */
+async function withdrawFromDepartments(perResidentShare, monthPrefix) {
+  const share = round2(perResidentShare)
+  const month = String(monthPrefix ?? '').trim() || currentMonthPrefix()
+  if (!(share > 0)) return
+
+  const [{ data: residentsData }, { data: receiptsData }] = await Promise.all([
+    apiClient.get('/users', { params: withOwnerParams({ role: 'resident' }) }),
+    apiClient.get('/receipts', { params: withOwnerParams() }),
+  ])
+
+  const residents = Array.isArray(residentsData) ? residentsData : []
+  const receipts = Array.isArray(receiptsData) ? receiptsData : []
+
+  await Promise.all(
+    residents.map(async (resident) => {
+      const unpaid = receipts.filter(
+        (row) => row.residentId === resident.id && row.status !== 'Paid',
+      )
+      if (!unpaid.length) return
+
+      const monthMatches = unpaid.filter(
+        (row) =>
+          String(row.dueDate ?? '').startsWith(month) ||
+          String(row.issueDate ?? '').startsWith(month),
+      )
+      const pool = (monthMatches.length ? monthMatches : unpaid).filter(
+        (row) => Number(row.extraCharges) > 0,
+      )
+      if (!pool.length) return
+
+      const target = pool.reduce((latest, row) =>
+        String(row.dueDate ?? '') > String(latest.dueDate ?? '') ? row : latest,
+      )
+
+      const nextExtra = round2(Math.max(0, (Number(target.extraCharges) || 0) - share))
+      const serviceOnly =
+        (Number(target.amount) || 0) === 0 &&
+        (Number(target.lateFee) || 0) === 0 &&
+        nextExtra === 0 &&
+        String(target.concept ?? '').includes('Servicios compartidos')
+
+      if (serviceOnly) {
+        await apiClient.delete(`/receipts/${target.id}`)
+        return
+      }
+
+      const patch = { extraCharges: nextExtra }
+      if (nextExtra === 0 && String(target.concept ?? '').includes('Servicios compartidos')) {
+        patch.concept = 'Mantenimiento'
+      }
+      await apiClient.patch(`/receipts/${target.id}`, patch)
+    }),
+  )
+}
+
 /**
  * Servicios compartidos (agua, luz) para vista recaudaciones.
  */
@@ -124,5 +180,26 @@ export const sharedUtilityServicesApi = {
 
     const { data: created } = await apiClient.post('/sharedUtilityServices', newRow)
     return created
+  },
+
+  async remove(id) {
+    const cleanId = String(id ?? '').trim()
+    if (!cleanId) {
+      throw apiError('SHARED_SERVICE_NOT_FOUND', 'Service id is required.')
+    }
+
+    let row = null
+    try {
+      ;({ data: row } = await apiClient.get(`/sharedUtilityServices/${encodeURIComponent(cleanId)}`))
+    } catch (error) {
+      if (error?.status === 404 || error?.code === 'HTTP_404') {
+        throw apiError('SHARED_SERVICE_NOT_FOUND', 'Service not found.')
+      }
+      throw error
+    }
+
+    await withdrawFromDepartments(Number(row?.perResidentShare) || 0, String(row?.month ?? ''))
+    await apiClient.delete(`/sharedUtilityServices/${encodeURIComponent(cleanId)}`)
+    return { id: cleanId }
   },
 }

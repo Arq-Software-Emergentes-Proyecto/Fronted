@@ -1,6 +1,8 @@
 import axios from 'axios'
 import { API_BASE_URL } from '@/shared/infrastructure/envConfig.js'
+import { LOCAL_PREVIEW_ENABLED, isPreviewAccessToken } from '@/iam/application/localPreviewAuth.js'
 import { clearSession, getAccessToken } from '@/iam/application/sessionStore.js'
+import { localMockAdapter } from '@/shared/infrastructure/mock/mockAdapter.js'
 
 /**
  * Centralized axios instance pointing at the BuildingFex API.
@@ -15,6 +17,7 @@ export const apiClient = axios.create({
     'Content-Type': 'application/json',
     Accept: 'application/json',
   },
+  ...(LOCAL_PREVIEW_ENABLED ? { adapter: localMockAdapter } : {}),
 })
 
 apiClient.interceptors.request.use((config) => {
@@ -49,7 +52,8 @@ apiClient.interceptors.response.use(
     if (error.response.status === 401) {
       const url = String(error.config?.url ?? '')
       const isAuthRoute = url.includes('/authentication/')
-      if (!isAuthRoute && getAccessToken()) {
+      const token = getAccessToken()
+      if (!isAuthRoute && token && !isPreviewAccessToken(token)) {
         clearSession()
         if (typeof window !== 'undefined') {
           const path = window.location.pathname

@@ -5,9 +5,20 @@ import Button from 'primevue/button'
 import InputNumber from 'primevue/inputnumber'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
-import Dropdown from 'primevue/dropdown'
-
+import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
+import { residentExtraChargesApi } from '../../../finances/infrastructure/residentExtraChargesApi.js'
 import { useFinancesStore } from '../../../finances/application/financesStore.js'
+import {
+  applyLateFeeToReceipt,
+  computeChargeDates,
+  currentStatementMonthKey,
+  findCharge,
+  formatDayMonth,
+  formatMonthLabel,
+  normalizeCharge,
+  normalizeMonthKey,
+  normalizeSettings,
+} from '../../../finances/domain/billingCycle.js'
 
 const { t, locale } = useI18n()
 const store = useFinancesStore()
@@ -23,111 +34,324 @@ const nfPen = computed(() => (value) => {
 })
 
 const uiState = ref({
-  isGenerating: false,
-  isCronRunning: false,
   isLoaded: false,
-  isSaving: false,
 })
 
 const editSettings = ref({
-  baseMonthlyExpense: 0,
-  lateFeeRate: 0,
-  lateFeeRateDisplay: 0,
+  lateFeePerDay: 0,
+  admissionPayFromDay: 1,
+  admissionPayToDay: 7,
+  monthlyCharges: [],
 })
+
+const chargeForm = ref({
+  month: '',
+  amount: null,
+  billingStart: '',
+  billingEnd: '',
+  paymentOpen: '',
+})
+const chargeError = ref('')
+const isSavingCharge = ref(false)
+
+const selectedCharge = computed(() =>
+  findCharge(editSettings.value.monthlyCharges, chargeForm.value.month),
+)
+const isChargeRegistered = computed(() => Boolean(selectedCharge.value))
+const isReceiptsModalOpen = ref(false)
+const extraCharges = ref([])
+const extraSearch = ref('')
+const residentsSearch = ref('')
+const selectedResidentId = ref('')
+const extraForm = ref({
+  title: '',
+  amount: null,
+  description: '',
+})
+const extraError = ref('')
+const isSavingExtra = ref(false)
+
+const chargePeriodLabel = computed(() => {
+  if (!chargeForm.value.billingStart || !chargeForm.value.billingEnd) return '—'
+  return t('financeAdmin.chargePeriodValue', {
+    start: formatDayMonth(chargeForm.value.billingStart, locale.value),
+    end: formatDayMonth(chargeForm.value.billingEnd, locale.value),
+  })
+})
+
+function chargeMonthLabel(month) {
+  return formatMonthLabel(month, locale.value)
+}
+
+function applySettingsToForm(settings) {
+  const normalized = normalizeSettings(settings || {})
+  editSettings.value = {
+    lateFeePerDay: normalized.lateFeePerDay,
+    admissionPayFromDay: normalized.admissionPayFromDay,
+    admissionPayToDay: normalized.admissionPayToDay,
+    monthlyCharges: normalized.monthlyCharges,
+  }
+}
+
+function resetChargeForm(monthKey) {
+  const month = normalizeMonthKey(monthKey || currentStatementMonthKey())
+  const dates = computeChargeDates(month)
+  const existing = findCharge(editSettings.value.monthlyCharges, month)
+  chargeForm.value = {
+    month,
+    amount: existing?.amount ?? null,
+    billingStart: dates.billingStart,
+    billingEnd: dates.billingEnd,
+    paymentOpen: existing?.paymentOpen || dates.paymentOpen,
+  }
+  chargeError.value = ''
+}
+
+function onChargeMonthChange() {
+  resetChargeForm(chargeForm.value.month)
+}
+
+function settingsPayload() {
+  return {
+    lateFeePerDay: editSettings.value.lateFeePerDay,
+    admissionPayFromDay: editSettings.value.admissionPayFromDay,
+    admissionPayToDay: editSettings.value.admissionPayToDay,
+    monthlyCharges: editSettings.value.monthlyCharges,
+  }
+}
 
 onMounted(async () => {
   await store.loadData()
-  editSettings.value = {
-    baseMonthlyExpense: store.state.settings?.baseMonthlyExpense ?? 150,
-    lateFeeRate: store.state.settings?.lateFeeRate ?? 0.05,
-    lateFeeRateDisplay: Math.round((store.state.settings?.lateFeeRate ?? 0.05) * 100),
-  }
+  applySettingsToForm(store.state.settings)
+  resetChargeForm()
+  extraCharges.value = await residentExtraChargesApi.list().catch(() => [])
   uiState.value.isLoaded = true
 })
 
-const handleSaveSettings = async () => {
-  if (uiState.value.isSaving) return
-  uiState.value.isSaving = true
+function receiptPayable(receipt) {
+  return (
+    Number(receipt?.amount) +
+    Number(receipt?.lateFee || 0) +
+    Number(receipt?.extraCharges || 0)
+  )
+}
+
+function residentSearchText(resident) {
+  const name = String(resident?.name ?? '')
+  const floor = String(resident?.floor ?? '')
+  const code = String(resident?.code ?? '')
+  return [name, floor, code, `piso ${floor}`, `depto ${code}`, `dept ${code}`, `${floor}-${code}`]
+    .join(' ')
+    .toLowerCase()
+}
+
+function residentLabel(resident) {
+  if (!resident) return ''
+  const code = String(resident.code ?? '').trim()
+  return code ? `${resident.name} · ${code}` : String(resident.name ?? '')
+}
+
+const extraResidentMatches = computed(() => {
+  const query = extraSearch.value.trim().toLowerCase()
+  const residents = store.state.residents || []
+  if (!query) return residents
+  return residents.filter((resident) => residentSearchText(resident).includes(query))
+})
+
+const filteredResidentStatus = computed(() => {
+  const rows = store.getResidentFinancialStatus.value || []
+  const query = residentsSearch.value.trim().toLowerCase()
+  if (!query) return rows
+  return rows.filter((resident) => residentSearchText(resident).includes(query))
+})
+
+const selectedExtraResident = computed(
+  () =>
+    (store.state.residents || []).find(
+      (resident) => String(resident.id) === String(selectedResidentId.value),
+    ) || null,
+)
+
+const historyExtraCharges = computed(() => {
+  const resident = selectedHistoryResident.value
+  if (!resident) return []
+  return extraCharges.value.filter(
+    (item) => String(item.residentId) === String(resident.id),
+  )
+})
+
+function selectExtraResident(resident) {
+  selectedResidentId.value = resident.id
+  extraSearch.value = residentLabel(resident)
+  extraError.value = ''
+}
+
+function resetExtraForm() {
+  extraForm.value = { title: '', amount: null, description: '' }
+  extraError.value = ''
+}
+
+async function onAddExtraCharge() {
+  if (!selectedResidentId.value) {
+    extraError.value = t('financeAdmin.extraRequired')
+    return
+  }
+  const title = String(extraForm.value.title ?? '').trim()
+  const description = String(extraForm.value.description ?? '').trim()
+  const amount = Number(extraForm.value.amount)
+  if (!title || !description || !Number.isFinite(amount) || amount <= 0) {
+    extraError.value = t('financeAdmin.extraRequired')
+    return
+  }
+
+  isSavingExtra.value = true
+  extraError.value = ''
   try {
-    await store.updateSettings({
-      baseMonthlyExpense: editSettings.value.baseMonthlyExpense,
-      lateFeeRate: editSettings.value.lateFeeRateDisplay / 100,
+    const created = await residentExtraChargesApi.add({
+      residentId: selectedResidentId.value,
+      title,
+      amount,
+      description,
     })
-    editSettings.value = {
-      baseMonthlyExpense: store.state.settings?.baseMonthlyExpense ?? 150,
-      lateFeeRate: store.state.settings?.lateFeeRate ?? 0.05,
-      lateFeeRateDisplay: Math.round((store.state.settings?.lateFeeRate ?? 0.05) * 100),
-    }
-    alert(t('financeAdmin.settingsSaved'))
+    extraCharges.value = [created, ...extraCharges.value]
+    resetExtraForm()
+    await store.loadData()
+    applySettingsToForm(store.state.settings)
   } catch (e) {
-    alert(e.message)
+    extraError.value = e.message
   } finally {
-    uiState.value.isSaving = false
+    isSavingExtra.value = false
   }
 }
 
-const handleGenerateReceipts = async () => {
-  if(uiState.value.isGenerating) return;
-  uiState.value.isGenerating = true;
+async function persistCharges(nextCharges) {
+  const updated = await store.updateSettings({
+    ...settingsPayload(),
+    monthlyCharges: nextCharges,
+  })
+  applySettingsToForm(updated)
+}
+
+async function onSaveCharge() {
+  const month = normalizeMonthKey(chargeForm.value.month)
+  const amount = Number(chargeForm.value.amount)
+  const billingStart = String(chargeForm.value.billingStart ?? '').trim()
+  const billingEnd = String(chargeForm.value.billingEnd ?? '').trim()
+  const paymentOpen = String(chargeForm.value.paymentOpen ?? '').trim()
+  if (findCharge(editSettings.value.monthlyCharges, month)) {
+    chargeError.value = t('financeAdmin.chargeLocked', { month: chargeMonthLabel(month) })
+    return
+  }
+  if (!month || !Number.isFinite(amount) || amount <= 0 || !paymentOpen) {
+    chargeError.value = t('financeAdmin.chargeRequired')
+    return
+  }
+
+  isSavingCharge.value = true
+  chargeError.value = ''
   try {
-    const newReceipts = await store.generateMonthlyReceipts()
-    if(newReceipts.length === 0) {
-      alert("No new receipts generated. Everyone is up to date based on their next cycle.");
-    } else {
-      alert(`Generated ${newReceipts.length} new receipts!`);
-    }
-    await store.loadData()
-  } catch(e) {
-    alert(e.message)
+    const nextCharge = normalizeCharge({
+      id: `charge-${month}`,
+      month,
+      amount,
+      billingStart,
+      billingEnd,
+      paymentOpen,
+    })
+    await persistCharges([nextCharge, ...editSettings.value.monthlyCharges])
+    resetChargeForm(month)
+    alert(t('financeAdmin.chargeSaved'))
+  } catch (e) {
+    chargeError.value = e.message
   } finally {
-    uiState.value.isGenerating = false;
+    isSavingCharge.value = false
   }
 }
 
-const handleSimulateCron = async () => {
-  if(uiState.value.isCronRunning) return;
-  uiState.value.isCronRunning = true;
-  try {
-    await store.simulateNightlyCron()
-    alert('Simulated Nightly Cron. Late fees applied where applicable.');
-    await store.loadData()
-  } catch(e) {
-    alert(e.message)
-  } finally {
-    uiState.value.isCronRunning = false;
-  }
+function openReceiptsModal() {
+  isReceiptsModalOpen.value = true
 }
 
-// Payment History grouped by Floor
-const floorSections = computed(() => {
-  const sections = {};
-  const data = store.getResidentFinancialStatus.value || [];
-  data.forEach(res => {
-    if(!sections[res.floor]) sections[res.floor] = [];
-    sections[res.floor].push(res);
-  });
-  return Object.keys(sections).map(floor => ({
-    floor,
-    residents: sections[floor]
-  })).sort((a,b) => parseInt(a.floor) - parseInt(b.floor));
-})
+function closeReceiptsModal() {
+  isReceiptsModalOpen.value = false
+}
 
-const historyFloorFilter = ref('')
+function residentById(id) {
+  return (store.state.residents || []).find((resident) => String(resident.id) === String(id)) || null
+}
 
-const historyFloorOptions = computed(() => {
-  const all = { label: t('financeAdmin.allFloors'), value: '' }
-  const byFloor = floorSections.value.map((s) => ({
-    label: `${t('financeAdmin.tableFloor')} ${s.floor}`,
-    value: String(s.floor),
+function receiptStatusKey(status) {
+  const raw = String(status ?? '')
+  if (raw === 'Paid' || raw === 'Pagado') return 'Paid'
+  if (raw === 'Overdue' || raw === 'En Mora') return 'Overdue'
+  return 'Pending'
+}
+
+const chargeReceiptGroups = computed(() => {
+  const receipts = store.state.receipts || []
+  const lateFeePerDay = editSettings.value.lateFeePerDay
+  return editSettings.value.monthlyCharges.map((charge) => ({
+    charge,
+    receipts: receipts
+      .filter((receipt) => String(receipt.billingMonth || '') === String(charge.month))
+      .map((receipt) => {
+        const withFee = applyLateFeeToReceipt(receipt, lateFeePerDay)
+        const resident = residentById(withFee.residentId)
+        return {
+          ...withFee,
+          residentName: resident?.name || '—',
+          residentFloor: resident?.floor ?? '',
+          residentCode: resident?.code ?? '',
+          statusKey: receiptStatusKey(withFee.status),
+        }
+      }),
   }))
-  return [all, ...byFloor]
 })
 
-const filteredFloorSections = computed(() => {
-  if (!historyFloorFilter.value) {
-    return floorSections.value
-  }
-  return floorSections.value.filter((s) => String(s.floor) === String(historyFloorFilter.value))
+const historySearch = ref('')
+const selectedHistoryResidentId = ref('')
+
+const historyResidentMatches = computed(() => {
+  const query = historySearch.value.trim().toLowerCase()
+  const residents = store.state.residents || []
+  if (!query) return []
+  return residents.filter((resident) => {
+    const hay = `${resident.name ?? ''} ${resident.code ?? ''} ${resident.floor ?? ''}`.toLowerCase()
+    return hay.includes(query)
+  })
+})
+
+const selectedHistoryResident = computed(
+  () =>
+    (store.state.residents || []).find(
+      (resident) => String(resident.id) === String(selectedHistoryResidentId.value),
+    ) || null,
+)
+
+function selectHistoryResident(resident) {
+  selectedHistoryResidentId.value = resident.id
+  historySearch.value = resident.name
+}
+
+const historyPaidMonths = computed(() => {
+  const resident = selectedHistoryResident.value
+  if (!resident) return []
+  const lateFeePerDay = editSettings.value.lateFeePerDay
+  return (store.state.receipts || [])
+    .filter((receipt) => String(receipt.residentId) === String(resident.id))
+    .map((receipt) => applyLateFeeToReceipt(receipt, lateFeePerDay))
+    .filter((receipt) => receiptStatusKey(receipt.status) === 'Paid')
+    .map((receipt) => {
+      const month =
+        String(receipt.billingMonth || '').trim() ||
+        String(normalizeYmd(receipt.dueDate) || '').slice(0, 7)
+      return {
+        ...receipt,
+        month,
+        monthLabel: chargeMonthLabel(month) || month,
+      }
+    })
+    .sort((a, b) => String(b.month).localeCompare(String(a.month)))
 })
 
 function normalizeYmd(value) {
@@ -143,148 +367,67 @@ function normalizeYmd(value) {
   return `${y}-${m}-${d}`
 }
 
-function todayYmdLocal() {
-  const dt = new Date()
-  const y = dt.getFullYear()
-  const m = String(dt.getMonth() + 1).padStart(2, '0')
-  const d = String(dt.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-}
-
-function receiptCalendarStatus(receipt, todayYmd) {
-  const status = String(receipt?.status ?? 'Pending')
-  const due = normalizeYmd(receipt?.dueDate)
-  if (status === 'Paid') return 'paid'
-  if (status === 'Overdue') return 'overdue'
-  if (status === 'Pending' && due && todayYmd >= due) return 'overdue'
-  return 'pending'
-}
-
-function residentCalendarStatus(resident) {
-  const status = String(resident?.overallStatus ?? 'Pending')
-  if (status === 'Paid') return 'paid'
-  if (status === 'Overdue') return 'overdue'
-  return 'pending'
-}
-
-const calendarMonth = ref({
-  year: new Date().getFullYear(),
-  month: new Date().getMonth(),
-})
-
-function shiftCalendarMonth(delta) {
-  const dt = new Date(calendarMonth.value.year, calendarMonth.value.month + delta, 1)
-  calendarMonth.value = { year: dt.getFullYear(), month: dt.getMonth() }
-}
-
-function resetCalendarMonth() {
-  const dt = new Date()
-  calendarMonth.value = { year: dt.getFullYear(), month: dt.getMonth() }
-}
-
-const currentMonthData = computed(() => {
-  const { year, month } = calendarMonth.value
-  const daysInMonth = new Date(year, month + 1, 0).getDate()
-  const firstDay = new Date(year, month, 1).getDay()
-  const monthName = new Intl.DateTimeFormat(locale.value === 'es' ? 'es-PE' : 'en-US', {
-    month: 'long',
-    year: 'numeric',
-  }).format(new Date(year, month, 1))
-
-  const todayYmd = todayYmdLocal()
-  const days = []
-
-  for (let i = 0; i < firstDay; i++) {
-    days.push({ date: '', status: null, empty: true })
-  }
-
-  for (let i = 1; i <= daysInMonth; i++) {
-    const dStr = i.toString().padStart(2, '0')
-    const mStr = (month + 1).toString().padStart(2, '0')
-    const dateStr = `${year}-${mStr}-${dStr}`
-
-    let status = null
-    let hasPaid = false
-    let hasOverdue = false
-    let hasPending = false
-
-    for (const rc of store.state.receipts ?? []) {
-      if (normalizeYmd(rc.dueDate) !== dateStr) continue
-      const rcStatus = receiptCalendarStatus(rc, todayYmd)
-      if (rcStatus === 'paid') hasPaid = true
-      else if (rcStatus === 'overdue') hasOverdue = true
-      else hasPending = true
-    }
-
-    for (const res of store.getResidentFinancialStatus.value ?? []) {
-      const nextDate = normalizeYmd(res.nextPaymentDate)
-      if (nextDate !== dateStr) continue
-      const resStatus = residentCalendarStatus(res)
-      if (resStatus === 'paid') hasPaid = true
-      else if (resStatus === 'overdue') hasOverdue = true
-      else hasPending = true
-    }
-
-    if (hasOverdue) status = 'overdue'
-    else if (hasPending) status = 'pending'
-    else if (hasPaid) status = 'paid'
-
-    days.push({
-      date: i,
-      status,
-      empty: false,
-      isToday: dateStr === todayYmd,
-    })
-  }
-
-  return { monthName, days, year, month }
-})
-
 const getStatusBadgeClass = (status) => {
   if(status === 'Paid') return 'status-paid';
   if(status === 'Pending') return 'status-pending';
   if(status === 'Overdue') return 'status-overdue';
+  if(status === 'Unbilled') return 'status-unbilled';
+  if(status === 'Exempt') return 'status-unbilled';
   return '';
 }
+
+const residentsStatusMonthLabel = computed(() =>
+  chargeMonthLabel(store.currentBillingMonthKey.value),
+)
 </script>
 
 <template>
   <div v-if="uiState.isLoaded" class="app-view">
-    <h1 class="app-view__title">{{ t('financeAdmin.title') }}</h1>
-    <p class="app-view__subtitle">{{ t('financeAdmin.subtitle') }}</p>
-
     <div class="finance-page">
-      <div class="finance-toolbar-row">
-        <Button
-          type="button"
-          rounded
-          severity="secondary"
-          :label="t('financeAdmin.generateReceipts')"
-          :loading="uiState.isGenerating"
-          class="import-dropzone__btn"
-          @click="handleGenerateReceipts"
-        />
-        <Button
-          type="button"
-          rounded
-          severity="secondary"
-          :label="t('financeAdmin.simulateCron')"
-          :loading="uiState.isCronRunning"
-          class="import-dropzone__btn"
-          @click="handleSimulateCron"
-        />
-      </div>
+      <section class="finance-panel import-panel" aria-labelledby="finance-settings-heading">
+        <div class="mgmt-panel-toolbar">
+          <h2 id="finance-settings-heading" class="finance-panel__section-title finance-panel__section-title--plain">
+            <i class="pi pi-cog" aria-hidden="true" />
+            {{ t('financeAdmin.settingsTitle') }}
+          </h2>
+          <Button
+            type="button"
+            class="import-dropzone__btn"
+            :label="t('financeAdmin.viewReceipts')"
+            @click="openReceiptsModal"
+          />
+        </div>
 
-      <section class="finance-panel finance-panel--settings import-panel" aria-labelledby="finance-settings-heading">
-        <h2 id="finance-settings-heading" class="finance-panel__section-title">
-          {{ t('financeAdmin.settingsTitle') }}
-        </h2>
-        <div class="settings-form">
+        <div class="settings-grid">
+          <label class="settings-field" for="chargeMonth">
+            <span>{{ t('financeAdmin.chargeMonth') }}</span>
+            <input
+              id="chargeMonth"
+              v-model="chargeForm.month"
+              type="month"
+              class="settings-native-input"
+              @change="onChargeMonthChange"
+            />
+          </label>
           <div class="settings-field">
-            <label for="baseMonthlyExpense">{{ t('financeAdmin.baseMonthlyExpense') }}</label>
+            <span>{{ t('financeAdmin.chargePeriod') }}</span>
+            <p class="settings-period">{{ chargePeriodLabel }}</p>
+          </div>
+          <label class="settings-field" for="chargePaymentOpen">
+            <span>{{ t('financeAdmin.chargePaymentOpen') }}</span>
+            <input
+              id="chargePaymentOpen"
+              v-model="chargeForm.paymentOpen"
+              type="date"
+              class="settings-native-input"
+              :disabled="isChargeRegistered"
+            />
+          </label>
+          <label class="settings-field" for="chargeAmount">
+            <span>{{ t('financeAdmin.chargeAmount') }}</span>
             <InputNumber
-              id="baseMonthlyExpense"
-              v-model="editSettings.baseMonthlyExpense"
+              id="chargeAmount"
+              v-model="chargeForm.amount"
               :minFractionDigits="2"
               :maxFractionDigits="2"
               :min="0"
@@ -292,47 +435,56 @@ const getStatusBadgeClass = (status) => {
               currency="PEN"
               locale="es-PE"
               class="settings-input"
+              :disabled="isChargeRegistered"
             />
-          </div>
-          <div class="settings-field">
-            <label for="lateFeeRate">{{ t('financeAdmin.lateFeeRate') }}</label>
-            <InputNumber
-              id="lateFeeRate"
-              v-model="editSettings.lateFeeRateDisplay"
-              :minFractionDigits="0"
-              :maxFractionDigits="2"
-              :min="0"
-              :max="100"
-              suffix="%"
-              class="settings-input"
-            />
-          </div>
+          </label>
+        </div>
+
+        <div class="settings-actions">
+          <p v-if="chargeError" class="settings-error">{{ chargeError }}</p>
+          <p v-else-if="isChargeRegistered" class="settings-locked">
+            {{ t('financeAdmin.chargeLocked', { month: chargeMonthLabel(chargeForm.month) }) }}
+          </p>
           <Button
+            v-if="!isChargeRegistered"
             type="button"
-            rounded
-            severity="primary"
-            :label="t('financeAdmin.saveSettings')"
-            :loading="uiState.isSaving"
-            class="settings-save-btn"
-            @click="handleSaveSettings"
+            class="import-dropzone__btn"
+            :label="t('financeAdmin.addCharge')"
+            :loading="isSavingCharge"
+            @click="onSaveCharge"
           />
         </div>
+
       </section>
 
-      <div class="finance-main-row">
-        <section
-          class="finance-panel finance-panel--table table-panel import-panel"
-          aria-labelledby="finance-residents-heading"
-        >
+      <section
+        class="finance-panel finance-panel--table import-panel"
+        aria-labelledby="finance-residents-heading"
+      >
+        <div class="mgmt-panel-toolbar">
           <h2 id="finance-residents-heading" class="finance-panel__section-title">
+            <i class="pi pi-users" aria-hidden="true" />
             {{ t('financeAdmin.residentsPanelTitle') }}
+            <span class="finance-panel__title-month">{{ residentsStatusMonthLabel }}</span>
           </h2>
+        </div>
+        <label class="settings-field" for="residentsStatusSearch">
+          <input
+            id="residentsStatusSearch"
+            v-model="residentsSearch"
+            type="search"
+            class="settings-native-input"
+            :placeholder="t('financeAdmin.extraSearchPlaceholder')"
+            :aria-label="t('financeAdmin.extraSearch')"
+          />
+        </label>
           <DataTable
-            :value="store.getResidentFinancialStatus.value"
+            :value="filteredResidentStatus"
             responsiveLayout="scroll"
             class="finance-data finance-table"
             :paginator="true"
             :rows="10"
+            :empty-message="t('financeAdmin.extraNoResidents')"
           >
             <Column field="name" :header="t('financeAdmin.tableResident')">
               <template #body="slotProps">
@@ -363,212 +515,324 @@ const getStatusBadgeClass = (status) => {
                 </span>
               </template>
             </Column>
-            <Column :header="t('financeAdmin.tableStatus')">
+            <Column :header="t('financeAdmin.tableMonthStatus', { month: residentsStatusMonthLabel })">
               <template #body="slotProps">
                 <span
                   class="status-badge"
-                  :class="getStatusBadgeClass(slotProps.data.overallStatus)"
+                  :class="getStatusBadgeClass(slotProps.data.monthStatus)"
                 >
-                  {{ t(`financeAdmin.status${slotProps.data.overallStatus}`) }}
+                  {{ t(`financeAdmin.status${slotProps.data.monthStatus}`) }}
                 </span>
               </template>
             </Column>
           </DataTable>
-        </section>
+      </section>
 
-        <section
-          class="finance-panel finance-panel--calendar calendar-widget import-panel"
-          aria-labelledby="finance-calendar-heading"
-        >
-          <h2 id="finance-calendar-heading" class="finance-panel__section-title finance-calendar__header">
-            <span>{{ t('financeAdmin.calendarTitle') }}</span>
-            <span class="finance-panel__title-month">{{ currentMonthData.monthName }}</span>
-            <div class="finance-calendar__nav">
-              <Button
-                type="button"
-                rounded
-                text
-                severity="secondary"
-                icon="pi pi-chevron-left"
-                :aria-label="t('app.calendarPrevMonth')"
-                @click="shiftCalendarMonth(-1)"
-              />
-              <Button
-                type="button"
-                rounded
-                text
-                severity="secondary"
-                :label="t('app.calendarTodayLabel')"
-                @click="resetCalendarMonth"
-              />
-              <Button
-                type="button"
-                rounded
-                text
-                severity="secondary"
-                icon="pi pi-chevron-right"
-                :aria-label="t('app.calendarNextMonth')"
-                @click="shiftCalendarMonth(1)"
-              />
-            </div>
+      <div class="finance-split">
+      <section
+        class="finance-panel import-panel"
+        aria-labelledby="finance-extra-heading"
+      >
+        <div class="mgmt-panel-toolbar">
+          <h2 id="finance-extra-heading" class="finance-panel__section-title">
+            <i class="pi pi-plus-circle" aria-hidden="true" />
+            {{ t('financeAdmin.extraTitle') }}
           </h2>
-        <div class="calendar-grid">
-           <div class="weekday-header">S</div>
-           <div class="weekday-header">M</div>
-           <div class="weekday-header">T</div>
-           <div class="weekday-header">W</div>
-           <div class="weekday-header">T</div>
-           <div class="weekday-header">F</div>
-           <div class="weekday-header">S</div>
-          <div
-            class="calendar-day"
-            v-for="(day, idx) in currentMonthData.days"
-            :key="idx"
-            :class="{ 'empty-day': day.empty, 'calendar-day--today': day.isToday }"
+        </div>
+
+        <label class="settings-field" for="extraResidentSearch">
+          <input
+            id="extraResidentSearch"
+            v-model="extraSearch"
+            type="search"
+            class="settings-native-input"
+            :placeholder="t('financeAdmin.extraSearchPlaceholder')"
+            :aria-label="t('financeAdmin.extraSearch')"
+            @input="selectedResidentId = ''"
+          />
+        </label>
+
+        <ul v-if="extraSearch.trim() && !selectedExtraResident" class="extra-resident-list" role="listbox">
+          <li v-if="!extraResidentMatches.length" class="extra-resident-list__empty">
+            {{ t('financeAdmin.extraNoResidents') }}
+          </li>
+          <li
+            v-for="resident in extraResidentMatches"
+            :key="resident.id"
+            class="extra-resident-list__item"
+            role="option"
+            @click="selectExtraResident(resident)"
           >
-            <span class="day-number" v-if="!day.empty">{{ day.date }}</span>
-            <div class="day-dot" :class="day.status" v-if="day.status && !day.empty"></div>
-          </div>
+            <strong>{{ resident.name }}</strong>
+            <span>{{
+              t('financeAdmin.residentFloorApt', {
+                floor: resident.floor,
+                code: resident.code,
+              })
+            }}</span>
+          </li>
+        </ul>
+
+        <div class="settings-grid extra-form-grid">
+          <label class="settings-field" for="extraTitle">
+            <span>{{ t('financeAdmin.extraAmountTitle') }}</span>
+            <input
+              id="extraTitle"
+              v-model="extraForm.title"
+              type="text"
+              maxlength="80"
+              class="settings-native-input"
+              :disabled="!selectedResidentId"
+            />
+          </label>
+          <label class="settings-field" for="extraAmount">
+            <span>{{ t('financeAdmin.extraAmount') }}</span>
+            <InputNumber
+              id="extraAmount"
+              v-model="extraForm.amount"
+              :minFractionDigits="2"
+              :maxFractionDigits="2"
+              :min="0"
+              mode="currency"
+              currency="PEN"
+              locale="es-PE"
+              class="settings-input"
+              :disabled="!selectedResidentId"
+            />
+          </label>
+          <label class="settings-field extra-form-grid__full" for="extraDescription">
+            <span>{{ t('financeAdmin.extraDescription') }}</span>
+            <textarea
+              id="extraDescription"
+              v-model="extraForm.description"
+              class="settings-native-input settings-textarea"
+              maxlength="240"
+              rows="2"
+              :disabled="!selectedResidentId"
+            />
+          </label>
         </div>
-        <div class="calendar-legend">
-          <div class="legend-item"><div class="day-dot paid"></div> {{ t('financeAdmin.statusPaid') }}</div>
-          <div class="legend-item"><div class="day-dot pending"></div> {{ t('financeAdmin.statusPending') }}</div>
-          <div class="legend-item"><div class="day-dot overdue"></div> {{ t('financeAdmin.statusOverdue') }}</div>
+
+        <div class="settings-actions">
+          <p v-if="extraError" class="settings-error">{{ extraError }}</p>
+          <Button
+            type="button"
+            class="import-dropzone__btn"
+            :label="t('financeAdmin.extraAdd')"
+            :loading="isSavingExtra"
+            :disabled="!selectedResidentId"
+            @click="onAddExtraCharge"
+          />
         </div>
-        </section>
-      </div>
+      </section>
 
       <section
         class="finance-panel finance-panel--history import-panel"
         aria-labelledby="finance-history-heading"
       >
-        <div class="finance-history__toolbar">
+        <div class="mgmt-panel-toolbar">
           <h2 id="finance-history-heading" class="finance-panel__section-title">
+            <i class="pi pi-wallet" aria-hidden="true" />
             {{ t('financeAdmin.paymentHistory') }}
           </h2>
-          <Dropdown
-            v-if="historyFloorOptions.length > 1"
-            v-model="historyFloorFilter"
-            :options="historyFloorOptions"
-            option-label="label"
-            option-value="value"
-            class="finance-history__floor-filter"
-            :aria-label="t('financeAdmin.filterFloorAria')"
-          />
         </div>
 
-        <div v-for="section in filteredFloorSections" :key="section.floor" class="floor-section">
-          <h3 class="floor-title">
-            {{ t('financeAdmin.tableFloor') }} {{ section.floor }}
-          </h3>
-          <div class="history-cards">
-            <div v-for="res in section.residents" :key="res.id" class="finance-card">
-              <h4>
-                {{ res.name }}
-                <span class="apt-code">#{{ res.code }}</span>
-              </h4>
-              <ul class="receipt-list">
-                <li v-for="rc in res.receipts" :key="rc.id">
-                  <div class="rc-info">
-                    <span>{{ t('financeAdmin.receiptDue') }}: {{ rc.dueDate }}</span>
-                    <strong>{{ nfPen(Number(rc.amount) + Number(rc.lateFee)) }}</strong>
-                  </div>
-                  <span class="small-badge" :class="getStatusBadgeClass(rc.status)">{{ rc.status }}</span>
-                </li>
-                <li v-if="res.receipts.length === 0" class="empty-list">
-                  {{ t('financeAdmin.emptyReceipts') }}
-                </li>
-              </ul>
-            </div>
+        <label class="settings-field" for="historyResidentSearch">
+          <input
+            id="historyResidentSearch"
+            v-model="historySearch"
+            type="search"
+            class="settings-native-input"
+            :placeholder="t('financeAdmin.extraSearchPlaceholder')"
+            :aria-label="t('financeAdmin.historySearch')"
+            @input="selectedHistoryResidentId = ''"
+          />
+        </label>
+
+        <ul v-if="historySearch.trim() && !selectedHistoryResident" class="extra-resident-list" role="listbox">
+          <li v-if="!historyResidentMatches.length" class="extra-resident-list__empty">
+            {{ t('financeAdmin.extraNoResidents') }}
+          </li>
+          <li
+            v-for="resident in historyResidentMatches"
+            :key="resident.id"
+            class="extra-resident-list__item"
+            role="option"
+            @click="selectHistoryResident(resident)"
+          >
+            <strong>{{ resident.name }}</strong>
+            <span>{{
+              t('financeAdmin.residentFloorApt', {
+                floor: resident.floor,
+                code: resident.code,
+              })
+            }}</span>
+          </li>
+        </ul>
+
+        <div v-if="!selectedHistoryResident" class="import-empty">
+          <i class="pi pi-search" aria-hidden="true" />
+          <span>{{ t('financeAdmin.historySearchHint') }}</span>
+        </div>
+        <div v-else>
+          <p class="settings-locked">
+            {{ t('financeAdmin.extraSelected', { name: selectedHistoryResident.name }) }}
+          </p>
+          <ul
+            v-if="historyPaidMonths.length || historyExtraCharges.length"
+            class="receipt-list"
+            role="list"
+          >
+            <li v-for="rc in historyPaidMonths" :key="rc.id">
+              <div class="rc-info">
+                <span>{{ rc.monthLabel }}</span>
+                <strong>{{ nfPen(receiptPayable(rc)) }}</strong>
+              </div>
+              <span class="small-badge status-paid">{{ t('financeAdmin.statusPaid') }}</span>
+            </li>
+            <li v-for="item in historyExtraCharges" :key="item.id">
+              <div class="rc-info">
+                <span>{{ item.title }}</span>
+                <span>{{ item.description }}</span>
+                <strong>{{ nfPen(item.amount) }}</strong>
+              </div>
+              <span class="small-badge">{{ t('financeAdmin.receiptExtraLabel') }}</span>
+            </li>
+          </ul>
+          <div v-else class="import-empty">
+            <i class="pi pi-inbox" aria-hidden="true" />
+            <span>{{ t('financeAdmin.historyEmptyPaid') }}</span>
           </div>
         </div>
+      </section>
+      </div>
+
+      <p class="mgmt-view-footer" role="note">
+        {{ t('financeAdmin.subtitle') }}
+      </p>
+    </div>
+
+    <div
+      v-if="isReceiptsModalOpen"
+      class="resident-modal-backdrop bf-modal-backdrop"
+      role="presentation"
+      @click.self="closeReceiptsModal"
+    >
+      <section
+        class="resident-modal resident-modal--wide bf-modal-panel"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="t('financeAdmin.receiptsModalTitle')"
+      >
+        <h3 class="resident-modal__title">{{ t('financeAdmin.receiptsModalTitle') }}</h3>
+        <div v-if="!chargeReceiptGroups.length" class="import-empty">
+          <i class="pi pi-inbox" aria-hidden="true" />
+          <span>{{ t('financeAdmin.emptyCharges') }}</span>
+        </div>
+        <ul v-else class="r-list charge-list" role="list">
+          <li v-for="group in chargeReceiptGroups" :key="group.charge.id" class="r-card">
+            <div class="r-card__row">
+              <span class="r-card__avatar" aria-hidden="true">
+                <i class="pi pi-calendar" />
+              </span>
+              <div class="r-card__body">
+                <p class="r-card__name">{{ chargeMonthLabel(group.charge.month) }}</p>
+                <p class="r-card__meta">
+                  {{
+                    t('financeAdmin.chargeDatesHint', {
+                      start: formatDayMonth(group.charge.billingStart, locale),
+                      end: formatDayMonth(group.charge.billingEnd, locale),
+                      open: formatDayMonth(group.charge.paymentOpen, locale),
+                    })
+                  }}
+                </p>
+              </div>
+              <strong class="charge-amount">{{ nfPen(group.charge.amount) }}</strong>
+            </div>
+            <ul class="receipt-list receipt-list--modal">
+              <li v-for="rc in group.receipts" :key="rc.id">
+                <div class="rc-info">
+                  <span>{{ rc.residentName }}</span>
+                  <span>{{
+                    t('financeAdmin.residentFloorApt', {
+                      floor: rc.residentFloor,
+                      code: rc.residentCode,
+                    })
+                  }}</span>
+                  <span>{{
+                    t('financeAdmin.receiptDue')
+                  }}: {{ formatDayMonth(normalizeYmd(rc.dueDate), locale) }}</span>
+                  <span v-if="Number(rc.lateFee) > 0" class="rc-late-fee">
+                    {{ t('financeAdmin.receiptLateFee', { amount: nfPen(rc.lateFee), n: rc.lateDays || 0 }) }}
+                  </span>
+                  <span v-if="Number(rc.extraCharges) > 0">
+                    {{ t('financeAdmin.receiptExtra', { amount: nfPen(rc.extraCharges) }) }}
+                  </span>
+                  <strong>{{ nfPen(receiptPayable(rc)) }}</strong>
+                </div>
+                <span class="small-badge" :class="getStatusBadgeClass(rc.statusKey)">
+                  {{ t(`financeAdmin.status${rc.statusKey}`) }}
+                </span>
+              </li>
+              <li v-if="!group.receipts.length" class="empty-list">
+                {{ t('financeAdmin.emptyChargeReceipts') }}
+              </li>
+            </ul>
+          </li>
+        </ul>
+        <ConfirmActions
+          :show-cancel="false"
+          :confirm-label="t('app.closeAction')"
+          :stagger="false"
+          @confirm="closeReceiptsModal"
+        />
       </section>
     </div>
   </div>
 
   <div v-else class="app-view finance-loading" role="status" aria-live="polite">
-    <p class="app-view__status finance-loading__text">{{ t('financeAdmin.loading') }}</p>
+    <div class="import-status">
+      <i class="pi pi-spin pi-spinner" aria-hidden="true" />
+      <span>{{ t('financeAdmin.loading') }}</span>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .app-view {
-  padding: 1.75rem 1.5rem 2.5rem;
-  max-width: 72rem;
-}
-
-.app-view__title {
-  margin: 0;
-  font-size: 1.75rem;
-  font-weight: 600;
-  letter-spacing: -0.035em;
-  line-height: 1.15;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.app-view__subtitle {
-  margin: 0.5rem 0 0;
-  max-width: 40rem;
-  font-size: 0.875rem;
-  font-weight: 400;
-  line-height: 1.45;
-  letter-spacing: -0.015em;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.app-view__status {
-  margin: 0;
-  font-size: 0.9375rem;
-  color: var(--apple-text-secondary, #6e6e73);
+  padding: 1.75rem 1.5rem 1.25rem;
+  width: 100%;
+  max-width: none;
+  min-height: 100dvh;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
 }
 
 .finance-page {
-  margin-top: 1.5rem;
+  margin-top: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  min-height: 0;
 }
 
-.finance-toolbar-row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.5rem;
+.finance-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 2.5rem;
+  align-items: start;
 }
 
-.import-dropzone__btn :deep(.p-button) {
-  font-weight: 500;
-  font-size: 0.8125rem;
-  padding-block: 0.5rem;
-  padding-inline: 1rem;
-}
-
-.finance-main-row {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  gap: 1.25rem;
-}
-
-.table-panel {
-  flex: 1 1 58%;
+.finance-split > .finance-panel {
   min-width: 0;
 }
 
-.calendar-widget {
-  flex: 0 1 22rem;
-  min-width: 17rem;
-}
-
-@media (max-width: 1024px) {
-  .finance-main-row {
-    flex-direction: column;
-  }
-
-  .calendar-widget {
-    flex: 1 1 auto;
-    min-width: 0;
-    max-width: none;
+@media (max-width: 900px) {
+  .finance-split {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.25rem;
   }
 }
 
@@ -580,33 +844,87 @@ const getStatusBadgeClass = (status) => {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
-.finance-panel--calendar {
-  background: #fafafa;
-}
-
-.finance-panel--settings {
-  background: #fafafa;
-}
-
 .finance-panel--table {
   padding: 1.2rem 1.25rem 1.35rem;
   overflow: hidden;
 }
 
 .finance-panel__section-title {
-  margin: 0 0 0.5rem;
-  font-size: 1.0625rem;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 1.15rem;
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.25;
   color: var(--apple-text, #1d1d1f);
+  text-transform: capitalize;
+}
+
+.finance-panel__section-title .pi {
+  font-size: 1.25rem;
+  color: #0071e3;
+}
+
+.finance-panel__section-title--plain {
+  text-transform: none;
+}
+
+.mgmt-panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.mgmt-panel-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.finance-panel > .settings-field {
+  --settings-control-height: 2.75rem;
+}
+
+.finance-panel--table > .settings-field {
+  margin-bottom: 0.85rem;
+}
+
+.mgmt-view-footer {
+  margin-top: auto;
+  padding: 1.5rem 0 0.25rem;
+  width: 100%;
+  text-align: center;
+  font-size: 0.6875rem;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: #aeaeb2;
+}
+
+.app-view :deep(.import-dropzone__btn.p-button) {
+  min-height: 1.7rem;
+  padding: 0.22rem 0.85rem;
+  border-radius: 8px;
+  font-weight: 500;
+  font-size: 0.8125rem;
+  box-shadow: none;
+  border: none;
+  background: #0071e3;
+  color: #ffffff;
+}
+
+.app-view :deep(.import-dropzone__btn.p-button:hover) {
+  background: #0066cc;
+  color: #ffffff;
 }
 
 .import-panel .finance-table {
-  margin-top: 0.65rem;
-}
-
-.import-panel .calendar-grid {
   margin-top: 0.65rem;
 }
 
@@ -616,25 +934,6 @@ const getStatusBadgeClass = (status) => {
   text-transform: capitalize;
   color: #86868b;
   font-weight: 500;
-}
-
-.finance-calendar__header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem 0.75rem;
-}
-
-.finance-calendar__nav {
-  display: flex;
-  align-items: center;
-  gap: 0.15rem;
-  margin-left: auto;
-}
-
-.calendar-day--today {
-  border-color: rgba(0, 122, 255, 0.35);
-  box-shadow: inset 0 0 0 1px rgba(0, 122, 255, 0.15);
 }
 
 .finance-table {
@@ -697,11 +996,22 @@ const getStatusBadgeClass = (status) => {
   border-top: 1px solid rgba(0, 0, 0, 0.06);
   padding: 0.6rem 0.5rem;
   font-size: 0.8125rem;
+  --p-paginator-page-selected-background: #dbeafe;
+  --p-paginator-page-selected-color: #0071e3;
 }
 
-.finance-data :deep(.p-paginator .p-paginator-page.p-highlight) {
-  background: rgba(10, 132, 255, 0.12);
-  color: #0a84ff;
+.finance-data :deep(.p-paginator .p-paginator-page) {
+  min-width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+}
+
+.finance-data :deep(.p-paginator .p-paginator-page.p-highlight),
+.finance-data :deep(.p-paginator .p-paginator-page[data-p-active="true"]),
+.finance-data :deep(.p-paginator .p-paginator-page.p-paginator-page-selected) {
+  background: #dbeafe;
+  color: #0071e3;
+  border-color: transparent;
 }
 
 .finance-date-cell {
@@ -728,10 +1038,10 @@ const getStatusBadgeClass = (status) => {
 .days-left {
   font-weight: 600;
   font-size: 0.8125rem;
-  color: #0a84ff;
-  background: rgba(10, 132, 255, 0.08);
+  color: #0071e3;
+  background: rgba(0, 113, 227, 0.08);
   padding: 0.25rem 0.55rem;
-  border-radius: 980px;
+  border-radius: 8px;
 }
 
 .days-left.urgent {
@@ -741,7 +1051,7 @@ const getStatusBadgeClass = (status) => {
 
 .status-badge {
   padding: 0.25rem 0.65rem;
-  border-radius: 980px;
+  border-radius: 8px;
   font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -763,96 +1073,13 @@ const getStatusBadgeClass = (status) => {
   color: #d70015;
 }
 
-.calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 0.35rem;
-}
-
-.calendar-day {
-  background: #fff;
-  border-radius: 10px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  padding: 0.4rem 0.35rem;
-  text-align: center;
-  position: relative;
-  font-weight: 500;
-  font-size: 0.8125rem;
-  color: var(--apple-text, #1d1d1f);
-  min-height: 2.75rem;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-}
-
-.empty-day {
-  background: transparent;
-  border: none;
-}
-
-.weekday-header {
-  font-weight: 600;
-  color: #86868b;
-  font-size: 0.6875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  text-align: center;
-  margin-bottom: 0.25rem;
-}
-
-.day-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-top: 4px;
-  flex-shrink: 0;
-}
-
-.day-dot.paid {
-  background: #34c759;
-  box-shadow: 0 0 0 1px rgba(52, 199, 89, 0.25);
-}
-
-.day-dot.pending {
-  background: #ff9500;
-  box-shadow: 0 0 0 1px rgba(255, 149, 0, 0.25);
-}
-
-.day-dot.overdue {
-  background: #ff3b30;
-  box-shadow: 0 0 0 1px rgba(255, 59, 48, 0.2);
-}
-
-.calendar-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem 1rem;
-  margin-top: 1.125rem;
-  padding-top: 1rem;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-  font-size: 0.75rem;
-  color: #86868b;
-  font-weight: 500;
-}
-
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
+.status-unbilled {
+  background: rgba(142, 142, 147, 0.14);
+  color: #6e6e73;
 }
 
 .finance-history__toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem 1.25rem;
-  flex-wrap: wrap;
   margin-bottom: 0.65rem;
-}
-
-.finance-history__toolbar .finance-panel__section-title {
-  margin-bottom: 0;
 }
 
 .finance-history__floor-filter {
@@ -861,10 +1088,11 @@ const getStatusBadgeClass = (status) => {
 }
 
 .finance-history__floor-filter :deep(.p-dropdown) {
-  border-radius: 10px;
+  border-radius: 8px;
   border: 1px solid #d2d2d7;
   background: #fff;
   font-size: 0.875rem;
+  box-shadow: none;
 }
 
 .finance-history__floor-filter :deep(.p-dropdown:not(.p-disabled):hover) {
@@ -873,8 +1101,8 @@ const getStatusBadgeClass = (status) => {
 
 .finance-history__floor-filter :deep(.p-dropdown:not(.p-disabled).p-focus) {
   outline: none;
-  border-color: #0a84ff;
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.18);
+  border-color: #0071e3;
+  box-shadow: none;
 }
 
 .finance-history__floor-filter :deep(.p-dropdown-label) {
@@ -894,12 +1122,11 @@ const getStatusBadgeClass = (status) => {
 .floor-title {
   font-size: 0.75rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.055em;
+  text-transform: capitalize;
+  letter-spacing: -0.01em;
   color: #86868b;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   padding-bottom: 0.5rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
 }
 
 .history-cards {
@@ -968,6 +1195,10 @@ const getStatusBadgeClass = (status) => {
   color: var(--apple-text-secondary, #6e6e73);
 }
 
+.rc-late-fee {
+  color: #c35b00 !important;
+}
+
 .rc-info strong {
   color: var(--apple-text, #1d1d1f);
   font-size: 0.9375rem;
@@ -996,38 +1227,158 @@ const getStatusBadgeClass = (status) => {
   min-height: 45vh;
 }
 
-.finance-loading__text {
+.import-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 2rem 1rem;
+  color: #86868b;
+  font-size: 0.875rem;
   text-align: center;
 }
 
-.settings-form {
+.import-status .pi {
+  font-size: 1.5rem;
+  color: #c7c7cc;
+}
+
+.settings-grid {
+  --settings-control-height: 2.75rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem 1.25rem;
+}
+
+@media (max-width: 720px) {
+  .settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.extra-form-grid {
+  --settings-control-height: 1.375rem;
+  margin-top: 1rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.65rem 1.25rem;
+}
+
+.extra-form-grid .settings-native-input,
+.extra-form-grid .settings-input :deep(.p-inputnumber),
+.extra-form-grid .settings-input :deep(.p-inputnumber-input) {
+  height: var(--settings-control-height);
+  line-height: var(--settings-control-height);
+  font-size: 0.8125rem;
+  padding: 0 0.55rem;
+}
+
+.extra-form-grid .settings-input :deep(.p-inputnumber-input) {
+  line-height: var(--settings-control-height);
+}
+
+.extra-form-grid__full {
+  grid-column: 1 / -1;
+}
+
+.settings-textarea {
+  height: auto;
+  min-height: 2.15rem;
+  line-height: 1.3;
+  padding: 0.3rem 0.55rem;
+  resize: vertical;
+}
+
+.extra-resident-list {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 10px;
+  background: #fff;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+.extra-resident-list__item {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 1rem;
-  margin-top: 0.75rem;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.65rem 0.8rem;
+  cursor: pointer;
+}
+
+.extra-resident-list__item + .extra-resident-list__item {
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.extra-resident-list__item strong {
+  font-size: 0.875rem;
+  color: #1d1d1f;
+}
+
+.extra-resident-list__item span {
+  font-size: 0.75rem;
+  color: #86868b;
+}
+
+.extra-resident-list__item:hover,
+.extra-resident-list__item--active {
+  background: #f0f7ff;
+}
+
+.extra-resident-list__empty {
+  padding: 0.75rem 0.8rem;
+  color: #86868b;
+  font-size: 0.8125rem;
 }
 
 .settings-field {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  min-width: 10rem;
+  gap: 0.4rem;
+  min-width: 0;
+  text-transform: none;
 }
 
-.settings-field label {
-  font-size: 0.75rem;
+.settings-field span {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #6e6e73;
+}
+
+.settings-period {
+  margin: 0;
+  height: var(--settings-control-height);
+  display: flex;
+  align-items: center;
+  padding: 0 0.7rem;
+  border-radius: 8px;
+  background: #f5f5f7;
+  font-size: 0.875rem;
   font-weight: 600;
-  color: var(--apple-text-secondary, #6e6e73);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  color: #1d1d1f;
+  box-sizing: border-box;
+}
+
+.settings-input {
+  width: 100%;
+  height: var(--settings-control-height);
+}
+
+.settings-input :deep(.p-inputnumber),
+.settings-input :deep(.p-inputnumber-input) {
+  width: 100%;
+  height: var(--settings-control-height);
 }
 
 .settings-input :deep(.p-inputnumber-input) {
-  border-radius: 10px;
+  border-radius: 8px;
   border: 1px solid #d2d2d7;
   font-size: 0.875rem;
-  padding: 0.5rem 0.75rem;
+  padding: 0 0.7rem;
+  line-height: var(--settings-control-height);
+  box-shadow: none;
+  box-sizing: border-box;
 }
 
 .settings-input :deep(.p-inputnumber:not(.p-disabled):hover .p-inputnumber-input) {
@@ -1035,11 +1386,234 @@ const getStatusBadgeClass = (status) => {
 }
 
 .settings-input :deep(.p-inputnumber.p-inputnumber-focus .p-inputnumber-input) {
-  border-color: #0a84ff;
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.18);
+  border-color: #0071e3;
+  box-shadow: none;
+  outline: none;
 }
 
-.settings-save-btn {
-  margin-left: auto;
+.settings-native-input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: var(--settings-control-height);
+  border: 1px solid #d2d2d7;
+  border-radius: 8px;
+  padding: 0 0.7rem;
+  font: inherit;
+  font-size: 0.875rem;
+  line-height: var(--settings-control-height);
+  color: #1d1d1f;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.settings-native-input::-webkit-date-and-time-value {
+  text-align: left;
+  min-width: 100%;
+}
+
+.settings-native-input:focus {
+  outline: none;
+  border-color: #0071e3;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.15rem;
+}
+
+.settings-error {
+  margin: 0;
+  margin-right: auto;
+  color: #ff3b30;
+  font-size: 0.78rem;
+}
+
+.settings-locked {
+  margin: 0;
+  margin-right: auto;
+  color: #86868b;
+  font-size: 0.78rem;
+}
+
+.settings-native-input:disabled,
+.settings-input :deep(.p-inputnumber.p-disabled .p-inputnumber-input) {
+  background: #f5f5f7;
+  color: #1d1d1f;
+  cursor: default;
+}
+
+.charge-saved {
+  margin-top: 1.5rem;
+  padding-top: 1.15rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.charge-saved__title {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+
+.charge-amount {
+  flex-shrink: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+
+.import-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 1.5rem 1rem;
+  margin-top: 0.85rem;
+  color: #86868b;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.import-empty .pi {
+  font-size: 1.5rem;
+  color: #c7c7cc;
+}
+
+.charge-list {
+  margin-top: 0.85rem;
+}
+
+.r-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.r-card {
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+  background: #fafafa;
+}
+
+.r-card__row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.r-card__avatar {
+  flex-shrink: 0;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  background: #e8e8ed;
+  color: #6e6e73;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+}
+
+.r-card__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.r-card__name {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: #1d1d1f;
+}
+
+.r-card__meta {
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  color: #86868b;
+}
+
+.r-card__actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0.25rem;
+}
+
+.receipt-list--modal {
+  margin-top: 0.75rem;
+}
+
+.resident-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 1000;
+}
+
+.resident-modal {
+  width: min(100%, 26rem);
+  background: #ffffff;
+  border-radius: 14px;
+  border: 1px solid #e8e8ed;
+  padding: 1.15rem;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.resident-modal--wide {
+  width: min(100%, 36rem);
+}
+
+.resident-modal__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+
+.resident-modal .charge-list {
+  margin-top: 0.85rem;
+}
+
+.resident-modal .bf-actions {
+  margin-top: 1rem;
+}
+
+.app-view :deep(.bf-btn) {
+  min-height: 1.7rem;
+  padding: 0.22rem 0.85rem;
+  border-radius: 8px;
+  box-shadow: none;
+  transform: none;
+}
+
+.app-view :deep(.bf-btn--confirm) {
+  background: #0071e3;
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.app-view :deep(.bf-btn--confirm:not(:disabled):hover) {
+  background: #0066cc;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.app-view :deep(.bf-btn--confirm:not(:disabled):focus-visible) {
+  animation: none;
+  box-shadow: none;
 }
 </style>

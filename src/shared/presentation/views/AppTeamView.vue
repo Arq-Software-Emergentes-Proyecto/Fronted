@@ -163,6 +163,34 @@ async function submitWorker() {
   }
 }
 
+const pendingDelete = ref(null)
+const deleting = ref(false)
+
+function askDelete(worker) {
+  pendingDelete.value = worker
+}
+
+function closeDelete() {
+  if (deleting.value) return
+  pendingDelete.value = null
+}
+
+async function confirmDelete() {
+  const worker = pendingDelete.value
+  if (!worker || deleting.value) return
+
+  deleting.value = true
+  try {
+    await teamWorkersApi.remove(worker.id)
+    pendingDelete.value = null
+    await loadWorkers()
+  } catch {
+    loadError.value = t('teamMgmt.deleteError')
+  } finally {
+    deleting.value = false
+  }
+}
+
 function formatSalary(data) {
   const n = Number(data.salary)
   if (!Number.isFinite(n)) return '—'
@@ -297,7 +325,45 @@ onMounted(loadWorkers)
           {{ formatSalary(data) }}
         </template>
       </Column>
+      <Column :header="t('app.deleteAction')" class="team-col-actions">
+        <template #body="{ data }">
+          <Button
+            type="button"
+            text
+            rounded
+            class="team-row-delete"
+            icon="pi pi-trash"
+            :aria-label="t('app.deleteAction')"
+            @click="askDelete(data)"
+          />
+        </template>
+      </Column>
     </DataTable>
+
+    <Dialog
+      :visible="pendingDelete != null"
+      modal
+      :header="t('teamMgmt.deleteModalTitle')"
+      class="team-delete-dialog"
+      :style="{ width: 'min(24rem, 92vw)' }"
+      :draggable="false"
+      :closable="!deleting"
+      @update:visible="(open) => { if (!open) closeDelete() }"
+    >
+      <p class="team-delete-dialog__text">
+        {{ t('teamMgmt.deleteConfirm', { name: pendingDelete?.name || '' }) }}
+      </p>
+      <template #footer>
+        <ConfirmActions
+          :cancel-label="t('app.cancelAction')"
+          :confirm-label="t('app.deleteAction')"
+          confirm-variant="danger"
+          :loading="deleting"
+          @cancel="closeDelete"
+          @confirm="confirmDelete"
+        />
+      </template>
+    </Dialog>
 
     <p v-if="loadError" class="app-view__error" role="alert">{{ loadError }}</p>
   </div>
@@ -433,7 +499,24 @@ onMounted(loadWorkers)
   color: #b42318;
 }
 
-.team-dialog :deep(.p-dialog-footer) {
+.team-col-actions {
+  width: 5.5rem;
+  text-align: right;
+}
+
+.team-row-delete :deep(.p-button) {
+  color: #ff3b30;
+}
+
+.team-delete-dialog__text {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  color: var(--apple-text, #1d1d1f);
+}
+
+.team-dialog :deep(.p-dialog-footer),
+.team-delete-dialog :deep(.p-dialog-footer) {
   gap: 0.5rem;
 }
 

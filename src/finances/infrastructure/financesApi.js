@@ -2,25 +2,28 @@ import { apiClient } from '@/shared/infrastructure/api/apiClient.js'
 import { withOwnerParams } from '@/shared/infrastructure/api/ownerQuery.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
 import { Receipt } from '../domain/receipt.js'
+import { normalizeSettings, settingsToPayload } from '../domain/billingCycle.js'
 
 export const financesApi = {
   async getSettings() {
     const { data } = await apiClient.get('/financeSettings', { params: withOwnerParams() })
     const row = Array.isArray(data) ? data[0] : data
-    if (row && typeof row === 'object') {
-      return {
-        baseMonthlyExpense: row.baseMonthlyExpense ?? 150,
-        lateFeeRate: row.lateFeeRate ?? 0.05,
-      }
-    }
-    return { baseMonthlyExpense: 150, lateFeeRate: 0.05 }
+    if (row && typeof row === 'object') return normalizeSettings(row)
+    return normalizeSettings({})
   },
 
   async getResidents() {
     const { data } = await apiClient.get('/users', {
       params: withOwnerParams({ role: 'resident' }),
     })
-    return Array.isArray(data) ? data : []
+    return (Array.isArray(data) ? data : []).map((row) => {
+      const admissionMatch = String(row?.admissionDate ?? '').trim().match(/^(\d{4}-\d{2}-\d{2})/)
+      return {
+        ...row,
+        admissionDate: admissionMatch ? admissionMatch[1] : '',
+        billFromNextMonth: Boolean(row.billFromNextMonth),
+      }
+    })
   },
 
   async getReceipts() {
@@ -33,6 +36,12 @@ export const financesApi = {
       params: withOwnerParams({ residentId }),
     })
     return (Array.isArray(data) ? data : []).map((d) => new Receipt(d))
+  },
+
+  async deleteReceipt(receiptId) {
+    const cleanId = String(receiptId ?? '').trim()
+    if (!cleanId) return
+    await apiClient.delete(`/receipts/${encodeURIComponent(cleanId)}`)
   },
 
   async createReceipt(receiptData) {
@@ -184,10 +193,7 @@ export const financesApi = {
   async updateSettings(settings) {
     const params = withOwnerParams()
     const ownerId = getActiveDataOwnerId()
-    const payload = {
-      baseMonthlyExpense: Number(settings.baseMonthlyExpense),
-      lateFeeRate: Number(settings.lateFeeRate),
-    }
+    const payload = settingsToPayload(settings)
 
     let data
     try {
@@ -203,9 +209,6 @@ export const financesApi = {
       }
     }
 
-    return {
-      baseMonthlyExpense: Number(data.baseMonthlyExpense) || 150,
-      lateFeeRate: Number(data.lateFeeRate) || 0.05,
-    }
+    return normalizeSettings(data)
   },
 }

@@ -120,4 +120,13 @@ export const fixedPayoutRecipientsApi = {
     const { data: created } = await apiClient.post('/fixedPayoutRecipients', newRow)
     return created
   },
+
+  async remove(id) {
+    const cleanId = String(id ?? '').trim()
+    if (!cleanId) {
+      throw apiError('FIXED_PAYOUT_NOT_FOUND', 'Recipient id is required.')
+    }
+    await apiClient.delete(`/fixedPayoutRecipients/${encodeURIComponent(cleanId)}`)
+    return { id: cleanId }
+  },
 }

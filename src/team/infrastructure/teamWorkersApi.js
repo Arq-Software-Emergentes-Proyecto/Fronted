@@ -42,4 +42,13 @@ export const teamWorkersApi = {
     const { data: created } = await apiClient.post('/teamWorkers', newWorker)
     return created
   },
+
+  async remove(id) {
+    const cleanId = String(id ?? '').trim()
+    if (!cleanId) {
+      throw apiError('TEAM_WORKER_NOT_FOUND', 'Worker id is required.')
+    }
+    await apiClient.delete(`/teamWorkers/${encodeURIComponent(cleanId)}`)
+    return { id: cleanId }
+  },
 }

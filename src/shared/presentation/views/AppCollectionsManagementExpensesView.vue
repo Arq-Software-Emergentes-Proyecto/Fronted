@@ -443,6 +443,52 @@ async function submitFixedRecipient() {
   }
 }
 
+const pendingDelete = ref(null)
+const deleting = ref(false)
+
+function deleteCandidateLabel(item) {
+  if (!item) return ''
+  if (item.kind === 'expense') return String(item.row?.name ?? '')
+  if (item.kind === 'fixed') return String(item.row?.name ?? '')
+  if (item.kind === 'service') return serviceTypeLabel(item.row?.type)
+  return ''
+}
+
+function askDelete(kind, row) {
+  pendingDelete.value = { kind, row }
+}
+
+function closeDelete() {
+  if (deleting.value) return
+  pendingDelete.value = null
+}
+
+async function confirmDelete() {
+  const current = pendingDelete.value
+  if (!current || deleting.value) return
+
+  deleting.value = true
+  try {
+    if (current.kind === 'expense') {
+      await adminManagementExpensesApi.remove(current.row.id)
+      await loadCosts()
+    } else if (current.kind === 'service') {
+      await sharedUtilityServicesApi.remove(current.row.id)
+      await Promise.all([loadSharedServices(), loadData()])
+    } else if (current.kind === 'fixed') {
+      await fixedPayoutRecipientsApi.remove(current.row.id)
+      await loadFixedRecipients()
+    }
+    pendingDelete.value = null
+  } catch {
+    if (current.kind === 'expense') costsLoadError.value = t('collectionsMgmt.deleteError')
+    else if (current.kind === 'service') servicesLoadError.value = t('sharedServices.deleteError')
+    else fixedLoadError.value = t('fixedPay.deleteError')
+  } finally {
+    deleting.value = false
+  }
+}
+
 onMounted(() => {
   loadData()
   loadCosts()
@@ -640,6 +686,19 @@ onMounted(() => {
               {{ nfDate(data.purchaseDate) }}
             </template>
           </Column>
+          <Column :header="t('app.deleteAction')" class="collections-col-actions">
+            <template #body="{ data }">
+              <Button
+                type="button"
+                text
+                rounded
+                class="collections-row-delete"
+                icon="pi pi-trash"
+                :aria-label="t('app.deleteAction')"
+                @click="askDelete('expense', data)"
+              />
+            </template>
+          </Column>
         </DataTable>
 
         <p v-if="costsLoadError" class="collections-panel__error" role="alert">
@@ -737,6 +796,19 @@ onMounted(() => {
                   </span>
                 </template>
                 <span v-else>—</span>
+              </template>
+            </Column>
+            <Column :header="t('app.deleteAction')" class="collections-col-actions">
+              <template #body="{ data }">
+                <Button
+                  type="button"
+                  text
+                  rounded
+                  class="collections-row-delete"
+                  icon="pi pi-trash"
+                  :aria-label="t('app.deleteAction')"
+                  @click="askDelete('service', data)"
+                />
               </template>
             </Column>
           </DataTable>
@@ -907,6 +979,19 @@ onMounted(() => {
           <Column :header="t('fixedPay.tableNext')">
             <template #body="{ data }">{{ nfDate(data.nextPaymentDate) }}</template>
           </Column>
+          <Column :header="t('app.deleteAction')" class="collections-col-actions">
+            <template #body="{ data }">
+              <Button
+                type="button"
+                text
+                rounded
+                class="collections-row-delete"
+                icon="pi pi-trash"
+                :aria-label="t('app.deleteAction')"
+                @click="askDelete('fixed', data)"
+              />
+            </template>
+          </Column>
         </DataTable>
 
         <h3 class="collections-panel__sub collections-panel__sub--divider">
@@ -932,6 +1017,43 @@ onMounted(() => {
           {{ fixedLoadError }}
         </p>
         </section>
+
+        <Dialog
+          :visible="pendingDelete != null"
+          modal
+          :header="t('collectionsMgmt.deleteModalTitle')"
+          class="collections-delete-dialog"
+          :style="{ width: 'min(24rem, 92vw)' }"
+          :draggable="false"
+          :closable="!deleting"
+          @update:visible="(open) => { if (!open) closeDelete() }"
+        >
+          <p class="collections-delete-dialog__text">
+            {{
+              pendingDelete?.kind === 'service'
+                ? t('sharedServices.deleteConfirm', { name: deleteCandidateLabel(pendingDelete) })
+                : pendingDelete?.kind === 'fixed'
+                  ? t('fixedPay.deleteConfirm', { name: deleteCandidateLabel(pendingDelete) })
+                  : t('collectionsMgmt.deleteConfirm', { name: deleteCandidateLabel(pendingDelete) })
+            }}
+          </p>
+          <p
+            v-if="pendingDelete?.kind === 'service'"
+            class="collections-delete-dialog__hint"
+          >
+            {{ t('sharedServices.deleteHint') }}
+          </p>
+          <template #footer>
+            <ConfirmActions
+              :cancel-label="t('app.cancelAction')"
+              :confirm-label="t('app.deleteAction')"
+              confirm-variant="danger"
+              :loading="deleting"
+              @cancel="closeDelete"
+              @confirm="confirmDelete"
+            />
+          </template>
+        </Dialog>
       </div>
     </template>
   </div>
@@ -1292,9 +1414,33 @@ onMounted(() => {
   font-size: 0.875rem;
 }
 
+.collections-col-actions {
+  width: 5.5rem;
+  text-align: right;
+}
+
+.collections-row-delete :deep(.p-button) {
+  color: #ff3b30;
+}
+
+.collections-delete-dialog__text {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  color: var(--apple-text, #1d1d1f);
+}
+
+.collections-delete-dialog__hint {
+  margin: 0.75rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
 .collections-cost-dialog :deep(.p-dialog-footer),
 .collections-service-dialog :deep(.p-dialog-footer),
-.collections-fixed-dialog :deep(.p-dialog-footer) {
+.collections-fixed-dialog :deep(.p-dialog-footer),
+.collections-delete-dialog :deep(.p-dialog-footer) {
   gap: 0.5rem;
 }
 

@@ -8,6 +8,7 @@ import router from '@/shared/presentation/router'
 import '@/shared/presentation/assets/main.css'
 import 'primeicons/primeicons.css'
 import { syncDocumentLocale } from '@/shared/application/syncDocumentLocale.js'
+import { startFirebaseAnalytics } from '@/iam/infrastructure/firebaseApp.js'
 
 const app = createApp(App)
 
@@ -21,6 +22,7 @@ app.use(PrimeVue, {
 app.use(ToastService)
 
 app.mount('#app')
+startFirebaseAnalytics()
 
 watch(
   () => i18n.global.locale.value,

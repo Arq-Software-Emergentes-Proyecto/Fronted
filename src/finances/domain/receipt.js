@@ -1,5 +1,16 @@
 export class Receipt {
-  constructor({ id = null, residentId, issueDate, dueDate, amount, status = 'Pending', lateFee = 0 }) {
+  constructor({
+    id = null,
+    residentId,
+    issueDate,
+    dueDate,
+    amount,
+    status = 'Pending',
+    lateFee = 0,
+    extraCharges = 0,
+    billingMonth = '',
+    paymentOpen = '',
+  }) {
     this.id = id;
     this.residentId = residentId;
     this.issueDate = issueDate;
@@ -7,6 +18,9 @@ export class Receipt {
     this.amount = amount;
     this.status = status; // 'Pending', 'Paid', 'Overdue'
     this.lateFee = lateFee;
+    this.extraCharges = Number(extraCharges) || 0;
+    this.billingMonth = billingMonth || '';
+    this.paymentOpen = Receipt.normalizeYmd(paymentOpen);
   }
 
   static normalizeYmd(value) {
@@ -29,6 +43,6 @@ export class Receipt {
   }
 
   getTotalAmount() {
-    return this.amount + this.lateFee;
+    return this.amount + this.lateFee + (Number(this.extraCharges) || 0);
   }
 }

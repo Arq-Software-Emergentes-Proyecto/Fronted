@@ -14,7 +14,7 @@ export const importUploadsApi = {
     return Array.isArray(data) ? data : []
   },
 
-  async add({ fileName, mimeType, size, dataUrl }) {
+  async add({ fileName, mimeType, size, dataUrl, folderId }) {
     const ownerId = getActiveDataOwnerId()
     const payload = {
       id: `import-${Date.now()}`,
@@ -23,10 +23,34 @@ export const importUploadsApi = {
       size: Number(size) || 0,
       uploadedAt: new Date().toISOString(),
       dataUrl: String(dataUrl ?? ''),
+      folderId: folderId ? String(folderId) : null,
       ...(ownerId ? { ownerAdminId: ownerId } : {}),
     }
     const { data: created } = await apiClient.post('/importUploads', payload)
     return created
+  },
+
+  async updateFileName(id, fileName) {
+    const cleanId = String(id ?? '').trim()
+    const name = String(fileName ?? '').trim()
+    if (!cleanId || !name) {
+      const error = new Error('INVALID_FILE_NAME')
+      error.code = 'INVALID_FILE_NAME'
+      throw error
+    }
+    const { data } = await apiClient.patch(`/importUploads/${encodeURIComponent(cleanId)}`, {
+      fileName: name,
+    })
+    return data
+  },
+
+  async setFolder(id, folderId) {
+    const cleanId = String(id ?? '').trim()
+    if (!cleanId) return null
+    const { data } = await apiClient.patch(`/importUploads/${encodeURIComponent(cleanId)}`, {
+      folderId: folderId ? String(folderId) : null,
+    })
+    return data
   },
 
   async remove(id) {

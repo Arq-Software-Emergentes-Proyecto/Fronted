@@ -1,0 +1,462 @@
+/** Demo tenant used by local preview login (`preview-admin-1` / `preview-resident-1`). */
+export const MOCK_OWNER_ID = 'preview-admin-1'
+export const MOCK_DB_VERSION = 2
+
+function pad(n) {
+  return String(n).padStart(2, '0')
+}
+
+function ymd(offsetDays = 0) {
+  const d = new Date()
+  d.setDate(d.getDate() + offsetDays)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function monthEnd(offsetMonths = 0) {
+  const d = new Date()
+  d.setMonth(d.getMonth() + offsetMonths + 1, 0)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function monthStart(offsetMonths = 0) {
+  const d = new Date()
+  d.setMonth(d.getMonth() + offsetMonths, 1)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-01`
+}
+
+function isoHoursAgo(hours) {
+  return new Date(Date.now() - hours * 3600_000).toISOString()
+}
+
+export function createSeedDb() {
+  const owner = MOCK_OWNER_ID
+
+  return {
+    version: MOCK_DB_VERSION,
+    users: [
+      {
+        id: owner,
+        name: 'Admin demo',
+        email: 'admin@demo.test',
+        password: 'demo',
+        dni: '12345678',
+        address: 'Av. Principal 123, Lima',
+        company: 'BuildingFex Demo',
+        ruc: '20123456789',
+        role: 'admin',
+      },
+      {
+        id: 'preview-resident-1',
+        name: 'Ana Torres',
+        floor: '3',
+        code: '302',
+        email: 'resident@demo.test',
+        password: 'demo',
+        role: 'resident',
+        admissionDate: '2025-03-12',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'preview-resident-2',
+        name: 'Luis Vega',
+        floor: '4',
+        code: '401',
+        email: 'luis.vega@demo.test',
+        password: 'demo',
+        role: 'resident',
+        admissionDate: '2025-06-01',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'preview-resident-3',
+        name: 'Carla Ríos',
+        floor: '5',
+        code: '505',
+        email: 'carla.rios@demo.test',
+        password: 'demo',
+        role: 'resident',
+        admissionDate: '2024-11-20',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'preview-resident-4',
+        name: 'Diego Soto',
+        floor: '2',
+        code: '201',
+        email: '',
+        password: '',
+        role: 'resident',
+        admissionDate: '2026-01-15',
+        ownerAdminId: owner,
+      },
+    ],
+    socialSpaces: [
+      {
+        id: 'space-pool',
+        name: 'Piscina',
+        description: 'Piscina climatizada. Horario 7:00–21:00.',
+        capacity: 20,
+        imageUrl: '',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'space-salon',
+        name: 'Salón de usos múltiples',
+        description: 'Eventos, reuniones de junta y celebraciones.',
+        capacity: 40,
+        imageUrl: '',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'space-gym',
+        name: 'Gimnasio',
+        description: 'Máquinas de cardio y pesas.',
+        capacity: 12,
+        imageUrl: '',
+        ownerAdminId: owner,
+      },
+    ],
+    reservations: [
+      {
+        id: 'res-today-pool',
+        spaceId: 'space-pool',
+        residentId: 'preview-resident-1',
+        residentName: 'Ana Torres',
+        residentCode: '302',
+        date: ymd(0),
+        startTime: '10:00',
+        endTime: '12:00',
+        guests: [
+          { id: 'guest-1', name: 'Mario Torres', checkedIn: true, checkedInAt: isoHoursAgo(1) },
+          { id: 'guest-2', name: 'Lucía Pérez', checkedIn: false, checkedInAt: null },
+        ],
+        guestInviteToken: 'demo-invite-302',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'res-tomorrow-salon',
+        spaceId: 'space-salon',
+        residentId: 'preview-resident-2',
+        residentName: 'Luis Vega',
+        residentCode: '401',
+        date: ymd(1),
+        startTime: '18:00',
+        endTime: '21:00',
+        guests: [],
+        guestInviteToken: 'demo-invite-401',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'res-past-gym',
+        spaceId: 'space-gym',
+        residentId: 'preview-resident-3',
+        residentName: 'Carla Ríos',
+        residentCode: '505',
+        date: ymd(-3),
+        startTime: '07:00',
+        endTime: '08:00',
+        guests: [],
+        guestInviteToken: null,
+        ownerAdminId: owner,
+      },
+    ],
+    incidents: [
+      {
+        id: 'inc-1',
+        residentId: 'preview-resident-1',
+        residentName: 'Ana Torres',
+        description: 'Fuga de agua en el baño principal del dpto. 302.',
+        status: 'open',
+        provider: 'Plomería Andes',
+        createdAt: isoHoursAgo(20),
+        ownerAdminId: owner,
+      },
+      {
+        id: 'inc-2',
+        residentId: 'preview-resident-2',
+        residentName: 'Luis Vega',
+        description: 'Ascensor del bloque A se detiene entre pisos 3 y 4.',
+        status: 'in-progress',
+        provider: 'Elevadores del Sur',
+        createdAt: isoHoursAgo(48),
+        ownerAdminId: owner,
+      },
+      {
+        id: 'inc-3',
+        residentId: 'preview-resident-3',
+        residentName: 'Carla Ríos',
+        description: 'Luminaria del pasillo 5to piso no enciende.',
+        status: 'resolved',
+        provider: 'Eléctricos Lima',
+        createdAt: isoHoursAgo(120),
+        ownerAdminId: owner,
+      },
+    ],
+    announcements: [
+      {
+        id: 'ann-1',
+        title: 'Corte de agua programado',
+        body: 'El martes de 9:00 a 13:00 se realizará mantenimiento de cisternas. Almacena agua con anticipación.',
+        priority: 'urgent',
+        duration: 5,
+        authorId: owner,
+        authorName: 'Admin demo',
+        createdAt: isoHoursAgo(6),
+        expiresAt: `${ymd(4)}T23:59:59.000Z`,
+        ownerAdminId: owner,
+      },
+      {
+        id: 'ann-2',
+        title: 'Junta de propietarios',
+        body: 'Reunión el sábado 10:00 en el salón de usos múltiples. Agenda: presupuesto 2026 y áreas comunes.',
+        priority: 'normal',
+        duration: 14,
+        authorId: owner,
+        authorName: 'Admin demo',
+        createdAt: isoHoursAgo(30),
+        expiresAt: `${ymd(10)}T23:59:59.000Z`,
+        ownerAdminId: owner,
+      },
+      {
+        id: 'ann-3',
+        title: 'Nuevo horario de gimnasio',
+        body: 'El gimnasio abre de 6:00 a 22:00 de lunes a domingo.',
+        priority: 'normal',
+        duration: 30,
+        authorId: owner,
+        authorName: 'Admin demo',
+        createdAt: isoHoursAgo(80),
+        expiresAt: `${ymd(20)}T23:59:59.000Z`,
+        ownerAdminId: owner,
+      },
+    ],
+    receipts: [
+      {
+        id: 'rcpt-ana-prev',
+        residentId: 'preview-resident-1',
+        issueDate: monthStart(-1),
+        dueDate: monthEnd(-1),
+        amount: 180,
+        status: 'Paid',
+        lateFee: 0,
+        extraCharges: 0,
+        concept: 'Mantenimiento',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'rcpt-ana-curr',
+        residentId: 'preview-resident-1',
+        issueDate: monthStart(0),
+        dueDate: monthEnd(0),
+        amount: 180,
+        status: 'Pending',
+        lateFee: 0,
+        extraCharges: 25,
+        concept: 'Mantenimiento + Servicios compartidos',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'rcpt-luis-curr',
+        residentId: 'preview-resident-2',
+        issueDate: monthStart(0),
+        dueDate: monthEnd(0),
+        amount: 180,
+        status: 'Pending',
+        lateFee: 0,
+        extraCharges: 0,
+        concept: 'Mantenimiento',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'rcpt-carla-curr',
+        residentId: 'preview-resident-3',
+        issueDate: monthStart(0),
+        dueDate: monthEnd(0),
+        amount: 180,
+        status: 'Paid',
+        lateFee: 0,
+        extraCharges: 0,
+        concept: 'Mantenimiento',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'rcpt-diego-curr',
+        residentId: 'preview-resident-4',
+        issueDate: monthStart(0),
+        dueDate: monthEnd(0),
+        amount: 180,
+        status: 'Pending',
+        lateFee: 9,
+        extraCharges: 0,
+        concept: 'Mantenimiento',
+        ownerAdminId: owner,
+      },
+    ],
+    fees: [
+      {
+        id: 'fee-ana-aug',
+        residentId: 'preview-resident-1',
+        month: 'Agosto 2026',
+        amount: 180,
+        dueDate: '2026-08-31',
+        status: 'Pagado',
+        concept: 'Cuota Mantenimiento',
+        ownerAdminId: owner,
+      },
+    ],
+    payments: [
+      {
+        id: 'pay-1',
+        residentId: 'preview-resident-1',
+        feeId: 'rcpt-ana-prev',
+        feeMonth: monthEnd(-1),
+        concept: 'Mantenimiento',
+        amount: 180,
+        paidAt: `${monthEnd(-1)}T15:20:00.000Z`,
+        method: 'Yape',
+        reference: 'YAPE-88421',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'pay-2',
+        residentId: 'preview-resident-3',
+        feeId: 'rcpt-carla-curr',
+        feeMonth: monthEnd(0),
+        concept: 'Mantenimiento',
+        amount: 180,
+        paidAt: isoHoursAgo(10),
+        method: 'Transferencia',
+        reference: 'TRX-11029',
+        ownerAdminId: owner,
+      },
+    ],
+    financeSettings: [
+      {
+        id: 'fs-1',
+        ownerAdminId: owner,
+        baseMonthlyExpense: 180,
+        lateFeeRate: 0,
+        lateFeePerDay: 5,
+        admissionPayFromDay: 1,
+        admissionPayToDay: 7,
+        monthlyCharges: [
+          {
+            id: 'charge-2026-09',
+            month: '2026-09',
+            amount: 180,
+            billingStart: '2026-09-01',
+            billingEnd: '2026-09-30',
+            paymentOpen: '2026-10-01',
+            paymentDue: '2026-10-07',
+          },
+        ],
+      },
+    ],
+    kpi: [
+      {
+        id: 'kpi-1',
+        ownerAdminId: owner,
+        totalResidents: 4,
+        occupiedUnits: 4,
+        emptyUnits: 8,
+        totalDebt: 0,
+      },
+    ],
+    adminManagementExpenses: [
+      {
+        id: 'exp-1',
+        name: 'Limpieza de cisternas',
+        amount: 450,
+        purchaseDate: ymd(-12),
+        invoicePhotoUrl: '',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'exp-2',
+        name: 'Repuestos de bomba de agua',
+        amount: 220,
+        purchaseDate: ymd(-4),
+        invoicePhotoUrl: '',
+        ownerAdminId: owner,
+      },
+    ],
+    sharedUtilityServices: [
+      {
+        id: 'util-1',
+        type: 'water',
+        amount: 320,
+        month: monthStart(0).slice(0, 7),
+        residentCount: 4,
+        perResidentShare: 80,
+        ownerAdminId: owner,
+      },
+    ],
+    fixedPayoutRecipients: [
+      {
+        id: 'fp-1',
+        name: 'Rosa Mendoza',
+        dni: '45678912',
+        phone: '987654321',
+        salary: 1200,
+        intervalDays: 30,
+        nextPaymentDate: ymd(18),
+        photoUrl: '',
+        paymentHistory: [
+          { id: 'fp-pay-1', paidOn: ymd(-12), amount: 1200 },
+        ],
+        createdAt: isoHoursAgo(800),
+        ownerAdminId: owner,
+      },
+    ],
+    teamWorkers: [
+      {
+        id: 'tw-1',
+        name: 'Jorge Huamán',
+        phone: '912345678',
+        dni: '70881234',
+        salary: 1800,
+        photoUrl: '',
+        ownerAdminId: owner,
+      },
+    ],
+    supportChats: [
+      {
+        id: 'chat-1',
+        ownerAdminId: owner,
+        residentId: 'preview-resident-1',
+        residentName: 'Ana Torres',
+        topic: 'Recibo de septiembre',
+        status: 'open',
+        messages: [
+          {
+            id: 'msg-1',
+            authorRole: 'resident',
+            authorName: 'Ana Torres',
+            body: 'Hola, el recibo de este mes incluye un cargo extra. ¿Pueden confirmarlo?',
+            createdAt: isoHoursAgo(5),
+          },
+          {
+            id: 'msg-2',
+            authorRole: 'admin',
+            authorName: 'Admin demo',
+            body: 'Sí, es el prorrateo de agua potable. Cualquier duda avísanos.',
+            createdAt: isoHoursAgo(3),
+          },
+        ],
+        createdAt: isoHoursAgo(5),
+        updatedAt: isoHoursAgo(3),
+      },
+    ],
+    importUploads: [],
+    importFolders: [],
+    residentExtraCharges: [],
+    subscriptions: [
+      {
+        ownerAdminId: owner,
+        planId: 'standard',
+        paidUntil: ymd(25),
+        isPaid: true,
+      },
+    ],
+  }
+}

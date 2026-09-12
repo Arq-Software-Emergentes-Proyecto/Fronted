@@ -11,9 +11,10 @@ import { residentsApi } from '@/residents/infrastructure/residentsApi.js'
 import { spacesApi } from '@/socialSpaces/infrastructure/spacesApi.js'
 import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.js'
 import { useFinancesStore } from '@/finances/application/financesStore.js'
+import { formatDayMonth } from '@/finances/domain/billingCycle.js'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const financesStore = useFinancesStore()
 
 const residents = ref([])
@@ -24,7 +25,6 @@ const loadError = ref('')
 const isAddResidentModalOpen = ref(false)
 const modalError = ref('')
 const isSubmitting = ref(false)
-const searchQuery = ref('')
 const residentForm = reactive({
   name: '',
   department: '',
@@ -49,28 +49,12 @@ async function refreshPlanLimit() {
   await refreshSubscriptionFromApi()
   residentPlanLimitCap.value = getResidentLimitForActiveOwner()
 }
-const activeResidents = computed(() =>
-  residents.value.filter((r) => r.hasCredentials).length,
-)
-const totalSpaces = computed(() => spaces.value.length)
-
 function residentInitials(name) {
   if (!name) return '?'
   const parts = name.trim().split(/\s+/)
   if (parts.length === 1) return parts[0][0].toUpperCase()
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
-
-const filteredResidents = computed(() => {
-  const query = searchQuery.value.trim().toLowerCase()
-  if (!query) return residents.value
-
-  return residents.value.filter((resident) =>
-    [resident.name, resident.floor, resident.code].some((value) =>
-      String(value ?? '').toLowerCase().includes(query),
-    ),
-  )
-})
 
 async function loadResidents() {
   isLoading.value = true
@@ -153,6 +137,10 @@ async function onAddResidentSubmit() {
 }
 
 function generateResidentAccessLink(resident) {
+  if (accessLinks[resident.id]) {
+    delete accessLinks[resident.id]
+    return
+  }
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : ''
   const params = new URLSearchParams({
     invite: '1',
@@ -538,23 +526,57 @@ async function onEditSpaceSubmit() {
   }
 }
 
-async function deleteSpace(space) {
-  if (deletingSpaceIds[space.id]) return
-  const confirmed =
-    typeof window === 'undefined'
-      ? true
-      : window.confirm(t('app.deleteSpaceConfirm', { name: space.name }))
-  if (!confirmed) return
+const isDeleteSpaceModalOpen = ref(false)
+const deleteSpaceCandidate = ref(null)
+const deleteSpacePreview = ref(null)
+const isLoadingSpaceDeletePreview = ref(false)
+const isDeletingSpace = ref(false)
+const deleteSpaceSummary = ref(null)
 
+async function openDeleteSpaceModal(space) {
+  if (isDeletingSpace.value) return
+  deleteSpaceCandidate.value = space
+  deleteSpacePreview.value = null
+  deleteSpaceSummary.value = null
+  spaceDeleteError.value = ''
+  isDeleteSpaceModalOpen.value = true
+  isLoadingSpaceDeletePreview.value = true
+  try {
+    const reservations = await reservationsApi.listBySpace(space.id)
+    deleteSpacePreview.value = {
+      reservations: Array.isArray(reservations) ? reservations.length : 0,
+    }
+  } catch {
+    deleteSpacePreview.value = { reservations: 0 }
+  } finally {
+    isLoadingSpaceDeletePreview.value = false
+  }
+}
+
+function closeDeleteSpaceModal() {
+  if (isDeletingSpace.value) return
+  isDeleteSpaceModalOpen.value = false
+  deleteSpaceCandidate.value = null
+  deleteSpacePreview.value = null
+  deleteSpaceSummary.value = null
+}
+
+async function confirmDeleteSpace() {
+  const space = deleteSpaceCandidate.value
+  if (!space || isDeletingSpace.value) return
+
+  isDeletingSpace.value = true
   spaceDeleteError.value = ''
   deletingSpaceIds[space.id] = true
   try {
-    await reservationsApi.removeBySpace(space.id)
+    const result = await reservationsApi.removeBySpace(space.id)
     await spacesApi.remove(space.id)
     spaces.value = spaces.value.filter((item) => item.id !== space.id)
+    deleteSpaceSummary.value = { reservations: result?.removed ?? 0 }
   } catch {
     spaceDeleteError.value = t('app.deleteSpaceError')
   } finally {
+    isDeletingSpace.value = false
     delete deletingSpaceIds[space.id]
   }
 }
@@ -601,47 +623,22 @@ const groupedReservations = computed(() => {
 
 <template>
   <div class="app-view">
-    <h1 class="app-view__title">{{ t('app.pageAdvancedManagement') }}</h1>
-    <p class="app-view__subtitle app-view__subtitle--metrics">
-      <span>{{ totalResidents }} {{ t('app.residentsCountLabel') }}</span>
-      <span class="adv-metrics__sep" aria-hidden="true">·</span>
-      <span>{{ activeResidents }} {{ t('app.residentHasCredentials') }}</span>
-      <span class="adv-metrics__sep" aria-hidden="true">·</span>
-      <span>{{ totalSpaces }} {{ t('app.spacesColumnTitle') }}</span>
-    </p>
-
     <div class="finance-page">
       <div class="finance-main-row">
         <article class="finance-panel finance-panel--table import-panel mgmt-col" aria-labelledby="residents-col-heading">
           <div class="mgmt-panel-toolbar">
             <h2 id="residents-col-heading" class="finance-panel__section-title">
+              <i class="pi pi-users" aria-hidden="true" />
               {{ t('app.residentsColumnTitle') }}
             </h2>
             <Button
               type="button"
-              rounded
-              severity="secondary"
               icon="pi pi-plus"
               class="import-dropzone__btn"
               :label="t('app.addResidentAction')"
               @click="openAddResidentModal"
             />
           </div>
-
-          <p class="residents-plan-hint" role="note">
-            {{ t('app.residentPlanUsageHint', { current: totalResidents, max: residentPlanLimitCap }) }}
-          </p>
-
-          <label class="mgmt-search">
-            <i class="pi pi-search mgmt-search__icon" aria-hidden="true" />
-            <input
-              v-model="searchQuery"
-              type="text"
-              class="mgmt-search__input"
-              :placeholder="t('app.searchResidentsPlaceholder')"
-              :aria-label="t('app.searchResidentsPlaceholder')"
-            />
-          </label>
 
           <p v-if="residentDeleteError" class="import-alert import-alert--error" role="alert">
             {{ residentDeleteError }}
@@ -659,12 +656,8 @@ const groupedReservations = computed(() => {
             <i class="pi pi-inbox" aria-hidden="true" />
             <span>{{ t('app.emptyResidents') }}</span>
           </div>
-          <div v-else-if="!filteredResidents.length" class="import-empty import-panel-state">
-            <i class="pi pi-search" aria-hidden="true" />
-            <span>{{ t('app.emptyResidentsSearch') }}</span>
-          </div>
         <ul v-else class="r-list" role="list">
-          <li v-for="resident in filteredResidents" :key="resident.id" class="r-card">
+          <li v-for="resident in residents" :key="resident.id" class="r-card">
             <div class="r-card__row">
               <span class="r-card__avatar" :class="{ 'r-card__avatar--active': resident.hasCredentials }">
                 {{ residentInitials(resident.name) }}
@@ -678,17 +671,28 @@ const groupedReservations = computed(() => {
                 </p>
                 <p class="r-card__meta">
                   {{ t('app.residentFloorApt', { floor: resident.floor, code: resident.code }) }}
+                  <template v-if="resident.admissionDate">
+                    · {{ t('app.residentAdmissionDate', { date: formatDayMonth(resident.admissionDate, locale) }) }}
+                  </template>
                   <template v-if="resident.email"> · {{ resident.email }}</template>
                 </p>
               </div>
               <div class="r-card__actions">
                 <button
                   type="button"
-                  class="r-card__icon-btn"
-                  :title="t('app.shareResidentAction')"
+                  class="r-card__icon-btn r-card__icon-btn--link"
+                  :class="{ 'is-open': accessLinks[resident.id] }"
+                  :title="
+                    accessLinks[resident.id]
+                      ? t('app.hideResidentLinkAction')
+                      : t('app.shareResidentAction')
+                  "
                   @click="generateResidentAccessLink(resident)"
                 >
-                  <i class="pi pi-link" aria-hidden="true" />
+                  <span class="r-card__link-icon" :class="{ 'r-card__link-icon--open': accessLinks[resident.id] }">
+                    <i class="pi pi-link r-card__link-icon-item r-card__link-icon-item--link" aria-hidden="true" />
+                    <i class="pi pi-chevron-up r-card__link-icon-item r-card__link-icon-item--up" aria-hidden="true" />
+                  </span>
                 </button>
                 <button
                   type="button"
@@ -701,15 +705,17 @@ const groupedReservations = computed(() => {
                 </button>
               </div>
             </div>
-            <a
-              v-if="accessLinks[resident.id]"
-              class="r-card__link"
-              :href="accessLinks[resident.id]"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {{ accessLinks[resident.id] }}
-            </a>
+            <Transition name="r-card-link">
+              <a
+                v-if="accessLinks[resident.id]"
+                class="r-card__link"
+                :href="accessLinks[resident.id]"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {{ accessLinks[resident.id] }}
+              </a>
+            </Transition>
           </li>
         </ul>
       </article>
@@ -717,12 +723,11 @@ const groupedReservations = computed(() => {
         <article class="finance-panel finance-panel--table import-panel mgmt-col" aria-labelledby="spaces-col-heading">
           <div class="mgmt-panel-toolbar">
             <h2 id="spaces-col-heading" class="finance-panel__section-title">
+              <i class="pi pi-building" aria-hidden="true" />
               {{ t('app.spacesColumnTitle') }}
             </h2>
             <Button
               type="button"
-              rounded
-              severity="secondary"
               icon="pi pi-plus"
               class="import-dropzone__btn"
               :label="t('app.addSpaceAction')"
@@ -770,16 +775,19 @@ const groupedReservations = computed(() => {
             </div>
             <div class="s-card__info">
               <p class="s-card__name">{{ space.name }}</p>
-              <p v-if="space.description" class="s-card__desc">{{ space.description }}</p>
-              <p v-if="space.capacity" class="s-card__cap">
-                <i class="pi pi-users" aria-hidden="true" />
-                {{ space.capacity }}
+              <p class="s-card__meta">
+                <template v-if="space.capacity">
+                  <i class="pi pi-users" aria-hidden="true" />
+                  {{ space.capacity }}
+                </template>
+                <template v-if="space.capacity && space.description"> · </template>
+                <template v-if="space.description">{{ space.description }}</template>
               </p>
             </div>
             <div class="s-card__actions" @click.stop @keyup.stop @keydown.stop>
               <button
                 type="button"
-                class="r-card__icon-btn"
+                class="r-card__icon-btn r-card__icon-btn--edit"
                 :title="t('app.editSpaceAction')"
                 @click.stop="openEditSpaceModal(space)"
               >
@@ -789,8 +797,8 @@ const groupedReservations = computed(() => {
                 type="button"
                 class="r-card__icon-btn r-card__icon-btn--danger"
                 :title="t('app.deleteSpaceAction')"
-                :disabled="!!deletingSpaceIds[space.id]"
-                @click.stop="deleteSpace(space)"
+                :disabled="isDeletingSpace && deleteSpaceCandidate?.id === space.id"
+                @click.stop="openDeleteSpaceModal(space)"
               >
                 <i class="pi pi-trash" aria-hidden="true" />
               </button>
@@ -799,6 +807,10 @@ const groupedReservations = computed(() => {
         </ul>
       </article>
       </div>
+
+      <p class="mgmt-view-footer" role="note">
+        {{ t('app.residentPlanUsageHint', { current: totalResidents, max: residentPlanLimitCap }) }}
+      </p>
     </div>
 
     <div
@@ -838,7 +850,6 @@ const groupedReservations = computed(() => {
               :placeholder="t('app.residentDepartmentPlaceholder')"
               autocomplete="off"
             />
-            <span class="resident-modal__field-hint">{{ t('app.residentDepartmentHint') }}</span>
             <span
               v-if="detectedFloor"
               class="resident-modal__field-preview"
@@ -854,6 +865,7 @@ const groupedReservations = computed(() => {
             :cancel-label="t('app.cancelAction')"
             :confirm-label="isSubmitting ? t('app.savingResidentAction') : t('app.saveResidentAction')"
             confirm-type="submit"
+            :stagger="false"
             :loading="isSubmitting"
             :cancel-disabled="isSubmitting"
             @cancel="closeAddResidentModal"
@@ -908,6 +920,7 @@ const groupedReservations = computed(() => {
             :cancel-label="t('app.closeAction')"
             :confirm-label="isSubmittingBulk ? t('app.bulkResidentsSubmitting') : t('app.bulkResidentsSubmit')"
             confirm-type="submit"
+            :stagger="false"
             :loading="isSubmittingBulk"
             :cancel-disabled="isSubmittingBulk"
             @cancel="closeBulkResidentsModal"
@@ -942,8 +955,6 @@ const groupedReservations = computed(() => {
           </label>
 
           <div class="resident-modal__field space-image-field">
-            <span>{{ t('app.spaceImageLabel') }}</span>
-            <p class="space-image-field__hint">{{ t('app.spaceImageHint') }}</p>
             <div v-if="spaceForm.imageUrl" class="space-image-field__preview">
               <img :src="spaceForm.imageUrl" alt="" />
             </div>
@@ -970,11 +981,13 @@ const groupedReservations = computed(() => {
               <button
                 v-if="spaceForm.imageUrl"
                 type="button"
-                class="space-image-field__remove"
+                class="r-card__icon-btn r-card__icon-btn--danger"
+                :title="t('app.spaceImageRemove')"
+                :aria-label="t('app.spaceImageRemove')"
                 :disabled="isProcessingAddImage || isSubmittingSpace"
                 @click="clearAddSpaceImage"
               >
-                {{ t('app.spaceImageRemove') }}
+                <i class="pi pi-trash" aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -985,6 +998,7 @@ const groupedReservations = computed(() => {
             :cancel-label="t('app.cancelAction')"
             :confirm-label="isSubmittingSpace ? t('app.savingSpaceAction') : t('app.saveSpaceAction')"
             confirm-type="submit"
+            :stagger="false"
             :loading="isSubmittingSpace"
             :disabled="isSubmittingSpace || isProcessingAddImage"
             :cancel-disabled="isSubmittingSpace"
@@ -1001,7 +1015,7 @@ const groupedReservations = computed(() => {
       @click.self="closeEditSpaceModal"
     >
       <section
-        class="resident-modal bf-modal-panel"
+        class="resident-modal resident-modal--horizontal bf-modal-panel"
         role="dialog"
         aria-modal="true"
         :aria-label="t('app.editSpaceModalTitle')"
@@ -1009,56 +1023,61 @@ const groupedReservations = computed(() => {
         <h3 class="resident-modal__title">{{ t('app.editSpaceModalTitle') }}</h3>
 
         <form class="resident-modal__form" @submit.prevent="onEditSpaceSubmit">
-          <label class="resident-modal__field">
-            <span>{{ t('app.spaceNameLabel') }}</span>
-            <input v-model="editSpaceForm.name" type="text" />
-          </label>
-
-          <label class="resident-modal__field">
-            <span>{{ t('app.spaceDescriptionLabel') }}</span>
-            <input v-model="editSpaceForm.description" type="text" />
-          </label>
-
-          <label class="resident-modal__field">
-            <span>{{ t('app.spaceCapacityLabel') }}</span>
-            <input v-model="editSpaceForm.capacity" type="number" min="1" />
-          </label>
-
-          <div class="resident-modal__field space-image-field">
-            <span>{{ t('app.spaceImageLabel') }}</span>
-            <p class="space-image-field__hint">{{ t('app.spaceImageHint') }}</p>
-            <div v-if="editSpaceForm.imageUrl" class="space-image-field__preview">
-              <img :src="editSpaceForm.imageUrl" alt="" />
-            </div>
-            <div class="space-image-field__controls">
-              <label class="space-image-field__btn">
-                <input
-                  type="file"
-                  accept="image/*"
-                  class="space-image-field__input"
-                  :disabled="isProcessingEditImage || isSubmittingEditSpace"
-                  @change="onEditSpaceImageSelected"
-                />
-                <i class="pi pi-upload" aria-hidden="true" />
-                <span>
-                  {{
-                    isProcessingEditImage
-                      ? t('app.spaceImageProcessing')
-                      : editSpaceForm.imageUrl
-                        ? t('app.spaceImageChange')
-                        : t('app.spaceImageLabel')
-                  }}
-                </span>
+          <div class="resident-modal__grid">
+            <div class="resident-modal__fields">
+              <label class="resident-modal__field">
+                <span>{{ t('app.spaceNameLabel') }}</span>
+                <input v-model="editSpaceForm.name" type="text" />
               </label>
-              <button
-                v-if="editSpaceForm.imageUrl"
-                type="button"
-                class="space-image-field__remove"
-                :disabled="isProcessingEditImage || isSubmittingEditSpace"
-                @click="clearEditSpaceImage"
-              >
-                {{ t('app.spaceImageRemove') }}
-              </button>
+
+              <label class="resident-modal__field">
+                <span>{{ t('app.spaceDescriptionLabel') }}</span>
+                <input v-model="editSpaceForm.description" type="text" />
+              </label>
+
+              <label class="resident-modal__field">
+                <span>{{ t('app.spaceCapacityLabel') }}</span>
+                <input v-model="editSpaceForm.capacity" type="number" min="1" />
+              </label>
+            </div>
+
+            <div class="resident-modal__field space-image-field">
+              <span>{{ t('app.spaceImageLabel') }}</span>
+              <div v-if="editSpaceForm.imageUrl" class="space-image-field__preview">
+                <img :src="editSpaceForm.imageUrl" alt="" />
+              </div>
+              <div class="space-image-field__controls">
+                <label class="space-image-field__btn">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    class="space-image-field__input"
+                    :disabled="isProcessingEditImage || isSubmittingEditSpace"
+                    @change="onEditSpaceImageSelected"
+                  />
+                  <i class="pi pi-upload" aria-hidden="true" />
+                  <span>
+                    {{
+                      isProcessingEditImage
+                        ? t('app.spaceImageProcessing')
+                        : editSpaceForm.imageUrl
+                          ? t('app.spaceImageChange')
+                          : t('app.spaceImageLabel')
+                    }}
+                  </span>
+                </label>
+                <button
+                  v-if="editSpaceForm.imageUrl"
+                  type="button"
+                  class="r-card__icon-btn r-card__icon-btn--danger"
+                  :title="t('app.spaceImageRemove')"
+                  :aria-label="t('app.spaceImageRemove')"
+                  :disabled="isProcessingEditImage || isSubmittingEditSpace"
+                  @click="clearEditSpaceImage"
+                >
+                  <i class="pi pi-trash" aria-hidden="true" />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1070,6 +1089,7 @@ const groupedReservations = computed(() => {
               isSubmittingEditSpace ? t('app.savingSpaceUpdateAction') : t('app.saveSpaceUpdateAction')
             "
             confirm-type="submit"
+            :stagger="false"
             :loading="isSubmittingEditSpace"
             :disabled="isSubmittingEditSpace || isProcessingEditImage"
             :cancel-disabled="isSubmittingEditSpace"
@@ -1086,122 +1106,240 @@ const groupedReservations = computed(() => {
       @click.self="closeDeleteResidentModal"
     >
       <section
-        class="resident-modal resident-modal--danger bf-modal-panel"
+        class="resident-modal bf-modal-panel"
         role="dialog"
         aria-modal="true"
         :aria-label="t('app.deleteResidentModalTitle')"
       >
-        <h3 class="resident-modal__title resident-modal__title--danger">
-          <i class="pi pi-exclamation-triangle" aria-hidden="true" />
-          {{ t('app.deleteResidentModalTitle') }}
-        </h3>
+        <h3 class="resident-modal__title">{{ t('app.deleteResidentModalTitle') }}</h3>
 
-        <p class="resident-modal__warning">
-          {{
-            t('app.deleteResidentWarning', {
-              name: deleteResidentCandidate?.name || '',
-            })
-          }}
-        </p>
-
-        <div v-if="!deleteResidentSummary" class="delete-impact">
-          <p class="delete-impact__title">{{ t('app.deleteResidentImpactTitle') }}</p>
-          <p v-if="isLoadingDeletePreview" class="delete-impact__loading">
-            {{ t('app.deleteResidentLoadingPreview') }}
+        <div class="resident-modal__form">
+          <p class="resident-modal__hint">
+            {{
+              t('app.deleteResidentWarning', {
+                name: deleteResidentCandidate?.name || '',
+              })
+            }}
           </p>
-          <ul v-else class="delete-impact__list">
-            <li
-              v-if="(deleteResidentPreview?.reservations ?? 0) > 0"
-              class="delete-impact__item"
+
+          <div v-if="!deleteResidentSummary" class="delete-impact">
+            <p class="delete-impact__title">{{ t('app.deleteResidentImpactTitle') }}</p>
+            <p v-if="isLoadingDeletePreview" class="delete-impact__loading">
+              {{ t('app.deleteResidentLoadingPreview') }}
+            </p>
+            <ul v-else class="delete-impact__list">
+              <li
+                v-if="(deleteResidentPreview?.reservations ?? 0) > 0"
+                class="delete-impact__item"
+              >
+                <i class="pi pi-calendar" aria-hidden="true" />
+                {{
+                  t('app.deleteResidentImpactReservations', {
+                    n: deleteResidentPreview?.reservations ?? 0,
+                  })
+                }}
+              </li>
+              <li class="delete-impact__item">
+                <i class="pi pi-id-card" aria-hidden="true" />
+                {{ t('app.deleteResidentImpactAccount') }}
+              </li>
+              <li
+                v-if="(deleteResidentPreview?.reservations ?? 0) === 0"
+                class="delete-impact__item delete-impact__item--muted"
+              >
+                <i class="pi pi-info-circle" aria-hidden="true" />
+                {{ t('app.deleteResidentImpactNone') }}
+              </li>
+            </ul>
+          </div>
+
+          <div v-else class="delete-summary">
+            <p class="delete-summary__title">
+              <i class="pi pi-check-circle" aria-hidden="true" />
+              {{ t('app.deleteResidentSuccessTitle') }}
+            </p>
+            <p class="delete-summary__subtitle">
+              {{ t('app.deleteResidentSuccessSummary') }}
+            </p>
+            <ul class="delete-summary__list">
+              <li class="delete-summary__item">
+                <i class="pi pi-calendar" aria-hidden="true" />
+                {{
+                  t('app.deleteResidentSummaryReservations', {
+                    n: deleteResidentSummary.reservations,
+                  })
+                }}
+              </li>
+              <li class="delete-summary__item">
+                <i class="pi pi-id-card" aria-hidden="true" />
+                {{ t('app.deleteResidentSummaryAccount') }}
+              </li>
+            </ul>
+            <p
+              v-if="deleteResidentHasErrors"
+              class="delete-summary__partial"
             >
-              <i class="pi pi-calendar" aria-hidden="true" />
-              {{
-                t('app.deleteResidentImpactReservations', {
-                  n: deleteResidentPreview?.reservations ?? 0,
-                })
-              }}
-            </li>
-            <li class="delete-impact__item">
-              <i class="pi pi-id-card" aria-hidden="true" />
-              {{ t('app.deleteResidentImpactAccount') }}
-            </li>
-            <li
-              v-if="(deleteResidentPreview?.reservations ?? 0) === 0"
-              class="delete-impact__item delete-impact__item--muted"
-            >
-              <i class="pi pi-info-circle" aria-hidden="true" />
-              {{ t('app.deleteResidentImpactNone') }}
-            </li>
-          </ul>
-        </div>
+              {{ t('app.deleteResidentPartialError') }}
+            </p>
+          </div>
 
-        <div v-else class="delete-summary">
-          <p class="delete-summary__title">
-            <i class="pi pi-check-circle" aria-hidden="true" />
-            {{ t('app.deleteResidentSuccessTitle') }}
+          <p v-if="residentDeleteError" class="resident-modal__error">
+            {{ residentDeleteError }}
           </p>
-          <p class="delete-summary__subtitle">
-            {{ t('app.deleteResidentSuccessSummary') }}
-          </p>
-          <ul class="delete-summary__list">
-            <li class="delete-summary__item">
-              <i class="pi pi-calendar" aria-hidden="true" />
-              {{
-                t('app.deleteResidentSummaryReservations', {
-                  n: deleteResidentSummary.reservations,
-                })
-              }}
-            </li>
-            <li class="delete-summary__item">
-              <i class="pi pi-id-card" aria-hidden="true" />
-              {{ t('app.deleteResidentSummaryAccount') }}
-            </li>
-          </ul>
-          <p
-            v-if="deleteResidentHasErrors"
-            class="delete-summary__partial"
+
+          <ConfirmActions
+            :show-cancel="!deleteResidentSummary"
+            :cancel-label="t('app.cancelAction')"
+            :cancel-disabled="isDeletingResidentCascade"
+            :stagger="false"
+            align="end"
+            @cancel="closeDeleteResidentModal"
           >
-            {{ t('app.deleteResidentPartialError') }}
-          </p>
+            <template #confirm>
+              <button
+                v-if="!deleteResidentSummary"
+                type="button"
+                class="bf-btn bf-btn--danger"
+                :disabled="isDeletingResidentCascade || isLoadingDeletePreview"
+                @click="confirmDeleteResidentCascade"
+              >
+                <span v-if="isDeletingResidentCascade" class="bf-btn__spinner" aria-hidden="true" />
+                <span>{{
+                  isDeletingResidentCascade
+                    ? t('app.deleteResidentInProgress')
+                    : t('app.deleteResidentConfirmAction')
+                }}</span>
+              </button>
+              <button
+                v-else
+                type="button"
+                class="bf-btn bf-btn--confirm"
+                @click="closeDeleteResidentModal"
+              >
+                {{ t('app.closeAction') }}
+              </button>
+            </template>
+          </ConfirmActions>
         </div>
+      </section>
+    </div>
 
-        <p v-if="residentDeleteError" class="resident-modal__error">
-          {{ residentDeleteError }}
-        </p>
+    <div
+      v-if="isDeleteSpaceModalOpen"
+      class="resident-modal-backdrop bf-modal-backdrop"
+      role="presentation"
+      @click.self="closeDeleteSpaceModal"
+    >
+      <section
+        class="resident-modal bf-modal-panel"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="t('app.deleteSpaceModalTitle')"
+      >
+        <h3 class="resident-modal__title">{{ t('app.deleteSpaceModalTitle') }}</h3>
 
-        <ConfirmActions
-          :show-cancel="!deleteResidentSummary"
-          :cancel-label="t('app.cancelAction')"
-          :cancel-disabled="isDeletingResidentCascade"
-          align="end"
-          @cancel="closeDeleteResidentModal"
-        >
-          <template #confirm>
-            <button
-              v-if="!deleteResidentSummary"
-              type="button"
-              class="bf-btn bf-btn--danger"
-              :disabled="isDeletingResidentCascade || isLoadingDeletePreview"
-              @click="confirmDeleteResidentCascade"
-            >
-              <span v-if="isDeletingResidentCascade" class="bf-btn__spinner" aria-hidden="true" />
-              <i v-else class="pi pi-trash" aria-hidden="true" />
-              <span>{{
-                isDeletingResidentCascade
-                  ? t('app.deleteResidentInProgress')
-                  : t('app.deleteResidentConfirmAction')
-              }}</span>
-            </button>
-            <button
-              v-else
-              type="button"
-              class="bf-btn bf-btn--confirm"
-              @click="closeDeleteResidentModal"
-            >
-              {{ t('app.closeAction') }}
-            </button>
-          </template>
-        </ConfirmActions>
+        <div class="resident-modal__form">
+          <p class="resident-modal__hint">
+            {{
+              t('app.deleteSpaceWarning', {
+                name: deleteSpaceCandidate?.name || '',
+              })
+            }}
+          </p>
+
+          <div v-if="!deleteSpaceSummary" class="delete-impact">
+            <p class="delete-impact__title">{{ t('app.deleteSpaceImpactTitle') }}</p>
+            <p v-if="isLoadingSpaceDeletePreview" class="delete-impact__loading">
+              {{ t('app.deleteResidentLoadingPreview') }}
+            </p>
+            <ul v-else class="delete-impact__list">
+              <li
+                v-if="(deleteSpacePreview?.reservations ?? 0) > 0"
+                class="delete-impact__item"
+              >
+                <i class="pi pi-calendar" aria-hidden="true" />
+                {{
+                  t('app.deleteSpaceImpactReservations', {
+                    n: deleteSpacePreview?.reservations ?? 0,
+                  })
+                }}
+              </li>
+              <li class="delete-impact__item">
+                <i class="pi pi-image" aria-hidden="true" />
+                {{ t('app.deleteSpaceImpactSpace') }}
+              </li>
+              <li
+                v-if="(deleteSpacePreview?.reservations ?? 0) === 0"
+                class="delete-impact__item delete-impact__item--muted"
+              >
+                <i class="pi pi-info-circle" aria-hidden="true" />
+                {{ t('app.deleteResidentImpactNone') }}
+              </li>
+            </ul>
+          </div>
+
+          <div v-else class="delete-summary">
+            <p class="delete-summary__title">
+              <i class="pi pi-check-circle" aria-hidden="true" />
+              {{ t('app.deleteSpaceSuccessTitle') }}
+            </p>
+            <p class="delete-summary__subtitle">
+              {{ t('app.deleteResidentSuccessSummary') }}
+            </p>
+            <ul class="delete-summary__list">
+              <li class="delete-summary__item">
+                <i class="pi pi-calendar" aria-hidden="true" />
+                {{
+                  t('app.deleteResidentSummaryReservations', {
+                    n: deleteSpaceSummary.reservations,
+                  })
+                }}
+              </li>
+              <li class="delete-summary__item">
+                <i class="pi pi-image" aria-hidden="true" />
+                {{ t('app.deleteSpaceImpactSpace') }}
+              </li>
+            </ul>
+          </div>
+
+          <p v-if="spaceDeleteError" class="resident-modal__error">
+            {{ spaceDeleteError }}
+          </p>
+
+          <ConfirmActions
+            :show-cancel="!deleteSpaceSummary"
+            :cancel-label="t('app.cancelAction')"
+            :cancel-disabled="isDeletingSpace"
+            :stagger="false"
+            align="end"
+            @cancel="closeDeleteSpaceModal"
+          >
+            <template #confirm>
+              <button
+                v-if="!deleteSpaceSummary"
+                type="button"
+                class="bf-btn bf-btn--danger"
+                :disabled="isDeletingSpace || isLoadingSpaceDeletePreview"
+                @click="confirmDeleteSpace"
+              >
+                <span v-if="isDeletingSpace" class="bf-btn__spinner" aria-hidden="true" />
+                <span>{{
+                  isDeletingSpace
+                    ? t('app.deleteResidentInProgress')
+                    : t('app.deleteResidentConfirmAction')
+                }}</span>
+              </button>
+              <button
+                v-else
+                type="button"
+                class="bf-btn bf-btn--confirm"
+                @click="closeDeleteSpaceModal"
+              >
+                {{ t('app.closeAction') }}
+              </button>
+            </template>
+          </ConfirmActions>
+        </div>
       </section>
     </div>
 
@@ -1248,6 +1386,7 @@ const groupedReservations = computed(() => {
         <ConfirmActions
           :show-cancel="false"
           :confirm-label="t('app.closeAction')"
+          :stagger="false"
           align="center"
           @confirm="closeSpaceCalendar"
         />
@@ -1258,60 +1397,36 @@ const groupedReservations = computed(() => {
 
 <style scoped>
 .app-view {
-  padding: 1.75rem 1.5rem 2.5rem;
-  max-width: 72rem;
-  box-sizing: border-box;
-}
-
-.app-view__title {
-  margin: 0;
-  font-size: 1.75rem;
-  font-weight: 600;
-  letter-spacing: -0.035em;
-  line-height: 1.15;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.app-view__subtitle {
-  margin: 0.5rem 0 0;
-  max-width: 40rem;
-  font-size: 0.875rem;
-  font-weight: 400;
-  line-height: 1.45;
-  letter-spacing: -0.015em;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.app-view__subtitle--metrics {
+  padding: 1.75rem 1.5rem 1.25rem;
+  width: 100%;
   max-width: none;
+  min-height: 100dvh;
+  box-sizing: border-box;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.adv-metrics__sep {
-  color: #aeaeb2;
-  user-select: none;
+  flex-direction: column;
 }
 
 .finance-page {
-  margin-top: 1.5rem;
+  margin-top: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  min-height: 0;
 }
 
 .finance-main-row {
-  display: flex;
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: stretch;
-  gap: 1.25rem;
+  gap: 2.5rem;
+  width: 100%;
+  flex: 1;
 }
 
 .mgmt-col {
-  flex: 1 1 50%;
   min-width: 0;
+  width: 100%;
 }
 
 @media (max-width: 1024px) {
@@ -1335,11 +1450,20 @@ const groupedReservations = computed(() => {
 
 .finance-panel__section-title {
   margin: 0;
-  font-size: 1.0625rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 1.15rem;
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.25;
   color: var(--apple-text, #1d1d1f);
+  text-transform: capitalize;
+}
+
+.finance-panel__section-title .pi {
+  font-size: 1.25rem;
+  color: #0071e3;
 }
 
 .mgmt-panel-toolbar {
@@ -1351,57 +1475,35 @@ const groupedReservations = computed(() => {
   margin-bottom: 0.5rem;
 }
 
-.residents-plan-hint {
-  margin: 0 0 0.65rem;
-  font-size: 0.8125rem;
-  color: var(--apple-text-secondary, #6e6e73);
-  line-height: 1.4;
+.mgmt-view-footer {
+  margin-top: auto;
+  padding: 1.5rem 0 0.25rem;
+  width: 100%;
+  text-align: center;
+  font-size: 0.6875rem;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: #aeaeb2;
 }
 
-.import-dropzone__btn :deep(.p-button) {
+.import-dropzone__btn :deep(.p-button),
+.app-view :deep(.import-dropzone__btn.p-button) {
+  min-height: 1.7rem;
+  padding: 0.22rem 0.85rem;
+  border-radius: 8px;
   font-weight: 500;
   font-size: 0.8125rem;
-  padding-block: 0.5rem;
-  padding-inline: 1rem;
-}
-
-.mgmt-search {
-  margin-top: 0.65rem;
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  border: 1px solid #d2d2d7;
-  border-radius: 10px;
-  padding: 0.5rem 0.65rem;
-  background: #ffffff;
-  transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
-}
-
-.mgmt-search:focus-within {
-  outline: none;
-  border-color: #0a84ff;
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.18);
-}
-
-.mgmt-search__icon {
-  color: #86868b;
-  font-size: 0.85rem;
-}
-
-.mgmt-search__input {
-  width: 100%;
+  box-shadow: none;
   border: none;
-  outline: none;
-  background: transparent;
-  font: inherit;
-  color: #1d1d1f;
-  font-size: 0.875rem;
+  background: #0071e3;
+  color: #ffffff;
 }
 
-.mgmt-search__input::placeholder {
-  color: #86868b;
+.app-view :deep(.import-dropzone__btn.p-button:hover),
+.app-view :deep(.import-dropzone__btn .p-button:hover) {
+  background: #0066cc;
+  color: #ffffff;
 }
 
 .import-alert {
@@ -1558,14 +1660,70 @@ const groupedReservations = computed(() => {
   transition: background 0.12s ease, color 0.12s ease;
 }
 
-.r-card__icon-btn:hover {
-  background: #f2f2f7;
-  color: #1d1d1f;
+.r-card__icon-btn--link {
+  color: #34c759;
+}
+
+.r-card__link-icon {
+  position: relative;
+  display: block;
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.r-card__link-icon-item {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  transition:
+    opacity 0.22s ease,
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.r-card__link-icon-item--link {
+  opacity: 1;
+  transform: rotate(0deg) scale(1);
+}
+
+.r-card__link-icon-item--up {
+  opacity: 0;
+  transform: rotate(-90deg) scale(0.55);
+}
+
+.r-card__link-icon--open .r-card__link-icon-item--link {
+  opacity: 0;
+  transform: rotate(90deg) scale(0.55);
+}
+
+.r-card__link-icon--open .r-card__link-icon-item--up {
+  opacity: 1;
+  transform: rotate(0deg) scale(1);
+}
+
+.r-card__icon-btn--link:hover {
+  background: #f0fff4;
+  color: #248a3d;
+}
+
+.r-card__icon-btn--edit {
+  color: #0071e3;
+}
+
+.r-card__icon-btn--edit:hover {
+  background: #f0f7ff;
+  color: #0066cc;
+}
+
+.r-card__icon-btn--danger {
+  color: #ff3b30;
 }
 
 .r-card__icon-btn--danger:hover {
   background: #fff2f2;
-  color: #ff3b30;
+  color: #e0352b;
 }
 
 .r-card__icon-btn:disabled {
@@ -1590,6 +1748,41 @@ const groupedReservations = computed(() => {
   text-decoration: underline;
 }
 
+.r-card-link-enter-active,
+.r-card-link-leave-active {
+  overflow: hidden;
+  transform-origin: top;
+  transition:
+    max-height 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.24s ease,
+    margin-top 0.32s ease,
+    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.r-card-link-enter-from,
+.r-card-link-leave-to {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+  transform: translateY(-6px);
+}
+
+.r-card-link-enter-to,
+.r-card-link-leave-from {
+  max-height: 6rem;
+  opacity: 1;
+  margin-top: 0.45rem;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .r-card__link-icon-item,
+  .r-card-link-enter-active,
+  .r-card-link-leave-active {
+    transition: none;
+  }
+}
+
 .s-list {
   margin: 0.85rem 0 0;
   padding: 0;
@@ -1602,7 +1795,7 @@ const groupedReservations = computed(() => {
 .s-card {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.65rem;
   border: 1px solid rgba(0, 0, 0, 0.06);
   border-radius: 10px;
   padding: 0.75rem 0.85rem;
@@ -1622,11 +1815,11 @@ const groupedReservations = computed(() => {
 
 .s-card__thumb {
   flex-shrink: 0;
-  width: 4rem;
-  height: 3rem;
+  width: 2.2rem;
+  height: 2.2rem;
   border-radius: 8px;
   overflow: hidden;
-  background: #f5f5f7;
+  background: #e8e8ed;
 }
 
 .s-card__img {
@@ -1642,8 +1835,8 @@ const groupedReservations = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #c7c7cc;
-  font-size: 1.1rem;
+  color: #6e6e73;
+  font-size: 0.75rem;
 }
 
 .s-card__info {
@@ -1658,27 +1851,16 @@ const groupedReservations = computed(() => {
   color: #1d1d1f;
 }
 
-.s-card__desc {
-  margin: 0.1rem 0 0;
-  color: #86868b;
+.s-card__meta {
+  margin: 0.15rem 0 0;
   font-size: 0.75rem;
-  line-height: 1.35;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.s-card__cap {
-  margin: 0.2rem 0 0;
-  display: flex;
-  align-items: center;
-  gap: 0.2rem;
-  font-size: 0.72rem;
   color: #86868b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.s-card__cap .pi {
+.s-card__meta .pi {
   font-size: 0.62rem;
 }
 
@@ -1724,6 +1906,37 @@ const groupedReservations = computed(() => {
   width: min(100%, 36rem);
 }
 
+.resident-modal--horizontal {
+  width: min(100%, 46rem);
+}
+
+.resident-modal__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(13rem, 16.5rem);
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.resident-modal__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.resident-modal--horizontal .space-image-field {
+  height: 100%;
+}
+
+.resident-modal--horizontal .space-image-field__preview {
+  aspect-ratio: 4 / 3;
+}
+
+@media (max-width: 640px) {
+  .resident-modal__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .resident-modal__title {
   margin: 0;
   font-size: 1.05rem;
@@ -1749,10 +1962,10 @@ const groupedReservations = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  border: 1px solid #d2d2d7;
-  background: #f5f5f7;
+  border: none;
+  background: transparent;
   color: #0a84ff;
-  border-radius: 980px;
+  border-radius: 8px;
   padding: 0.32rem 0.65rem;
   font-weight: 600;
   font-size: 0.78rem;
@@ -1780,7 +1993,7 @@ const groupedReservations = computed(() => {
 .resident-modal__textarea {
   width: 100%;
   border: 1px solid #d2d2d7;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 0.5rem 0.6rem;
   font: inherit;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1851,7 +2064,7 @@ const groupedReservations = computed(() => {
 
 .resident-modal__field input {
   border: 1px solid #d2d2d7;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 0.5rem 0.6rem;
   font: inherit;
   color: #1d1d1f;
@@ -1863,13 +2076,6 @@ const groupedReservations = computed(() => {
   border-color: #0a84ff;
 }
 
-.resident-modal__field-hint {
-  font-size: 0.75rem;
-  font-weight: 400;
-  color: #86868b;
-  line-height: 1.35;
-}
-
 .resident-modal__field-preview {
   font-size: 0.8125rem;
   font-weight: 600;
@@ -1878,17 +2084,11 @@ const groupedReservations = computed(() => {
 
 .space-image-field {
   border: 1px dashed #d2d2d7;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 0.6rem 0.65rem;
   background: #fafafc;
 }
 
-.space-image-field__hint {
-  margin: 0.1rem 0 0;
-  color: #86868b;
-  font-size: 0.75rem;
-  font-weight: 400;
-}
 
 .space-image-field__preview {
   margin-top: 0.5rem;
@@ -1907,20 +2107,28 @@ const groupedReservations = computed(() => {
 }
 
 .space-image-field__controls {
+  position: relative;
   margin-top: 0.5rem;
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
   gap: 0.35rem;
+  width: 100%;
+}
+
+.space-image-field__controls .r-card__icon-btn {
+  position: absolute;
+  right: 0;
 }
 
 .space-image-field__btn {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  border: 1px solid #d2d2d7;
-  background: #ffffff;
+  border: none;
+  background: transparent;
   color: #0a84ff;
-  border-radius: 980px;
+  border-radius: 8px;
   padding: 0.35rem 0.65rem;
   font-weight: 600;
   font-size: 0.78rem;
@@ -1931,20 +2139,6 @@ const groupedReservations = computed(() => {
   display: none;
 }
 
-.space-image-field__remove {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid #d2d2d7;
-  background: #ffffff;
-  color: #86868b;
-  border-radius: 980px;
-  padding: 0.35rem 0.65rem;
-  font-weight: 600;
-  font-size: 0.78rem;
-  cursor: pointer;
-}
-
-.space-image-field__remove:disabled,
 .space-image-field__btn:has(input:disabled) {
   opacity: 0.5;
   cursor: not-allowed;
@@ -1960,31 +2154,58 @@ const groupedReservations = computed(() => {
   margin-top: 0.4rem;
 }
 
-.resident-modal--danger {
-  border-color: #e8e8ed;
+.app-view :deep(.bf-btn) {
+  min-height: 1.7rem;
+  padding: 0.22rem 0.85rem;
+  border-radius: 8px;
+  box-shadow: none;
+  transform: none;
 }
 
-.resident-modal__title--danger {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  color: #ff3b30;
+.app-view :deep(.bf-btn:not(:disabled):hover),
+.app-view :deep(.bf-btn:not(:disabled):active) {
+  transform: none;
+  box-shadow: none;
 }
 
-.resident-modal__title--danger .pi {
-  color: #ff9500;
-}
-
-.resident-modal__warning {
-  margin: 0.5rem 0 0.75rem;
+.app-view :deep(.bf-btn--cancel) {
+  background: #f5f5f7;
   color: #1d1d1f;
-  font-size: 0.85rem;
+  border-color: transparent;
 }
 
-.delete-impact {
-  background: #fffbf5;
+.app-view :deep(.bf-btn--cancel:not(:disabled):hover) {
+  background: #e8e8ed;
+  border-color: transparent;
+}
+
+.app-view :deep(.bf-btn--confirm) {
+  background: #0071e3;
+  color: #ffffff;
+}
+
+.app-view :deep(.bf-btn--confirm:not(:disabled):hover) {
+  background: #0066cc;
+}
+
+.app-view :deep(.bf-btn--confirm:not(:disabled):focus-visible) {
+  animation: none;
+}
+
+.app-view :deep(.bf-btn--danger) {
+  background: #ff3b30;
+  color: #ffffff;
+}
+
+.app-view :deep(.bf-btn--danger:not(:disabled):hover) {
+  background: #e0352b;
+}
+
+.delete-impact,
+.delete-summary {
+  background: #fafafa;
   border: 1px solid #e8e8ed;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 0.65rem 0.75rem;
 }
 
@@ -1992,9 +2213,7 @@ const groupedReservations = computed(() => {
   margin: 0 0 0.4rem;
   font-size: 0.78rem;
   font-weight: 600;
-  color: #86868b;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  color: #6e6e73;
 }
 
 .delete-impact__loading {
@@ -2003,7 +2222,8 @@ const groupedReservations = computed(() => {
   font-size: 0.8rem;
 }
 
-.delete-impact__list {
+.delete-impact__list,
+.delete-summary__list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -2012,7 +2232,8 @@ const groupedReservations = computed(() => {
   gap: 0.3rem;
 }
 
-.delete-impact__item {
+.delete-impact__item,
+.delete-summary__item {
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -2020,8 +2241,9 @@ const groupedReservations = computed(() => {
   color: #1d1d1f;
 }
 
-.delete-impact__item .pi {
-  color: #ff9500;
+.delete-impact__item .pi,
+.delete-summary__item .pi {
+  color: #0071e3;
   font-size: 0.8rem;
 }
 
@@ -2031,13 +2253,6 @@ const groupedReservations = computed(() => {
 
 .delete-impact__item--muted .pi {
   color: #c7c7cc;
-}
-
-.delete-summary {
-  background: #f0fdf4;
-  border: 1px solid #e8e8ed;
-  border-radius: 10px;
-  padding: 0.7rem 0.8rem;
 }
 
 .delete-summary__title {
@@ -2058,27 +2273,6 @@ const groupedReservations = computed(() => {
   margin: 0.35rem 0 0.5rem;
   color: #6e6e73;
   font-size: 0.78rem;
-}
-
-.delete-summary__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.delete-summary__item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.8rem;
-  color: #1d1d1f;
-}
-
-.delete-summary__item .pi {
-  color: #34c759;
 }
 
 .delete-summary__partial {

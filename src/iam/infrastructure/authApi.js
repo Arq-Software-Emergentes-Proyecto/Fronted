@@ -4,10 +4,12 @@ import {
   normalizeEmail,
   publicUser,
 } from '@/shared/infrastructure/api/utils.js'
-
-const SIGN_IN_PATH = '/api/v1/authentication/sign-in'
-const REGISTER_ADMIN_PATH = '/api/v1/authentication/register-admin'
-const CHECK_EMAIL_PATH = '/api/v1/authentication/check-email'
+import {
+  getFirebaseAdminProfile,
+  isFirebaseEmailRegistered,
+  loginAdminWithFirebase,
+  registerAdminWithFirebase,
+} from './firebaseAuth.js'
 
 export function parseAuthResponse(data) {
   if (!data || typeof data !== 'object') {
@@ -33,7 +35,11 @@ async function seedAdminDefaults(ownerId, token) {
       {
         ownerAdminId: ownerId,
         baseMonthlyExpense: 150,
-        lateFeeRate: 0.05,
+        lateFeeRate: 0,
+        lateFeePerDay: 0,
+        admissionPayFromDay: 1,
+        admissionPayToDay: 7,
+        monthlyCharges: [],
       },
       { headers },
     )
@@ -66,52 +72,63 @@ async function seedAdminDefaults(ownerId, token) {
  */
 export const authApi = {
   async isEmailRegistered(email) {
-    const normalized = normalizeEmail(email)
-    if (!normalized) return false
+    const { exists, methods } = await isFirebaseEmailRegistered(email)
+    if (methods.includes('google.com') && !methods.includes('password')) {
+      throw apiError('RESIDENT_USE_GOOGLE')
+    }
+    if (!methods.length) return true
+    return exists
+  },
+
+  async loginWithGoogle({ email, googleSub, idToken }) {
+    const normalizedEmail = normalizeEmail(email)
+    if (!normalizedEmail) {
+      throw apiError('EMAIL_NOT_FOUND')
+    }
     try {
-      const { data } = await apiClient.get(CHECK_EMAIL_PATH, { params: { email: normalized } })
-      return Boolean(data?.exists)
-    } catch {
-      return false
+      const { data } = await apiClient.post('/api/v1/authentication/sign-in-google', {
+        email: normalizedEmail,
+        googleSub: String(googleSub ?? '').trim(),
+        idToken: String(idToken ?? ''),
+        provider: 'google',
+      })
+      return parseAuthResponse(data)
+    } catch (error) {
+      if (
+        error?.code === 'EMAIL_NOT_FOUND' ||
+        error?.code === 'INVALID_PASSWORD' ||
+        error?.code === 'RESIDENT_ONLY' ||
+        error?.code === 'RESIDENT_GOOGLE_REQUIRED' ||
+        error?.code === 'RESIDENT_USE_GOOGLE'
+      ) {
+        throw apiError(error.code, error.payload?.message)
+      }
+      throw error
     }
   },
 
   async login({ email, password }) {
-    try {
-      const { data } = await apiClient.post(SIGN_IN_PATH, {
-        email: normalizeEmail(email),
-        password: String(password ?? ''),
-      })
-      return parseAuthResponse(data)
-    } catch (error) {
-      if (error?.code === 'EMAIL_NOT_FOUND' || error?.code === 'INVALID_PASSWORD') {
-        throw apiError(error.code, error.payload?.message)
-      }
-      throw error
-    }
+    return loginAdminWithFirebase({ email, password })
   },
 
   async registerAdmin(payload) {
-    const normalizedEmail = normalizeEmail(payload.email)
+    const { user, token } = await registerAdminWithFirebase(payload)
+    await seedAdminDefaults(user.id, token)
     try {
-      const { data } = await apiClient.post(REGISTER_ADMIN_PATH, {
-        name: String(payload.name ?? '').trim(),
-        email: normalizedEmail,
-        password: String(payload.password ?? ''),
-        dni: String(payload.dni ?? '').trim(),
-        address: String(payload.address ?? '').trim(),
-        company: String(payload.company ?? '').trim(),
-        ruc: String(payload.ruc ?? '').trim(),
+      await apiClient.post('/users', {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        dni: user.dni,
+        address: user.address,
+        company: user.company,
+        ruc: user.ruc,
+        role: 'admin',
       })
-      const { user, token } = parseAuthResponse(data)
-      await seedAdminDefaults(user.id, token)
-      return { user, token }
-    } catch (error) {
-      if (error?.code === 'EMAIL_ALREADY_EXISTS') {
-        throw apiError(error.code, error.payload?.message)
-      }
-      throw error
+    } catch {
+      // mock/API user row is optional once Firebase Auth owns the account
     }
+    return { user, token }
   },
 
   /**
@@ -119,6 +136,8 @@ export const authApi = {
    */
   async getProfileById(userId) {
     if (!userId) return null
+    const fromFirebase = await getFirebaseAdminProfile(userId)
+    if (fromFirebase) return fromFirebase
     try {
       const { data } = await apiClient.get(`/users/${encodeURIComponent(userId)}`)
       if (!data || typeof data !== 'object') return null

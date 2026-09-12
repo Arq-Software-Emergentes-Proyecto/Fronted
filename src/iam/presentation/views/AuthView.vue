@@ -8,6 +8,7 @@ import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import { authApi } from '@/iam/infrastructure/authApi.js'
 import { residentsApi } from '@/residents/infrastructure/residentsApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
+import { signInWithGoogle } from '@/iam/infrastructure/googleIdentity.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -24,24 +25,62 @@ function navigateAfterAuth(fallback) {
 }
 
 const isRegister = computed(() => route.name === AppRouteNames.REGISTER)
+const isResidentLogin = computed(() => route.name === AppRouteNames.RESIDENT_LOGIN)
+const isAdminLogin = computed(
+  () => route.name === AppRouteNames.LOGIN && route.query.invite !== '1',
+)
+const authTab = computed(() => {
+  if (isRegister.value) return 'register'
+  if (isResidentLogin.value) return 'resident'
+  return 'login'
+})
 
 const isResidentInvite = computed(
   () => route.name === AppRouteNames.LOGIN && route.query.invite === '1',
 )
 const inviteCode = computed(() => String(route.query.code ?? ''))
 
-const inviteStep = ref('welcome') // 'welcome' | 'credentials'
+const inviteStep = ref('welcome') // 'welcome' | 'google'
 const inviteResident = ref(null)
 const inviteFetchError = ref('')
 const inviteLoading = ref(false)
-const residentEmail = ref('')
-const residentPassword = ref('')
 const residentError = ref('')
 const residentLoading = ref(false)
 
 const inviteName = computed(() => inviteResident.value?.name ?? '')
 const inviteFloor = computed(() => inviteResident.value?.floor ?? '')
 const inviteCodeDisplay = computed(() => inviteResident.value?.code ?? inviteCode.value)
+
+function applyResidentSession(user, token) {
+  setResidentSession(
+    {
+      id: user.id,
+      name: user.name,
+      floor: user.floor,
+      code: user.code,
+      email: user.email,
+      ownerAdminId: user.ownerAdminId ?? null,
+    },
+    token,
+  )
+  return navigateAfterAuth({ name: AppRouteNames.APP_RESIDENT_DASHBOARD })
+}
+
+function googleAuthMessage(error) {
+  if (error?.code === 'GOOGLE_NOT_CONFIGURED') return t('auth.inviteGoogleNotConfigured')
+  if (error?.code === 'GOOGLE_CANCELLED') return t('auth.inviteGoogleCancelled')
+  if (error?.code === 'GOOGLE_SCRIPT' || error?.code === 'GOOGLE_UNAVAILABLE') {
+    return t('auth.inviteGoogleError')
+  }
+  if (error?.code === 'NETWORK_ERROR' || error?.code === 'TIMEOUT') return t('auth.apiUnavailable')
+  if (error?.code === 'EMAIL_ALREADY_EXISTS') return t('auth.emailAlreadyExists')
+  if (error?.code === 'RESIDENT_NOT_FOUND') return t('auth.inviteNotFound')
+  if (error?.code === 'EMAIL_NOT_FOUND') return t('auth.residentGoogleNotFound')
+  if (error?.code === 'RESIDENT_ONLY') return t('auth.residentGoogleAdminBlocked')
+  if (error?.code === 'RESIDENT_GOOGLE_REQUIRED') return t('auth.residentGoogleRequired')
+  if (error?.code === 'RESIDENT_USE_GOOGLE') return t('auth.residentUseGoogle')
+  return t('auth.inviteGoogleError')
+}
 
 watchEffect(async () => {
   if (!isResidentInvite.value || !inviteCode.value) {
@@ -67,60 +106,26 @@ watchEffect(async () => {
 })
 
 function onResidentInviteAccept() {
-  inviteStep.value = 'credentials'
+  inviteStep.value = 'google'
   residentError.value = ''
 }
 
-async function onResidentCredentialsSubmit() {
+async function onResidentGoogleSignUp() {
   if (residentLoading.value) return
   residentError.value = ''
-
-  const email = residentEmail.value.trim()
-  const password = residentPassword.value.trim()
-
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    residentError.value = t('auth.emailInvalid')
-    return
-  }
-
-  if (password.length < 4) {
-    residentError.value = t('auth.passwordInvalid')
-    return
-  }
-
   residentLoading.value = true
   try {
-    const { user, token } = await residentsApi.setCredentials({
+    const googleProfile = await signInWithGoogle()
+    const { user, token } = await residentsApi.completeInviteWithGoogle({
       code: inviteCode.value,
-      email,
-      password,
+      email: googleProfile.email,
+      name: googleProfile.name,
+      googleSub: googleProfile.googleSub,
+      idToken: googleProfile.idToken,
     })
-    setResidentSession(
-      {
-        id: user.id,
-        name: user.name,
-        floor: user.floor,
-        code: user.code,
-        email: user.email,
-        ownerAdminId: user.ownerAdminId ?? null,
-      },
-      token,
-    )
-    navigateAfterAuth({ name: AppRouteNames.APP_RESIDENT_DASHBOARD })
+    await applyResidentSession(user, token)
   } catch (error) {
-    if (error?.code === 'NETWORK_ERROR' || error?.code === 'TIMEOUT') {
-      residentError.value = t('auth.apiUnavailable')
-      return
-    }
-    if (error?.code === 'EMAIL_ALREADY_EXISTS') {
-      residentError.value = t('auth.emailAlreadyExists')
-      return
-    }
-    if (error?.code === 'RESIDENT_NOT_FOUND') {
-      residentError.value = t('auth.inviteNotFound')
-      return
-    }
-    residentError.value = t('auth.genericError')
+    residentError.value = googleAuthMessage(error)
   } finally {
     residentLoading.value = false
   }
@@ -149,7 +154,6 @@ async function onLoginContinue() {
     loginEmailError.value = t('auth.emailInvalid')
     return
   }
-  loginStep.value = 2
   loginLoading.value = true
   try {
     const exists = await authApi.isEmailRegistered(raw)
@@ -159,7 +163,34 @@ async function onLoginContinue() {
     }
     loginStep.value = 2
   } catch (e) {
-    loginEmailError.value = e?.message || t('auth.genericError')
+    if (e?.code === 'RESIDENT_USE_GOOGLE') {
+      loginEmailError.value = t('auth.residentUseGoogle')
+      return
+    }
+    loginStep.value = 2
+  } finally {
+    loginLoading.value = false
+  }
+}
+
+async function onLoginWithGoogle() {
+  if (loginLoading.value) return
+  loginLoading.value = true
+  loginEmailError.value = ''
+  try {
+    const googleProfile = await signInWithGoogle()
+    const { user, token } = await authApi.loginWithGoogle({
+      email: googleProfile.email,
+      googleSub: googleProfile.googleSub,
+      idToken: googleProfile.idToken,
+    })
+    if (user.role !== 'resident') {
+      loginEmailError.value = t('auth.residentGoogleAdminBlocked')
+      return
+    }
+    await applyResidentSession(user, token)
+  } catch (error) {
+    loginEmailError.value = googleAuthMessage(error)
   } finally {
     loginLoading.value = false
   }
@@ -188,24 +219,18 @@ async function onLoginSubmit() {
     })
 
     if (user.role === 'resident') {
-      setResidentSession(
-        {
-          id: user.id,
-          name: user.name,
-          floor: user.floor,
-          code: user.code,
-          email: user.email,
-          ownerAdminId: user.ownerAdminId ?? null,
-        },
-        token,
-      )
-      navigateAfterAuth({ name: AppRouteNames.APP_RESIDENT_DASHBOARD })
+      loginEmailError.value = t('auth.residentUseGoogle')
+      return
     } else {
       setAdminSession(
         {
           id: user.id,
           name: user.name,
           email: user.email,
+          dni: user.dni,
+          address: user.address,
+          company: user.company,
+          ruc: user.ruc,
         },
         token,
       )
@@ -218,6 +243,10 @@ async function onLoginSubmit() {
     }
     if (error?.code === 'INVALID_PASSWORD') {
       loginEmailError.value = t('auth.passwordInvalid')
+      return
+    }
+    if (error?.code === 'RESIDENT_USE_GOOGLE') {
+      loginEmailError.value = t('auth.residentUseGoogle')
       return
     }
     if (error?.code === 'EMAIL_NOT_FOUND') {
@@ -237,6 +266,10 @@ async function onRegisterSubmit() {
   registerLoading.value = true
   registerError.value = ''
   try {
+    if (String(regPassword.value).length < 6) {
+      registerError.value = t('auth.passwordTooShort')
+      return
+    }
     const { user, token } = await authApi.registerAdmin({
       name: regName.value,
       email: regEmail.value,
@@ -251,14 +284,13 @@ async function onRegisterSubmit() {
         id: user.id,
         name: user.name,
         email: user.email,
+        dni: user.dni,
+        address: user.address,
+        company: user.company,
+        ruc: user.ruc,
       },
       token,
     )
-    setAdminSession({
-      id: user.id,
-      name: user.name,
-      email: user.email,
-    }, token)
     navigateAfterAuth({ name: AppRouteNames.APP_DASHBOARD })
   } catch (error) {
     if (error?.code === 'EMAIL_ALREADY_EXISTS') {
@@ -275,10 +307,15 @@ async function onRegisterSubmit() {
   }
 }
 
+watch(inviteCode, () => {
+  inviteStep.value = 'welcome'
+  residentError.value = ''
+})
+
 watch(
   () => route.name,
   (name) => {
-    if (name === AppRouteNames.LOGIN) {
+    if (name === AppRouteNames.LOGIN || name === AppRouteNames.RESIDENT_LOGIN) {
       loginStep.value = 1
       loginPassword.value = ''
       loginEmailError.value = ''
@@ -354,49 +391,28 @@ watch(loginEmail, () => {
               decoding="async"
             />
           </div>
-          <h1 class="auth-title auth-title--center">{{ t('auth.inviteCredentialsTitle') }}</h1>
-          <p class="auth-subtitle">{{ t('auth.inviteCredentialsSubtitle') }}</p>
+          <h1 class="auth-title auth-title--center">{{ t('auth.inviteGoogleTitle') }}</h1>
+          <p class="auth-subtitle">{{ t('auth.inviteGoogleSubtitle') }}</p>
 
-          <form
-            class="auth-form auth-form--narrow"
-            :aria-label="t('auth.inviteCredentialsAria')"
-            @submit.prevent="onResidentCredentialsSubmit"
-          >
-            <div class="auth-field">
-              <input
-                v-model="residentEmail"
-                class="auth-input"
-                type="email"
-                name="email"
-                autocomplete="email"
-                required
-                :aria-label="t('auth.emailPlaceholder')"
-                :placeholder="t('auth.emailPlaceholder')"
-              />
-            </div>
-            <div class="auth-field">
-              <input
-                v-model="residentPassword"
-                class="auth-input"
-                type="password"
-                name="password"
-                autocomplete="new-password"
-                required
-                :aria-label="t('auth.passwordPlaceholder')"
-                :placeholder="t('auth.passwordPlaceholder')"
-              />
-            </div>
+          <div class="auth-form auth-form--narrow" :aria-label="t('auth.inviteGoogleAria')">
             <p v-if="residentError" class="auth-error" role="alert">{{ residentError }}</p>
-            <Button
-              type="submit"
-              class="auth-submit"
-              rounded
-              :label="t('auth.inviteCredentialsSubmit')"
-              :loading="residentLoading"
+            <button
+              type="button"
+              class="auth-google"
               :disabled="residentLoading"
-              severity="info"
-            />
-          </form>
+              @click="onResidentGoogleSignUp"
+            >
+              <span class="auth-google__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18">
+                  <path fill="#4285F4" d="M23.49 12.27c0-.82-.07-1.64-.23-2.43H12v4.6h6.46a5.52 5.52 0 0 1-2.4 3.62v3h3.88c2.27-2.09 3.55-5.17 3.55-8.79Z" />
+                  <path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.95-2.94l-3.88-3c-1.08.72-2.47 1.14-4.07 1.14-3.13 0-5.78-2.11-6.73-4.96H1.27v3.09A12 12 0 0 0 12 24Z" />
+                  <path fill="#FBBC05" d="M5.27 14.24A7.2 7.2 0 0 1 4.89 12c0-.78.14-1.53.38-2.24V6.67H1.27A12 12 0 0 0 0 12c0 1.94.46 3.78 1.27 5.33l4-3.09Z" />
+                  <path fill="#EA4335" d="M12 4.75c1.76 0 3.34.6 4.59 1.79l3.44-3.44C17.95 1.14 15.23 0 12 0 7.31 0 3.23 2.69 1.27 6.67l4 3.09C6.22 6.86 8.87 4.75 12 4.75Z" />
+                </svg>
+              </span>
+              <span>{{ residentLoading ? t('auth.inviteGoogleLoading') : t('auth.inviteGoogleButton') }}</span>
+            </button>
+          </div>
         </div>
       </div>
       <div v-else class="auth-shell">
@@ -404,14 +420,17 @@ watch(loginEmail, () => {
           <div class="auth-tabs__track">
             <span
               class="auth-tabs__pill"
-              :class="{ 'auth-tabs__pill--register': isRegister }"
+              :class="{
+                'auth-tabs__pill--register': authTab === 'register',
+                'auth-tabs__pill--resident': authTab === 'resident',
+              }"
               aria-hidden="true"
             />
             <RouterLink
               class="auth-tab"
               role="tab"
-              :class="{ 'auth-tab--active': !isRegister }"
-              :aria-selected="!isRegister"
+              :class="{ 'auth-tab--active': authTab === 'login' }"
+              :aria-selected="authTab === 'login'"
               :to="{ name: AppRouteNames.LOGIN }"
             >
               {{ t('auth.loginTab') }}
@@ -419,16 +438,25 @@ watch(loginEmail, () => {
             <RouterLink
               class="auth-tab"
               role="tab"
-              :class="{ 'auth-tab--active': isRegister }"
-              :aria-selected="isRegister"
+              :class="{ 'auth-tab--active': authTab === 'register' }"
+              :aria-selected="authTab === 'register'"
               :to="{ name: AppRouteNames.REGISTER }"
             >
               {{ t('auth.registerTab') }}
             </RouterLink>
+            <RouterLink
+              class="auth-tab"
+              role="tab"
+              :class="{ 'auth-tab--active': authTab === 'resident' }"
+              :aria-selected="authTab === 'resident'"
+              :to="{ name: AppRouteNames.RESIDENT_LOGIN }"
+            >
+              {{ t('auth.residentLoginTab') }}
+            </RouterLink>
           </div>
         </nav>
 
-        <div v-if="!isRegister" class="auth-card auth-card--centered">
+        <div v-if="isAdminLogin" class="auth-card auth-card--centered">
           <div class="auth-brand">
             <img
               src="/logo-buildingfex.png"
@@ -440,7 +468,7 @@ watch(loginEmail, () => {
             />
           </div>
           <h1 class="auth-title auth-title--center">{{ t('auth.loginTitle') }}</h1>
-          <p class="auth-subtitle">{{ t('auth.loginSubtitle') }}</p>
+          <p class="auth-subtitle">{{ t('auth.loginFirebaseHint') }}</p>
 
           <form class="auth-form auth-form--narrow" :aria-label="t('auth.ariaLogin')" @submit.prevent="handleLoginSubmit">
             <div class="auth-field">
@@ -482,6 +510,40 @@ watch(loginEmail, () => {
           </form>
         </div>
 
+        <div v-else-if="isResidentLogin" class="auth-card auth-card--centered">
+          <div class="auth-brand">
+            <img
+              src="/logo-buildingfex.png"
+              :alt="t('brand')"
+              class="auth-logo"
+              width="200"
+              height="48"
+              decoding="async"
+            />
+          </div>
+          <h1 class="auth-title auth-title--center">{{ t('auth.residentLoginTitle') }}</h1>
+          <p class="auth-subtitle">{{ t('auth.residentLoginSubtitle') }}</p>
+          <div class="auth-form auth-form--narrow" :aria-label="t('auth.residentLoginAria')">
+            <p v-if="loginEmailError" class="auth-error" role="alert">{{ loginEmailError }}</p>
+            <button
+              type="button"
+              class="auth-google"
+              :disabled="loginLoading"
+              @click="onLoginWithGoogle"
+            >
+              <span class="auth-google__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18">
+                  <path fill="#4285F4" d="M23.49 12.27c0-.82-.07-1.64-.23-2.43H12v4.6h6.46a5.52 5.52 0 0 1-2.4 3.62v3h3.88c2.27-2.09 3.55-5.17 3.55-8.79Z" />
+                  <path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.95-2.94l-3.88-3c-1.08.72-2.47 1.14-4.07 1.14-3.13 0-5.78-2.11-6.73-4.96H1.27v3.09A12 12 0 0 0 12 24Z" />
+                  <path fill="#FBBC05" d="M5.27 14.24A7.2 7.2 0 0 1 4.89 12c0-.78.14-1.53.38-2.24V6.67H1.27A12 12 0 0 0 0 12c0 1.94.46 3.78 1.27 5.33l4-3.09Z" />
+                  <path fill="#EA4335" d="M12 4.75c1.76 0 3.34.6 4.59 1.79l3.44-3.44C17.95 1.14 15.23 0 12 0 7.31 0 3.23 2.69 1.27 6.67l4 3.09C6.22 6.86 8.87 4.75 12 4.75Z" />
+                </svg>
+              </span>
+              <span>{{ loginLoading ? t('auth.inviteGoogleLoading') : t('auth.inviteGoogleButton') }}</span>
+            </button>
+          </div>
+        </div>
+
         <div v-else class="auth-card auth-card--centered">
           <div class="auth-brand">
             <img
@@ -494,7 +556,7 @@ watch(loginEmail, () => {
             />
           </div>
           <h1 class="auth-title auth-title--center">{{ t('auth.registerTitle') }}</h1>
-          <p class="auth-subtitle">{{ t('auth.registerSubtitle') }}</p>
+          <p class="auth-subtitle">{{ t('auth.registerFirebaseHint') }}</p>
 
           <form class="auth-form auth-form--narrow" :aria-label="t('auth.ariaRegister')" @submit.prevent="onRegisterSubmit">
             <div class="auth-field">
@@ -626,7 +688,7 @@ watch(loginEmail, () => {
 
 .auth-shell {
   width: 100%;
-  max-width: 420px;
+  max-width: 460px;
 }
 
 .auth-tabs {
@@ -640,7 +702,7 @@ watch(loginEmail, () => {
 
   position: relative;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: var(--tab-gap);
   padding: var(--tab-p);
   border-radius: 999px;
@@ -653,7 +715,7 @@ watch(loginEmail, () => {
   bottom: var(--tab-p);
   left: var(--tab-p);
   z-index: 0;
-  width: calc((100% - 2 * var(--tab-p) - var(--tab-gap)) / 2);
+  width: calc((100% - 2 * var(--tab-p) - 2 * var(--tab-gap)) / 3);
   border-radius: 999px;
   background: #ffffff;
   box-shadow: 0 1px 5px rgba(0, 0, 0, 0.07);
@@ -666,13 +728,17 @@ watch(loginEmail, () => {
   transform: translateX(calc(100% + var(--tab-gap)));
 }
 
+.auth-tabs__pill--resident {
+  transform: translateX(calc(200% + 2 * var(--tab-gap)));
+}
+
 .auth-tab {
   position: relative;
   z-index: 1;
   margin: 0;
   text-align: center;
-  padding: 0.33rem 0.65rem;
-  font-size: 0.8125rem;
+  padding: 0.33rem 0.4rem;
+  font-size: 0.75rem;
   line-height: 1.25;
   font-weight: 500;
   letter-spacing: -0.02em;
@@ -746,6 +812,15 @@ watch(loginEmail, () => {
   line-height: 1.45;
   letter-spacing: -0.015em;
   color: #6e6e73;
+  text-align: center;
+}
+
+.auth-preview-hint {
+  margin: -1rem 0 1.25rem;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+  color: #0071e3;
   text-align: center;
 }
 
@@ -829,6 +904,48 @@ watch(loginEmail, () => {
   font-weight: 600 !important;
   padding-top: 0.7rem !important;
   padding-bottom: 0.7rem !important;
+}
+
+.auth-divider {
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #86868b;
+  text-align: center;
+}
+
+.auth-google {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.55rem 1rem;
+  border: 1px solid #dadce0;
+  border-radius: 999px;
+  background: #fff;
+  color: #1d1d1f;
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  cursor: pointer;
+}
+
+.auth-google:hover:not(:disabled) {
+  background: #f8f9fa;
+  border-color: #c6c6c6;
+}
+
+.auth-google:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.auth-google__icon {
+  display: inline-flex;
 }
 
 .auth-invite-list {

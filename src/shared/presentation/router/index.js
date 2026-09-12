@@ -43,6 +43,7 @@ const RESIDENT_APP_ROUTE_NAMES = new Set([
 const PUBLIC_ROUTE_NAMES = new Set([
   AppRouteNames.LOGIN,
   AppRouteNames.REGISTER,
+  AppRouteNames.RESIDENT_LOGIN,
   AppRouteNames.GUEST_INVITE,
 ])
 
@@ -52,6 +53,7 @@ const router = createRouter({
     { path: '/', redirect: { name: AppRouteNames.LOGIN } },
     { path: AppPaths.LOGIN, name: AppRouteNames.LOGIN, component: AuthView },
     { path: AppPaths.REGISTER, name: AppRouteNames.REGISTER, component: AuthView },
+    { path: AppPaths.RESIDENT_LOGIN, name: AppRouteNames.RESIDENT_LOGIN, component: AuthView },
     {
       path: AppPaths.GUEST_INVITE,
       name: AppRouteNames.GUEST_INVITE,

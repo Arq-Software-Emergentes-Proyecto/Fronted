@@ -5,6 +5,7 @@
 export const AppRouteNames = /** @type {const} */ ({
   LOGIN: 'login',
   REGISTER: 'register',
+  RESIDENT_LOGIN: 'resident-login',
   GUEST_INVITE: 'guest-invite',
   APP_DASHBOARD: 'app-dashboard',
   APP_ADVANCED_MANAGEMENT: 'app-advanced-management',
@@ -31,6 +32,7 @@ export const AppRouteNames = /** @type {const} */ ({
 export const AppPaths = /** @type {const} */ ({
   LOGIN: '/login',
   REGISTER: '/register',
+  RESIDENT_LOGIN: '/login/residente',
   GUEST_INVITE: '/invite/:token',
   APP: '/app',
   APP_ADVANCED_MANAGEMENT: '/app/advanced-management',

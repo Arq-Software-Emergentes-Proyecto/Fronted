@@ -12,6 +12,7 @@ import {
 } from '@/shared/infrastructure/api/utils.js'
 import { getResidentLimitForActiveOwner, refreshSubscriptionFromApi } from '@/shared/infrastructure/subscriptionPlanStorage.js'
 import { parseDepartmentNumber } from '@/shared/domain/departmentNumber.js'
+import { todayYmd } from '@/finances/domain/billingCycle.js'
 
 /**
  * Residents bounded-context API.
@@ -29,7 +30,7 @@ export const residentsApi = {
     return Array.isArray(data) ? data.map(publicResident) : []
   },
 
-  async add({ name, floor, code, department }) {
+  async add({ name, floor, code, department, billFromNextMonth = false }) {
     const cleanName = String(name ?? '').trim()
 
     let cleanFloor
@@ -67,7 +68,6 @@ export const residentsApi = {
       throw apiError('RESIDENT_PLAN_LIMIT_REACHED')
     }
 
-    const todayStr = new Date().toLocaleDateString('en-CA'); // Gets YYYY-MM-DD local format
     const newResident = {
       id: `resident-${Date.now()}`,
       name: cleanName,
@@ -76,13 +76,23 @@ export const residentsApi = {
       email: '',
       password: '',
       role: 'resident',
-      admissionDate: todayStr,
+      admissionDate: todayYmd(),
+      billFromNextMonth: Boolean(billFromNextMonth),
       ownerAdminId,
     }
 
     const { data: created } = await apiClient.post('/users', newResident)
     await refreshSubscriptionFromApi().catch(() => {})
     return publicResident(created)
+  },
+
+  async setBillFromNextMonth(id, billFromNextMonth) {
+    const cleanId = String(id ?? '').trim()
+    if (!cleanId) throw apiError('RESIDENT_NOT_FOUND')
+    const { data } = await apiClient.patch(`/users/${encodeURIComponent(cleanId)}`, {
+      billFromNextMonth: Boolean(billFromNextMonth),
+    })
+    return publicResident(data)
   },
 
   async findByCode(code) {
@@ -193,6 +203,49 @@ export const residentsApi = {
       }
       if (error?.code === 'INVALID_PASSWORD' || error?.code === 'EMAIL_NOT_FOUND') {
         throw apiError(error.code, error.payload?.message)
+      }
+      throw error
+    }
+  },
+
+  async completeInviteWithGoogle({ code, email, name, googleSub, idToken }) {
+    const cleanCode = normalizeCode(code)
+    const cleanEmail = normalizeEmail(email)
+    const cleanName = String(name ?? '').trim()
+    const cleanSub = String(googleSub ?? '').trim()
+
+    if (!cleanCode || !cleanEmail) {
+      throw apiError('RESIDENT_FIELDS_REQUIRED')
+    }
+
+    const payload = {
+      code: cleanCode,
+      email: cleanEmail,
+      name: cleanName,
+      googleSub: cleanSub,
+      idToken: String(idToken ?? ''),
+      provider: 'google',
+    }
+
+    try {
+      const { data } = await apiClient.post(
+        '/api/v1/authentication/residents/complete-google',
+        payload,
+      )
+      return parseAuthResponse(data)
+    } catch (error) {
+      if (error?.status === 404 || error?.code === 'HTTP_404') {
+        return residentsApi.setCredentials({
+          code: cleanCode,
+          email: cleanEmail,
+          password: cleanSub ? `google:${cleanSub}` : `google:${Date.now()}`,
+        })
+      }
+      if (error?.code === 'RESIDENT_NOT_FOUND') {
+        throw apiError('RESIDENT_NOT_FOUND')
+      }
+      if (error?.code === 'EMAIL_ALREADY_EXISTS') {
+        throw apiError('EMAIL_ALREADY_EXISTS')
       }
       throw error
     }

@@ -11,6 +11,9 @@ import {
   maxResidentsForSubscriptionPlan,
 } from '@/shared/domain/subscriptionPlans.js'
 import { subscriptionApi } from '@/shared/infrastructure/subscriptionApi.js'
+import { residentsApi } from '@/residents/infrastructure/residentsApi.js'
+import { useFinancesStore } from '@/finances/application/financesStore.js'
+import { formatDayMonth, normalizeAdmissionPayRange, normalizeSettings } from '@/finances/domain/billingCycle.js'
 import {
   applySubscriptionSnapshot,
   refreshSubscriptionFromApi,
@@ -19,8 +22,9 @@ import {
 const route = useRoute()
 const router = useRouter()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const { state, isAdmin, isResident } = useSession()
+const financesStore = useFinancesStore()
 
 const sessionProfile = computed(() => state.profile ?? {})
 const serverProfile = ref(null)
@@ -59,6 +63,42 @@ const planSaveNotice = ref('')
 const planError = ref('')
 const planLoading = ref(false)
 const planCheckoutPlanId = ref(null)
+
+const lateFeePerDay = ref(0)
+const lateFeeError = ref('')
+const lateFeeNotice = ref('')
+const isSavingLateFee = ref(false)
+const lateFeeLoading = ref(false)
+const admissionPayFromDay = ref(1)
+const admissionPayToDay = ref(7)
+const admissionRangePreview = computed(() =>
+  normalizeAdmissionPayRange({
+    admissionPayFromDay: admissionPayFromDay.value,
+    admissionPayToDay: admissionPayToDay.value,
+  }),
+)
+const admissionRuleError = ref('')
+const admissionRuleNotice = ref('')
+const isSavingAdmissionRules = ref(false)
+const admissionResidentSearch = ref('')
+const billingResidentId = ref('')
+const billingResidentError = ref('')
+
+function residentSearchText(resident) {
+  const name = String(resident?.name ?? '')
+  const floor = String(resident?.floor ?? '')
+  const code = String(resident?.code ?? '')
+  return [name, floor, code, `piso ${floor}`, `depto ${code}`, `dept ${code}`, `${floor}-${code}`]
+    .join(' ')
+    .toLowerCase()
+}
+
+const admissionResidents = computed(() => {
+  const query = admissionResidentSearch.value.trim().toLowerCase()
+  const residents = financesStore.state.residents || []
+  if (!query) return residents
+  return residents.filter((resident) => residentSearchText(resident).includes(query))
+})
 
 const activeResidentLimit = computed(() => residentLimit.value)
 
@@ -121,9 +161,104 @@ async function handleSubscriptionReturnFromRoute() {
   }
 }
 
+async function loadLateFee() {
+  if (!isAdmin.value) return
+  lateFeeLoading.value = true
+  lateFeeError.value = ''
+  try {
+    await financesStore.loadData()
+    const settings = normalizeSettings(financesStore.state.settings)
+    lateFeePerDay.value = Number(settings.lateFeePerDay) || 0
+    const range = normalizeAdmissionPayRange(settings)
+    admissionPayFromDay.value = range.admissionPayFromDay
+    admissionPayToDay.value = range.admissionPayToDay
+  } catch {
+    lateFeeError.value = t('app.settingsLateFeeLoadError')
+    admissionRuleError.value = t('app.settingsAdmissionLoadError')
+  } finally {
+    lateFeeLoading.value = false
+  }
+}
+
+async function onSaveLateFee() {
+  const amount = Number(lateFeePerDay.value)
+  if (!Number.isFinite(amount) || amount < 0) {
+    lateFeeError.value = t('financeAdmin.lateFeeRequired')
+    lateFeeNotice.value = ''
+    return
+  }
+
+  isSavingLateFee.value = true
+  lateFeeError.value = ''
+  lateFeeNotice.value = ''
+  try {
+    const current = normalizeSettings(financesStore.state.settings || {})
+    await financesStore.updateSettings({
+      ...current,
+      lateFeePerDay: amount,
+    })
+    lateFeeNotice.value = t('financeAdmin.lateFeeSaved')
+  } catch (error) {
+    lateFeeError.value = error?.message || t('app.settingsLateFeeSaveError')
+  } finally {
+    isSavingLateFee.value = false
+  }
+}
+
+async function onSaveAdmissionRules() {
+  const range = normalizeAdmissionPayRange({
+    admissionPayFromDay: admissionPayFromDay.value,
+    admissionPayToDay: admissionPayToDay.value,
+  })
+  if (
+    !Number.isFinite(Number(admissionPayFromDay.value)) ||
+    !Number.isFinite(Number(admissionPayToDay.value))
+  ) {
+    admissionRuleError.value = t('financeAdmin.admissionRangeInvalid')
+    admissionRuleNotice.value = ''
+    return
+  }
+
+  isSavingAdmissionRules.value = true
+  admissionRuleError.value = ''
+  admissionRuleNotice.value = ''
+  try {
+    const current = normalizeSettings(financesStore.state.settings || {})
+    await financesStore.updateSettings({
+      ...current,
+      admissionPayFromDay: range.admissionPayFromDay,
+      admissionPayToDay: range.admissionPayToDay,
+    })
+    admissionPayFromDay.value = range.admissionPayFromDay
+    admissionPayToDay.value = range.admissionPayToDay
+    admissionRuleNotice.value = t('financeAdmin.admissionRulesSaved')
+  } catch (error) {
+    admissionRuleError.value = error?.message || t('app.settingsAdmissionSaveError')
+  } finally {
+    isSavingAdmissionRules.value = false
+  }
+}
+
+async function onToggleBillFromNextMonth(resident) {
+  if (billingResidentId.value) return
+  billingResidentId.value = resident.id
+  billingResidentError.value = ''
+  const nextValue = !resident.billFromNextMonth
+  try {
+    const updated = await residentsApi.setBillFromNextMonth(resident.id, nextValue)
+    await financesStore.setResidentBillFromNextMonth(updated, nextValue)
+  } catch (error) {
+    console.error('Could not update billFromNextMonth:', error)
+    billingResidentError.value = t('app.billFromNextMonthError')
+  } finally {
+    billingResidentId.value = ''
+  }
+}
+
 async function initSettings() {
   await loadServerProfile()
   await loadSubscription()
+  await loadLateFee()
   await handleSubscriptionReturnFromRoute()
 }
 
@@ -183,6 +318,7 @@ watch(
   async () => {
     await loadServerProfile()
     await loadSubscription()
+    await loadLateFee()
   },
 )
 
@@ -190,6 +326,20 @@ watch(planSaveNotice, (msg) => {
   if (!msg) return
   window.setTimeout(() => {
     planSaveNotice.value = ''
+  }, 4000)
+})
+
+watch(lateFeeNotice, (msg) => {
+  if (!msg) return
+  window.setTimeout(() => {
+    lateFeeNotice.value = ''
+  }, 4000)
+})
+
+watch(admissionRuleNotice, (msg) => {
+  if (!msg) return
+  window.setTimeout(() => {
+    admissionRuleNotice.value = ''
   }, 4000)
 })
 </script>
@@ -228,6 +378,146 @@ watch(planSaveNotice, (msg) => {
           <strong>{{ t('app.settingsAdminRucLabel') }}:</strong> {{ display.ruc }}
         </li>
       </ul>
+    </section>
+
+    <section v-if="isAdmin" class="settings-card" aria-labelledby="settings-late-fee-heading">
+      <h2 id="settings-late-fee-heading" class="settings-card__title">
+        {{ t('financeAdmin.lateFeePerDay') }}
+      </h2>
+      <p class="settings-card__hint">{{ t('financeAdmin.lateFeeHint') }}</p>
+      <p v-if="lateFeeLoading" class="settings-card__status">{{ t('financeAdmin.loading') }}</p>
+      <label class="settings-card__field" for="settingsLateFeePerDay">
+        <span>{{ t('financeAdmin.lateFeePerDay') }}</span>
+        <input
+          id="settingsLateFeePerDay"
+          v-model.number="lateFeePerDay"
+          type="number"
+          min="0"
+          step="0.01"
+          class="settings-card__input"
+        />
+      </label>
+      <p v-if="lateFeeNotice" class="settings-card__notice" role="status">{{ lateFeeNotice }}</p>
+      <p v-if="lateFeeError" class="settings-card__error" role="alert">{{ lateFeeError }}</p>
+      <button
+        type="button"
+        class="settings-card__save"
+        :disabled="isSavingLateFee || lateFeeLoading"
+        @click="onSaveLateFee"
+      >
+        {{ t('financeAdmin.saveLateFee') }}
+      </button>
+    </section>
+
+    <section v-if="isAdmin" class="settings-card settings-card--admission" aria-labelledby="settings-admission-rules-heading">
+      <h2 id="settings-admission-rules-heading" class="settings-card__title">
+        {{ t('financeAdmin.admissionRulesTitle') }}
+      </h2>
+      <p class="settings-card__hint">{{ t('financeAdmin.admissionRulesHint') }}</p>
+      <p v-if="lateFeeLoading" class="settings-card__status">{{ t('financeAdmin.loading') }}</p>
+      <div class="admission-range">
+        <label class="settings-card__field" for="settingsAdmissionPayFromDay">
+          <span>{{ t('financeAdmin.admissionRangeFrom') }}</span>
+          <input
+            id="settingsAdmissionPayFromDay"
+            v-model.number="admissionPayFromDay"
+            type="number"
+            min="1"
+            max="31"
+            step="1"
+            class="settings-card__input"
+          />
+        </label>
+        <label class="settings-card__field" for="settingsAdmissionPayToDay">
+          <span>{{ t('financeAdmin.admissionRangeTo') }}</span>
+          <input
+            id="settingsAdmissionPayToDay"
+            v-model.number="admissionPayToDay"
+            type="number"
+            min="1"
+            max="31"
+            step="1"
+            class="settings-card__input"
+          />
+        </label>
+      </div>
+      <p class="settings-card__hint">
+        {{
+          admissionRangePreview.admissionPayToDay >= 31
+            ? t('financeAdmin.admissionRangePreviewAll', {
+                from: admissionRangePreview.admissionPayFromDay,
+                to: admissionRangePreview.admissionPayToDay,
+              })
+            : t('financeAdmin.admissionRangePreview', {
+                from: admissionRangePreview.admissionPayFromDay,
+                to: admissionRangePreview.admissionPayToDay,
+                after: admissionRangePreview.admissionPayToDay + 1,
+              })
+        }}
+      </p>
+      <p v-if="admissionRuleNotice" class="settings-card__notice" role="status">
+        {{ admissionRuleNotice }}
+      </p>
+      <p v-if="admissionRuleError" class="settings-card__error" role="alert">
+        {{ admissionRuleError }}
+      </p>
+      <button
+        type="button"
+        class="settings-card__save"
+        :disabled="isSavingAdmissionRules || lateFeeLoading"
+        @click="onSaveAdmissionRules"
+      >
+        {{ t('financeAdmin.admissionRulesSave') }}
+      </button>
+
+      <h3 class="settings-card__subtitle">{{ t('financeAdmin.admissionResidentsTitle') }}</h3>
+      <p class="settings-card__hint">{{ t('financeAdmin.admissionResidentsHint') }}</p>
+      <label class="settings-card__field" for="settingsAdmissionResidentSearch">
+        <span class="visually-hidden">{{ t('financeAdmin.extraSearch') }}</span>
+        <input
+          id="settingsAdmissionResidentSearch"
+          v-model="admissionResidentSearch"
+          type="search"
+          class="settings-card__input"
+          :placeholder="t('financeAdmin.extraSearchPlaceholder')"
+        />
+      </label>
+      <ul class="admission-resident-list" role="list">
+        <li v-if="!financesStore.state.residents.length" class="admission-resident-list__empty">
+          {{ t('financeAdmin.admissionResidentsEmpty') }}
+        </li>
+        <li v-else-if="!admissionResidents.length" class="admission-resident-list__empty">
+          {{ t('financeAdmin.admissionResidentsNone') }}
+        </li>
+        <li v-for="resident in admissionResidents" :key="resident.id" class="admission-resident">
+          <div class="admission-resident__info">
+            <strong>{{ resident.name }}</strong>
+            <span>
+              {{ t('app.residentFloorApt', { floor: resident.floor, code: resident.code }) }}
+              <template v-if="resident.admissionDate">
+                · {{ t('app.residentAdmissionDate', { date: formatDayMonth(resident.admissionDate, locale) }) }}
+              </template>
+            </span>
+          </div>
+          <button
+            type="button"
+            class="admission-resident__btn"
+            :class="{ 'is-on': resident.billFromNextMonth }"
+            :aria-pressed="resident.billFromNextMonth"
+            :disabled="Boolean(billingResidentId) || lateFeeLoading"
+            @click="onToggleBillFromNextMonth(resident)"
+          >
+            {{
+              resident.billFromNextMonth
+                ? t('app.billFromNextMonthOn')
+                : t('app.billFromNextMonthAction')
+            }}
+          </button>
+        </li>
+      </ul>
+      <p v-if="billingResidentError" class="settings-card__error" role="alert">
+        {{ billingResidentError }}
+      </p>
     </section>
 
     <!-- Subscriptions — solo visible para admin -->
@@ -448,12 +738,36 @@ watch(planSaveNotice, (msg) => {
   margin-bottom: 1.5rem;
 }
 
+.settings-card--admission {
+  max-width: 40rem;
+}
+
 .settings-card__title {
   margin: 0 0 0.65rem;
   font-size: 1.0625rem;
   font-weight: 600;
   letter-spacing: -0.02em;
   color: var(--apple-text, #1d1d1f);
+}
+
+.settings-card__subtitle {
+  margin: 1.25rem 0 0.45rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--apple-text, #1d1d1f);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .settings-card__list {
@@ -465,6 +779,163 @@ watch(planSaveNotice, (msg) => {
   gap: 0.4rem;
   font-size: 0.875rem;
   color: var(--apple-text, #1d1d1f);
+}
+
+.settings-card__hint {
+  margin: 0 0 0.85rem;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.settings-card__status {
+  margin: 0 0 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.settings-card__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #6e6e73;
+}
+
+.settings-card__input {
+  height: 2.75rem;
+  border: 1px solid #d2d2d7;
+  border-radius: 8px;
+  padding: 0 0.7rem;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 400;
+  color: #1d1d1f;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.settings-card__input:focus {
+  outline: none;
+  border-color: #0071e3;
+}
+
+.settings-card__notice {
+  margin: 0.65rem 0 0;
+  font-size: 0.8125rem;
+  color: #248a3d;
+}
+
+.settings-card__error {
+  margin: 0.65rem 0 0;
+  font-size: 0.8125rem;
+  color: #b42318;
+}
+
+.settings-card__save {
+  margin-top: 0.85rem;
+  min-height: 1.7rem;
+  padding: 0.22rem 0.85rem;
+  border: none;
+  border-radius: 8px;
+  background: #0071e3;
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.settings-card__save:hover:not(:disabled) {
+  background: #0066cc;
+}
+
+.settings-card__save:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.admission-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.admission-resident-list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  max-height: 20rem;
+  overflow: auto;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 12px;
+}
+
+.admission-resident-list__empty {
+  padding: 0.85rem 0.9rem;
+  font-size: 0.8125rem;
+  color: #6e6e73;
+}
+
+.admission-resident {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 0.85rem;
+}
+
+.admission-resident + .admission-resident {
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.admission-resident__info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.admission-resident__info strong {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+
+.admission-resident__info span {
+  font-size: 0.75rem;
+  color: #6e6e73;
+}
+
+.admission-resident__btn {
+  flex-shrink: 0;
+  max-width: 11.5rem;
+  padding: 0.38rem 0.6rem;
+  border: 1px solid #d2d2d7;
+  border-radius: 8px;
+  background: #fff;
+  color: #1d1d1f;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.admission-resident__btn:hover:not(:disabled) {
+  border-color: #1e3a8a;
+  color: #1e3a8a;
+  background: #f4f7ff;
+}
+
+.admission-resident__btn.is-on {
+  border-color: #1e3a8a;
+  background: #eef3ff;
+  color: #1e3a8a;
+}
+
+.admission-resident__btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* ── Sección de planes ── */

@@ -39,4 +39,13 @@ export const adminManagementExpensesApi = {
     const { data: created } = await apiClient.post('/adminManagementExpenses', newRow)
     return created
   },
+
+  async remove(id) {
+    const cleanId = String(id ?? '').trim()
+    if (!cleanId) {
+      throw apiError('ADMIN_EXPENSE_NOT_FOUND', 'Expense id is required.')
+    }
+    await apiClient.delete(`/adminManagementExpenses/${encodeURIComponent(cleanId)}`)
+    return { id: cleanId }
+  },
 }

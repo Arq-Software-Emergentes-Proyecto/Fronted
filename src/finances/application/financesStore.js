@@ -1,5 +1,18 @@
 import { reactive, computed } from 'vue';
 import { financesApi } from '../infrastructure/financesApi.js';
+import {
+  applyLateFeeToReceipt,
+  computeChargeDates,
+  currentStatementMonthKey,
+  findCharge,
+  latestCharge,
+  nextMonthKey,
+  normalizeMonthKey,
+  normalizeSettings,
+  residentOwesMonth,
+  todayYmd,
+  uniqueCharges,
+} from '../domain/billingCycle.js';
 
 const state = reactive({
   settings: null,
@@ -17,6 +30,7 @@ export function useFinancesStore() {
       state.settings = await financesApi.getSettings();
       state.residents = await financesApi.getResidents();
       state.receipts = await financesApi.getReceipts();
+      await applyDailyLateFees();
     } catch (err) {
       state.error = 'Failed to load finances data';
       console.error(err);
@@ -25,39 +39,60 @@ export function useFinancesStore() {
     }
   };
 
+  const currentBillingMonthKey = computed(() => {
+    const settings = state.settings ? normalizeSettings(state.settings) : normalizeSettings({})
+    const monthKey = currentStatementMonthKey(new Date(), settings)
+    return findCharge(settings.monthlyCharges, monthKey)?.month || monthKey
+  })
+
   const getResidentFinancialStatus = computed(() => {
     return state.residents.map(resident => {
       // Find all receipts for this resident
-      const resReceipts = state.receipts.filter(
-        (r) => String(r.residentId) === String(resident.id),
-      );
+      const settings = state.settings ? normalizeSettings(state.settings) : normalizeSettings({})
+      const todayStr = todayYmd()
+      const resReceipts = state.receipts
+        .filter((r) => String(r.residentId) === String(resident.id))
+        .map((r) => applyLateFeeToReceipt(r, settings.lateFeePerDay, todayStr));
 
-      // Calculate next payment date
-      let baseDate = resident.admissionDate ? new Date(resident.admissionDate) : new Date('2024-01-01');
-      if (isNaN(baseDate.getTime())) {
-        baseDate = new Date('2024-01-01');
+      const monthKey = currentBillingMonthKey.value
+      const currentCharge = findCharge(settings.monthlyCharges, monthKey)
+      const monthReceipt = receiptForMonth(resReceipts, monthKey)
+      const owesMonth = residentOwesMonth(resident, monthKey, settings)
+      const monthStatus = monthPaymentStatus(monthReceipt, currentCharge, todayStr, owesMonth)
+
+      let nextPaymentDate = dueDateFromCharge(
+        currentCharge || latestCharge(settings.monthlyCharges),
+        settings,
+      )
+      if (!owesMonth && !monthReceipt) {
+        const followingMonth = nextMonthKey(monthKey)
+        nextPaymentDate = dueDateFromCharge(
+          findCharge(settings.monthlyCharges, followingMonth),
+          settings,
+          followingMonth,
+        )
       }
 
-      let nextPaymentDate = new Date(baseDate);
-      nextPaymentDate.setDate(nextPaymentDate.getDate() + 30);
-
       if (resReceipts.length > 0) {
-        // Check if they have unpaid receipts
         const unpaidReceipts = resReceipts.filter(r => r.status !== 'Paid');
 
         if (unpaidReceipts.length > 0) {
-          // If they owe money, the 'Next Payment Date' should be the due date of their oldest unpaid receipt
           const oldestUnpaidDueDate = new Date(Math.min(...unpaidReceipts.map(r => new Date(r.dueDate))));
           if (!isNaN(oldestUnpaidDueDate.getTime())) {
             nextPaymentDate = new Date(oldestUnpaidDueDate);
           }
         } else {
-          // If all are Paid, find the latest due date among all receipts and add 30 days for the NEXT expected cycle
-          const latestDueDate = new Date(Math.max(...resReceipts.map(r => new Date(r.dueDate))));
-          if (!isNaN(latestDueDate.getTime())) {
-            nextPaymentDate = new Date(latestDueDate);
-            nextPaymentDate.setDate(nextPaymentDate.getDate() + 30);
-          }
+          const latestReceipt = [...resReceipts].sort((a, b) =>
+            String(b.billingMonth || b.dueDate).localeCompare(String(a.billingMonth || a.dueDate)),
+          )[0]
+          const followingMonth = nextMonthKey(
+            latestReceipt.billingMonth || currentStatementMonthKey(new Date(), settings),
+          )
+          nextPaymentDate = dueDateFromCharge(
+            findCharge(settings.monthlyCharges, followingMonth),
+            settings,
+            followingMonth,
+          )
         }
       }
 
@@ -65,26 +100,21 @@ export function useFinancesStore() {
       const today = new Date();
       const timeDiff = nextPaymentDate.getTime() - today.getTime();
       const daysUntilNextPayment = Math.ceil(timeDiff / (1000 * 3600 * 24));
-
-      // Get local today string for accurate comparison (YYYY-MM-DD)
-      const year = today.getFullYear();
-      const month = (today.getMonth() + 1).toString().padStart(2, '0');
-      const day = today.getDate().toString().padStart(2, '0');
-      const todayStr = `${year}-${month}-${day}`;
-
       // Current exact status
       // A receipt is overdue if its status is 'Overdue' OR it is 'Pending' and today's date has reached (or passed) its due date
       const hasOverdue = resReceipts.some(r =>
-        r.status === 'Overdue' ||
-        (r.status === 'Pending' && todayStr >= r.dueDate)
+        isPaidStatus(r.status) === false && (
+          r.status === 'Overdue' ||
+          (isPendingStatus(r.status) && todayStr >= r.dueDate)
+        )
       );
-      const hasPending = resReceipts.some(r => r.status === 'Pending');
+      const hasPending = resReceipts.some(r => isPendingStatus(r.status));
 
-      let overallStatus = 'Pending';
+      let overallStatus = monthStatus;
       if (hasOverdue) overallStatus = 'Overdue';
       else if (resReceipts.length === 0 && daysUntilNextPayment <= 0) overallStatus = 'Overdue';
       else if (hasPending) overallStatus = 'Pending';
-      else if (resReceipts.length > 0) overallStatus = 'Paid';
+      else if (resReceipts.length > 0 && resReceipts.every((r) => isPaidStatus(r.status))) overallStatus = 'Paid';
 
       const fmtDate = (d) => {
         const y = d.getFullYear();
@@ -98,10 +128,80 @@ export function useFinancesStore() {
         nextPaymentDate: fmtDate(nextPaymentDate),
         daysUntilNextPayment,
         overallStatus,
+        monthStatus,
+        currentBillingMonth: monthKey,
+        currentChargeAmount: currentCharge?.amount ?? null,
         receipts: resReceipts
       };
     });
   });
+
+  function isPaidStatus(status) {
+    return status === 'Paid' || status === 'Pagado'
+  }
+
+  function isPendingStatus(status) {
+    return status === 'Pending' || status === 'Pendiente'
+  }
+
+  function receiptForMonth(receipts, monthKey) {
+    const exact = (receipts || []).find(
+      (receipt) => String(receipt.billingMonth || '') === String(monthKey),
+    )
+    if (exact) return exact
+
+    const paymentMonth = nextMonthKey(monthKey)
+    return (receipts || []).find((receipt) => {
+      if (receipt.billingMonth) return false
+      const due = String(receipt.dueDate || '')
+      return due.startsWith(paymentMonth) || due.startsWith(String(monthKey))
+    }) || null
+  }
+
+  function monthPaymentStatus(receipt, charge, todayStr, owesMonth = true) {
+    if (receipt) {
+      if (isPaidStatus(receipt.status)) return 'Paid'
+      if (
+        receipt.status === 'Overdue' ||
+        (isPendingStatus(receipt.status) && receipt.dueDate && todayStr >= receipt.dueDate)
+      ) {
+        return 'Overdue'
+      }
+      return 'Pending'
+    }
+    if (!charge) return 'Unbilled'
+    if (!owesMonth) return 'Exempt'
+    if (charge.paymentDue && todayStr >= charge.paymentDue) return 'Overdue'
+    return 'Pending'
+  }
+
+  const applyDailyLateFees = async () => {
+    const settings = normalizeSettings(state.settings || {})
+    const today = todayYmd()
+    const perDay = Number(settings.lateFeePerDay) || 0
+
+    for (let i = 0; i < state.receipts.length; i++) {
+      const current = state.receipts[i]
+      if (isPaidStatus(current.status)) continue
+
+      const next = applyLateFeeToReceipt(current, perDay, today)
+      const sameFee = Number(current.lateFee || 0) === Number(next.lateFee || 0)
+      const sameStatus = String(current.status) === String(next.status)
+      if (sameFee && sameStatus) continue
+
+      const updatedReceipt = await financesApi.updateReceipt(current.id, {
+        lateFee: next.lateFee,
+        status: next.status,
+      })
+      state.receipts[i] = applyLateFeeToReceipt(updatedReceipt, perDay, today)
+    }
+  }
+
+  function dueDateFromCharge(charge, settings, monthKey) {
+    const due = charge?.paymentDue || computeChargeDates(monthKey || charge?.month, settings).paymentDue
+    const parsed = due ? new Date(`${due}T12:00:00`) : new Date()
+    return Number.isFinite(parsed.getTime()) ? parsed : new Date()
+  }
 
   // Utility to reliably format date strings
   const formatLocalIsoStringDate = (dateOb) => {
@@ -114,8 +214,30 @@ export function useFinancesStore() {
   const updateSettings = async (newSettings) => {
     try {
       state.isLoading = true;
-      const updated = await financesApi.updateSettings(newSettings);
+      const current = normalizeSettings(state.settings || {})
+      const incoming = normalizeSettings(newSettings || {})
+      const locked = new Map(
+        current.monthlyCharges.map((charge) => [normalizeMonthKey(charge.month), charge]),
+      )
+      const merged = []
+      const seen = new Set()
+
+      for (const charge of incoming.monthlyCharges) {
+        const month = normalizeMonthKey(charge.month)
+        if (!month || seen.has(month)) continue
+        merged.push(locked.get(month) || charge)
+        seen.add(month)
+      }
+      for (const [month, charge] of locked) {
+        if (!seen.has(month)) merged.push(charge)
+      }
+
+      const updated = await financesApi.updateSettings({
+        ...incoming,
+        monthlyCharges: uniqueCharges(merged),
+      });
       state.settings = updated;
+      await applyDailyLateFees();
       return updated;
     } catch (err) {
       console.error('Error updating finance settings:', err);
@@ -125,33 +247,88 @@ export function useFinancesStore() {
     }
   };
 
-  const generateInitialReceipt = async (resident) => {
-    if (!state.settings) {
-      // Attempt a gentle fallback fetch if settings are missing (likely on fresh reload without navigating to finances first)
-      state.settings = await financesApi.getSettings().catch(() => ({ baseMonthlyExpense: 150 }));
+  function upsertResident(resident) {
+    const id = String(resident?.id ?? '')
+    if (!id) return resident
+    const index = state.residents.findIndex((row) => String(row.id) === id)
+    const current = index === -1 ? null : state.residents[index]
+    const next = {
+      ...current,
+      ...resident,
+      admissionDate:
+        String(current?.admissionDate ?? '').trim() ||
+        String(resident?.admissionDate ?? '').trim() ||
+        todayYmd(),
+      billFromNextMonth: Boolean(
+        resident?.billFromNextMonth ?? current?.billFromNextMonth,
+      ),
     }
+    if (index === -1) state.residents.unshift(next)
+    else state.residents[index] = { ...state.residents[index], ...next }
+    return next
+  }
 
-    const amount = state.settings.baseMonthlyExpense || 150;
+  async function cancelUnpaidAdmissionMonthReceipt(resident) {
+    const admissionMonth = normalizeMonthKey(resident?.admissionDate)
+    if (!admissionMonth) return
+    const residentId = String(resident?.id ?? '')
+    if (!residentId) return
+    const receipts = await financesApi.getReceiptsByResident(residentId).catch(() => [])
+    for (const receipt of receipts) {
+      if (String(receipt.status ?? '') === 'Paid') continue
+      const billingMonth = normalizeMonthKey(receipt.billingMonth || receipt.dueDate)
+      if (billingMonth !== admissionMonth) continue
+      await financesApi.deleteReceipt(receipt.id)
+      const receiptId = String(receipt.id)
+      state.receipts = state.receipts.filter((row) => String(row.id) !== receiptId)
+    }
+  }
 
-    // Explicitly calculate 30 days from admissionDate
-    const baseDateString = resident.admissionDate || formatLocalIsoStringDate(new Date());
-    const baseDate = new Date(baseDateString);
-    if (isNaN(baseDate.getTime())) return null;
+  const setResidentBillFromNextMonth = async (resident, billFromNextMonth) => {
+    const next = upsertResident({
+      ...resident,
+      billFromNextMonth: Boolean(billFromNextMonth),
+    })
+    if (next.billFromNextMonth) {
+      await cancelUnpaidAdmissionMonthReceipt(next)
+      return next
+    }
+    await generateInitialReceipt(next)
+    return next
+  }
 
-    const nextDateObj = new Date(baseDate);
-    nextDateObj.setDate(nextDateObj.getDate() + 30);
-
-    const dueDate = formatLocalIsoStringDate(nextDateObj);
+  const generateInitialReceipt = async (resident) => {
+    state.settings = await financesApi.getSettings().catch(() =>
+      normalizeSettings(state.settings || {}),
+    )
+    const settings = normalizeSettings(state.settings)
+    const monthKey = currentStatementMonthKey(new Date(), settings)
+    const billedResident = upsertResident(resident)
+    if (!residentOwesMonth(billedResident, monthKey, settings)) return null
+    const charge = findCharge(settings.monthlyCharges, monthKey)
+    if (!charge) return null
+    const existing = await financesApi.getReceiptsByResident(billedResident.id).catch(() => [])
+    const alreadyBilled = existing.some(
+      (receipt) =>
+        normalizeMonthKey(receipt.billingMonth || receipt.dueDate) ===
+        String(charge.month || monthKey),
+    )
+    if (alreadyBilled) return null
+    const dates = charge
+    const amount = Number(charge.amount || settings.baseMonthlyExpense) || 150
+    const dueDate = dates.paymentDue
     const issueDate = formatLocalIsoStringDate(new Date());
 
     const receiptData = {
       id: Date.now(),
-      residentId: resident.id,
+      residentId: billedResident.id,
       issueDate,
       dueDate,
       amount,
       status: 'Pending',
-      lateFee: 0
+      lateFee: 0,
+      billingMonth: charge?.month || monthKey,
+      paymentOpen: dates.paymentOpen,
     };
 
     try {
@@ -164,38 +341,47 @@ export function useFinancesStore() {
     }
   };
 
-  // US-16: Massive Receipt Generation
-  const generateMonthlyReceipts = async () => {
-    if (!state.settings || !state.settings.baseMonthlyExpense) {
-      throw new Error('Base monthly expense is not configured. Cannot generate receipts.');
+  const generateMonthlyReceipts = async (monthKey) => {
+    if (!state.settings) {
+      state.settings = await financesApi.getSettings().catch(() => normalizeSettings({}))
+    }
+    const settings = normalizeSettings(state.settings)
+    const targetMonth = monthKey || currentStatementMonthKey(new Date(), settings)
+    const charge = findCharge(settings.monthlyCharges, targetMonth)
+    if (!charge || !charge.amount || !charge.paymentDue) {
+      const error = new Error('MISSING_MONTHLY_CHARGE')
+      error.code = 'MISSING_MONTHLY_CHARGE'
+      throw error
     }
 
     try {
       state.isLoading = true;
-      const amount = state.settings.baseMonthlyExpense;
       const issueDate = formatLocalIsoStringDate(new Date());
-
-      // Logic: For each resident, check if they need a receipt right now (e.g. they don't have a pending one)
-      const statuses = getResidentFinancialStatus.value;
       const newReceipts = [];
 
-      for (const residentStatus of statuses) {
-        // If there's no pending/overdue receipt, generate a new one based on the nextPaymentDate cycle
-        if (residentStatus.overallStatus === 'Paid') {
-          const dueDate = residentStatus.nextPaymentDate;
-          const receiptData = {
-            id: Date.now() + Math.floor(Math.random() * 1000), // Numeric explicit ID
-            residentId: residentStatus.id,
-            issueDate,
-            dueDate,
-            amount,
-            status: 'Pending',
-            lateFee: 0
-          };
-          const created = await financesApi.createReceipt(receiptData);
-          state.receipts.push(created);
-          newReceipts.push(created);
-        }
+      for (const resident of state.residents) {
+        if (!residentOwesMonth(resident, charge.month, settings)) continue
+        const alreadyBilled = state.receipts.some(
+          (receipt) =>
+            String(receipt.residentId) === String(resident.id) &&
+            String(receipt.billingMonth || '') === String(charge.month),
+        )
+        if (alreadyBilled) continue
+
+        const receiptData = {
+          id: Date.now() + Math.floor(Math.random() * 1000),
+          residentId: resident.id,
+          issueDate,
+          dueDate: charge.paymentDue,
+          amount: charge.amount,
+          status: 'Pending',
+          lateFee: 0,
+          billingMonth: charge.month,
+          paymentOpen: charge.paymentOpen,
+        };
+        const created = await financesApi.createReceipt(receiptData);
+        state.receipts.push(created);
+        newReceipts.push(created);
       }
       return newReceipts;
     } catch (err) {
@@ -227,17 +413,23 @@ export function useFinancesStore() {
         const issueDate = formatLocalIsoStringDate(new Date());
 
         if (!state.settings) {
-          state.settings = await financesApi.getSettings().catch(() => ({ baseMonthlyExpense: 150 }));
+          state.settings = await financesApi.getSettings().catch(() => normalizeSettings({}));
         }
+        const settings = normalizeSettings(state.settings)
+        const followingMonth = nextMonthKey(r.billingMonth || currentStatementMonthKey(new Date(), settings))
+        const nextCharge = findCharge(settings.monthlyCharges, followingMonth)
+        const nextDates = nextCharge || computeChargeDates(followingMonth, settings)
 
         const nextReceiptData = {
-          id: Date.now() + Math.floor(Math.random() * 1000), // Numeric explicit ID
+          id: Date.now() + Math.floor(Math.random() * 1000),
           residentId: r.residentId,
           issueDate,
-          dueDate: nextDueDate,
-          amount: state.settings.baseMonthlyExpense || 150,
+          dueDate: nextDates.paymentDue || nextDueDate,
+          amount: Number(nextCharge?.amount || r.amount || settings.baseMonthlyExpense) || 150,
           status: 'Pending',
-          lateFee: 0
+          lateFee: 0,
+          billingMonth: followingMonth,
+          paymentOpen: nextDates.paymentOpen,
         };
         const autoCreated = await financesApi.createReceipt(nextReceiptData);
         state.receipts.push(autoCreated);
@@ -250,42 +442,13 @@ export function useFinancesStore() {
     }
   };
 
-  // US-19: Automated Late Fee Application (Nocturnal Mock)
   const simulateNightlyCron = async () => {
-    if (!state.settings?.lateFeeRate && state.settings?.lateFeeRate !== 0) {
-      state.settings = await financesApi.getSettings().catch(() => null);
-    }
-    if (state.settings?.lateFeeRate == null) {
-      throw new Error('Late fee rate is not configured.');
-    }
-
     try {
       state.isLoading = true;
-      const today = new Date();
-      const year = today.getFullYear();
-      const month = (today.getMonth() + 1).toString().padStart(2, '0');
-      const day = today.getDate().toString().padStart(2, '0');
-      const todayStr = `${year}-${month}-${day}`;
-
-      const lateRate = Number(state.settings.lateFeeRate);
-
-      for (let i = 0; i < state.receipts.length; i++) {
-        const r = state.receipts[i];
-        const isPastDue = todayStr >= r.dueDate;
-        const needsLateFee =
-          isPastDue &&
-          r.status !== 'Paid' &&
-          (r.status === 'Pending' || Number(r.lateFee || 0) === 0);
-
-        if (needsLateFee) {
-          const newLateFee = Number(r.amount) * lateRate;
-          const updatedReceipt = await financesApi.updateReceipt(r.id, {
-            status: 'Overdue',
-            lateFee: newLateFee,
-          });
-          state.receipts[i] = updatedReceipt;
-        }
+      if (!state.settings) {
+        state.settings = await financesApi.getSettings().catch(() => normalizeSettings({}));
       }
+      await applyDailyLateFees();
     } catch (err) {
       console.error(err);
       throw new Error('Error running nightly cron job');
@@ -297,11 +460,14 @@ export function useFinancesStore() {
   return {
     state,
     loadData,
+    currentBillingMonthKey,
     getResidentFinancialStatus,
     generateInitialReceipt,
+    setResidentBillFromNextMonth,
     generateMonthlyReceipts,
     simulatePaymentReconciliation,
     simulateNightlyCron,
+    applyDailyLateFees,
     updateSettings
   };
 }

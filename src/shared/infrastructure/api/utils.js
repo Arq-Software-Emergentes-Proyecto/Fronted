@@ -37,14 +37,19 @@ export function publicUser(user) {
 }
 
 export function publicResident(user) {
+  const admissionMatch = String(user?.admissionDate ?? '').trim().match(/^(\d{4}-\d{2}-\d{2})/)
   return {
     id: user.id,
     name: user.name,
     floor: user.floor ?? '',
     code: user.code ?? '',
     email: user.email ?? '',
+    admissionDate: admissionMatch ? admissionMatch[1] : '',
+    billFromNextMonth: Boolean(user.billFromNextMonth),
     hasCredentials:
       user.hasCredentials === true ||
+      user.authProvider === 'google' ||
+      Boolean(user.googleSub) ||
       (user.hasCredentials !== false && Boolean(user.email && user.password)),
   }
 }
