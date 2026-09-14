@@ -1,267 +1,465 @@
 <script setup>
-import { onMounted, ref, computed, watch, nextTick } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import InputText from 'primevue/inputtext'
-import Button from 'primevue/button'
-import Accordion from 'primevue/accordion'
-import AccordionPanel from 'primevue/accordionpanel'
-import AccordionHeader from 'primevue/accordionheader'
-import AccordionContent from 'primevue/accordioncontent'
-import Dialog from 'primevue/dialog'
-import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
-import Textarea from 'primevue/textarea'
 
-import { useSupportStore } from '../../../support/application/supportStore.js'
-import { useSession } from '@/iam/application/sessionStore.js'
+import { useSession, getActiveDataOwnerId } from '@/iam/application/sessionStore.js'
+import { generateGeminiReply, summarizeChatTitle } from '@/support/infrastructure/geminiApi.js'
+import { buildResidentAssistantPrompt } from '@/support/domain/residentAssistantPrompt.js'
+import {
+  assistantWantsEscalate,
+  residentWantsAdmin,
+  stripEscalateMarker,
+} from '@/support/domain/supportEscalate.js'
+import {
+  appendAdminMessage,
+  appendAiMessage,
+  createAdminChat,
+  createAiChat,
+  patchAiChat,
+  watchAdminChat,
+  watchAiChats,
+  watchRealtimeConnected,
+} from '@/support/infrastructure/realtimeSupportDb.js'
 
 const { t, locale } = useI18n()
 const { state: sessionState } = useSession()
-const store = useSupportStore()
-const searchQuery = ref('')
-const chatMessage = ref('')
-const sending = ref(false)
-const messagesEl = ref(null)
-
-const filteredFaqs = computed(() => {
-  if (!searchQuery.value) return store.state.faqs
-  const q = searchQuery.value.toLowerCase()
-  return store.state.faqs.filter((faq) => {
-    const qText = t(`supportResident.${faq.questionKey}`).toLowerCase()
-    const aText = t(`supportResident.${faq.answerKey}`).toLowerCase()
-    return qText.includes(q) || aText.includes(q)
-  })
-})
+const aiInput = ref('')
+const aiSending = ref(false)
+const aiChats = ref([])
+const activeAiChatId = ref('')
+const aiMessagesEl = ref(null)
+const extraAdminMessages = ref([])
+const syncError = ref('')
+const creatingBlank = ref(false)
+const chatsReady = ref(false)
 
 const residentId = computed(() => sessionState.profile?.id ?? '')
 const residentName = computed(() => sessionState.profile?.name ?? '')
+const ownerId = computed(() => getActiveDataOwnerId() || sessionState.profile?.ownerAdminId || '')
 
-function formatWhen(iso) {
-  if (!iso) return ''
-  try {
-    return new Date(iso).toLocaleString(locale.value === 'es' ? 'es-PE' : 'en-US', {
-      dateStyle: 'short',
-      timeStyle: 'short',
-    })
-  } catch {
-    return String(iso)
-  }
+const activeAiChat = computed(
+  () => aiChats.value.find((chat) => chat.id === activeAiChatId.value) || null,
+)
+
+const displayMessages = computed(() => {
+  const base = activeAiChat.value?.messages || []
+  const extras = extraAdminMessages.value
+    .filter((row) => row.authorRole === 'admin')
+    .filter((row) => !base.some((item) => item.id === row.id))
+    .map((row) => ({
+      id: row.id,
+      role: 'admin',
+      body: row.body,
+      createdAt: row.createdAt,
+    }))
+  return [...base, ...extras].sort((a, b) =>
+    String(a.createdAt || '').localeCompare(String(b.createdAt || '')),
+  )
+})
+
+const hasAiMessages = computed(() => displayMessages.value.length > 0)
+
+function titleFromText(text) {
+  const clean = String(text ?? '').trim().replace(/\s+/g, ' ')
+  if (!clean) return t('supportResident.aiNewChat')
+  return clean.length > 38 ? `${clean.slice(0, 38)}…` : clean
 }
 
-async function scrollChatToBottom() {
+function messageWho(role) {
+  if (role === 'user') return t('supportResident.labelYou')
+  if (role === 'admin') return t('supportResident.labelAdmin')
+  return t('supportResident.aiLabel')
+}
+
+function geminiSystemInstruction() {
+  return buildResidentAssistantPrompt({
+    locale: locale.value,
+    t,
+    residentName: residentName.value,
+  })
+}
+
+async function scrollAiToBottom() {
   await nextTick()
-  const el = messagesEl.value
+  const el = aiMessagesEl.value
   if (el) el.scrollTop = el.scrollHeight
 }
 
-watch(
-  () => store.state.activeChat?.messages?.length,
-  () => {
-    scrollChatToBottom()
-  },
-)
+let stopAiChats = null
+let stopAdminThread = null
+let stopConnected = null
+let creatingBlankLock = false
+let connectWaitTimer = 0
 
-watch(
-  () => store.state.chatDialogVisible,
-  (open) => {
-    if (open) scrollChatToBottom()
-  },
-)
-
-onMounted(async () => {
-  store.loadFaqs()
-  if (residentId.value) {
-    await store.loadMyChats(residentId.value)
+function bindAiChats() {
+  stopAiChats?.()
+  stopAiChats = null
+  stopConnected?.()
+  stopConnected = null
+  if (connectWaitTimer) window.clearTimeout(connectWaitTimer)
+  chatsReady.value = false
+  if (!ownerId.value || !residentId.value) {
+    aiChats.value = []
+    return
   }
+  stopConnected = watchRealtimeConnected((ok) => {
+    if (ok && syncError.value === t('supportResident.syncError')) {
+      syncError.value = ''
+    }
+  })
+  connectWaitTimer = window.setTimeout(() => {
+    if (!chatsReady.value) syncError.value = t('supportResident.syncError')
+  }, 6000)
+  stopAiChats = watchAiChats(ownerId.value, residentId.value, (list, error) => {
+    if (connectWaitTimer) window.clearTimeout(connectWaitTimer)
+    syncError.value = error ? t('supportResident.syncError') : ''
+    aiChats.value = list
+    chatsReady.value = true
+    if (!list.some((chat) => chat.id === activeAiChatId.value)) {
+      activeAiChatId.value = list[0]?.id || ''
+    }
+    if (!error && !list.length) void startAiChat()
+  })
+}
+
+function bindAdminThread(chatId) {
+  stopAdminThread?.()
+  stopAdminThread = null
+  extraAdminMessages.value = []
+  if (!ownerId.value || !chatId) return
+  stopAdminThread = watchAdminChat(ownerId.value, chatId, (chat) => {
+    extraAdminMessages.value = chat?.messages || []
+  })
+}
+
+watch([ownerId, residentId], () => {
+  bindAiChats()
+}, { immediate: true })
+
+watch(
+  () => activeAiChat.value?.escalatedChatId,
+  (chatId) => bindAdminThread(chatId),
+  { immediate: true },
+)
+
+watch(
+  () => displayMessages.value.length,
+  () => scrollAiToBottom(),
+)
+
+watch([chatsReady, aiChats], async () => {
+  if (!chatsReady.value || !ownerId.value || !residentId.value) return
+  if (creatingBlank.value || aiChats.value.length) return
+  await startAiChat()
 })
 
-watch(
-  () => residentId.value,
-  async (newId, oldId) => {
-    if (newId && newId !== oldId) {
-      await store.loadMyChats(newId)
+onUnmounted(() => {
+  stopAiChats?.()
+  stopAdminThread?.()
+  stopConnected?.()
+  if (connectWaitTimer) window.clearTimeout(connectWaitTimer)
+})
+
+async function startAiChat() {
+  const blank = aiChats.value.find((chat) => !chat.messages?.length)
+  if (blank) {
+    activeAiChatId.value = blank.id
+    return
+  }
+  if (!ownerId.value || !residentId.value || creatingBlankLock) return
+  creatingBlankLock = true
+  creatingBlank.value = true
+  try {
+    const chat = await createAiChat({
+      ownerId: ownerId.value,
+      residentId: residentId.value,
+      title: t('supportResident.aiNewChat'),
+    })
+    activeAiChatId.value = chat.id
+  } catch (error) {
+    console.error(error)
+    syncError.value = t('supportResident.syncError')
+  } finally {
+    creatingBlankLock = false
+    creatingBlank.value = false
+  }
+}
+
+function openAiChat(id) {
+  activeAiChatId.value = id
+}
+
+function toAdminTranscript(messages) {
+  return (messages || []).map((row) => ({
+    id: row.id,
+    authorRole: row.role === 'user' ? 'resident' : row.role === 'admin' ? 'admin' : 'assistant',
+    body: row.body,
+    createdAt: row.createdAt,
+    authorName: row.role === 'user' ? residentName.value : undefined,
+  }))
+}
+
+async function maybeSummarizeTitle(chatId, messages) {
+  const chat = aiChats.value.find((row) => row.id === chatId)
+  if (!chat || chat.titleSummarized || (messages?.length ?? 0) < 2) return
+  try {
+    const title = await summarizeChatTitle({
+      messages,
+      locale: locale.value,
+    })
+    if (!title) return
+    await patchAiChat(ownerId.value, residentId.value, chatId, {
+      title,
+      titleSummarized: true,
+    })
+  } catch (error) {
+    console.error(error)
+  }
+}
+
+async function escalateChat(chatId, extraMessages = []) {
+  const chat = aiChats.value.find((row) => row.id === chatId)
+  if (!chat || chat.escalatedChatId) return chat?.escalatedChatId || ''
+  const merged = [...(chat.messages || [])]
+  for (const row of extraMessages) {
+    if (!row?.body) continue
+    if (!merged.some((item) => item.id === row.id || item.body === row.body)) {
+      merged.push(row)
     }
   }
-)
-
-const handleStartChat = async () => {
-  if (!residentId.value) return
-  await store.initiateAsyncChat(
-    residentId.value,
-    residentName.value,
-    t('supportResident.defaultChatTopic'),
-  )
+  const topic =
+    chat.title && chat.title !== t('supportResident.aiNewChat')
+      ? chat.title
+      : t('supportResident.defaultChatTopic')
+  const adminChat = await createAdminChat({
+    ownerId: ownerId.value,
+    residentId: residentId.value,
+    residentName: residentName.value,
+    topic,
+    source: 'ai-escalation',
+    aiChatId: chat.id,
+    messages: toAdminTranscript(merged),
+  })
+  await patchAiChat(ownerId.value, residentId.value, chat.id, {
+    escalatedChatId: adminChat.id,
+  })
+  await appendAiMessage(ownerId.value, residentId.value, chat.id, {
+    role: 'ai',
+    body: t('supportResident.escalatedToAdmin'),
+  })
+  return adminChat.id
 }
 
-async function sendChatMessage() {
-  const text = chatMessage.value.trim()
-  if (!text || sending.value) return
-  sending.value = true
+async function sendAiMessage(preset) {
+  const text = String(preset ?? aiInput.value).trim()
+  if (!text || aiSending.value) return
+  if (!ownerId.value || !residentId.value) return
+  if (!activeAiChat.value) await startAiChat()
+  const chatId = activeAiChatId.value
+  if (!chatId) return
+
+  aiInput.value = ''
+  aiSending.value = true
   try {
-    await store.sendResidentMessage(text, { name: residentName.value })
-    chatMessage.value = ''
-  } catch (e) {
-    console.error(e)
+    const current = aiChats.value.find((row) => row.id === chatId)
+    const userMsg = await appendAiMessage(ownerId.value, residentId.value, chatId, {
+      role: 'user',
+      body: text,
+    })
+    if (current && !current.titleSummarized) {
+      await patchAiChat(ownerId.value, residentId.value, chatId, {
+        title: titleFromText(text),
+      })
+    }
+
+    if (current?.escalatedChatId) {
+      await appendAdminMessage(ownerId.value, current.escalatedChatId, {
+        authorRole: 'resident',
+        body: text,
+        authorName: residentName.value,
+      })
+      return
+    }
+
+    const history = [...(current?.messages || []), userMsg].filter(
+      (row) => row.role === 'user' || row.role === 'ai',
+    )
+
+    if (residentWantsAdmin(text)) {
+      await escalateChat(chatId, [userMsg])
+      await maybeSummarizeTitle(chatId, [
+        ...history,
+        { role: 'ai', body: t('supportResident.escalatedToAdmin') },
+      ])
+      return
+    }
+
+    try {
+      const reply = await generateGeminiReply({
+        messages: history,
+        systemInstruction: geminiSystemInstruction(),
+      })
+      const shouldEscalate = assistantWantsEscalate(reply)
+      const body = stripEscalateMarker(reply) || t('supportResident.escalatedToAdmin')
+      const aiMsg = await appendAiMessage(ownerId.value, residentId.value, chatId, {
+        role: 'ai',
+        body,
+      })
+      await maybeSummarizeTitle(chatId, [...history, aiMsg])
+      if (shouldEscalate) await escalateChat(chatId, [userMsg, aiMsg])
+    } catch (error) {
+      console.error(error)
+      await appendAiMessage(ownerId.value, residentId.value, chatId, {
+        role: 'ai',
+        body:
+          error?.code === 'GEMINI_API_KEY_MISSING'
+            ? t('supportResident.aiMissingKey')
+            : error?.code === 'GEMINI_BUSY'
+              ? t('supportResident.aiBusy')
+              : t('supportResident.aiError'),
+      })
+    }
+  } catch (error) {
+    console.error(error)
+    syncError.value = t('supportResident.syncError')
   } finally {
-    sending.value = false
+    aiSending.value = false
+    scrollAiToBottom()
   }
 }
 
-function openExisting(chat) {
-  store.openChatDialog(chat)
-}
-
-function previewLast(chat) {
-  const msgs = chat.messages
-  if (!Array.isArray(msgs) || msgs.length === 0) return '—'
-  const last = msgs[msgs.length - 1]
-  return typeof last?.body === 'string' ? last.body : '—'
+function onAiSuggestion(kind) {
+  if (kind === 'admin') {
+    sendAiMessage(t('supportResident.aiSuggestionAdmin'))
+    return
+  }
+  sendAiMessage(t(`supportResident.${kind}`))
 }
 </script>
 
 <template>
-  <div class="app-view">
-    <h1 class="app-view__title">{{ t('supportResident.title') }}</h1>
-    <p class="app-view__subtitle">{{ t('supportResident.faqDescription') }}</p>
-
+  <div class="app-view app-view--ai">
     <div class="finance-page">
-      <div class="finance-toolbar-row">
-        <Button
-          type="button"
-          rounded
-          :label="t('supportResident.startChatBtn')"
-          icon="pi pi-comments"
-          severity="secondary"
-          class="finance-toolbar-row__btn"
-          :disabled="!residentId"
-          :loading="store.state.isSubmittingTicket"
-          @click="handleStartChat"
-        />
-      </div>
       <p v-if="!residentId" class="app-view__subtitle support-session-hint" role="status">
         {{ t('supportResident.sessionMissing') }}
       </p>
+      <p v-else-if="!ownerId" class="app-view__subtitle support-session-hint" role="status">
+        {{ t('supportResident.ownerMissing') }}
+      </p>
+      <p v-if="syncError" class="app-view__subtitle support-session-hint" role="alert">
+        {{ syncError }}
+      </p>
 
-      <div class="finance-main-row">
-        <section
-          class="finance-panel finance-panel--table table-panel support-stack"
-          aria-labelledby="support-search-heading"
-        >
-          <h2 id="support-search-heading" class="finance-panel__section-title">
-            {{ t('supportResident.searchPlaceholder') }}
-          </h2>
-          <div class="support-search-wrap">
-            <i class="pi pi-search support-search-wrap__icon" aria-hidden="true"></i>
-            <InputText
-              v-model="searchQuery"
-              :placeholder="t('supportResident.searchPlaceholder')"
-              class="support-search-input"
-            />
-          </div>
-
-          <h2 id="conv-heading" class="finance-panel__section-title support-section-spaced">
-            {{ t('supportResident.conversationsTitle') }}
-          </h2>
-          <p v-if="store.state.loadChatsError" class="support-load-error" role="alert">
-            {{ t('supportResident.loadChatsError') }}
-          </p>
-          <ul v-if="store.state.myChats.length" class="support-conv-list">
-            <li v-for="c in store.state.myChats" :key="c.id">
-              <button type="button" class="finance-card support-conv-card" @click="openExisting(c)">
-                <span class="support-conv-card__topic">{{
-                  c.topic || t('supportResident.defaultChatTopic')
-                }}</span>
-                <span class="support-conv-card__meta">{{ formatWhen(c.updatedAt || c.createdAt) }}</span>
-                <span class="support-conv-card__preview">{{ previewLast(c) }}</span>
+      <div class="ai-shell">
+        <aside class="ai-sidebar" aria-label="Chat history">
+          <button type="button" class="ai-new" @click="startAiChat">
+            <i class="pi pi-plus" aria-hidden="true" />
+            {{ t('supportResident.aiNewChat') }}
+          </button>
+          <p class="ai-recents-label">{{ t('supportResident.aiRecents') }}</p>
+          <ul class="ai-recent-list" role="list">
+            <li v-for="chat in aiChats" :key="chat.id">
+              <button
+                type="button"
+                class="ai-recent"
+                :class="{ 'is-active': chat.id === activeAiChatId }"
+                @click="openAiChat(chat.id)"
+              >
+                {{ chat.title }}
               </button>
             </li>
           </ul>
-          <p v-else class="empty-list support-empty-chats">{{ t('supportResident.noConversations') }}</p>
-        </section>
+        </aside>
 
-        <section
-          class="finance-panel finance-panel--calendar calendar-widget support-faq-panel"
-          aria-labelledby="support-faq-heading"
-        >
-          <h2 id="support-faq-heading" class="finance-panel__section-title">
-            {{ t('supportResident.faqTitle') }}
-          </h2>
-          <Accordion v-if="filteredFaqs.length > 0" class="faq-accordion">
-            <AccordionPanel v-for="faq in filteredFaqs" :key="faq.id" :value="faq.id.toString()">
-              <AccordionHeader class="faq-header">{{
-                t(`supportResident.${faq.questionKey}`)
-              }}</AccordionHeader>
-              <AccordionContent>
-                <p class="faq-answer">{{ t(`supportResident.${faq.answerKey}`) }}</p>
-              </AccordionContent>
-            </AccordionPanel>
-          </Accordion>
-          <div v-else-if="store.state.faqs.length > 0 && filteredFaqs.length === 0" class="support-faq-state">
-            <p class="app-view__subtitle">{{ t('supportResident.faqNoResults') }}</p>
+        <section class="ai-main" aria-labelledby="ai-prompt-heading">
+          <div v-if="!hasAiMessages" class="ai-stage">
+            <h2 id="ai-prompt-heading" class="ai-heading">{{ t('supportResident.aiPrompt') }}</h2>
+            <div class="ai-composer">
+              <span class="ai-composer__plus" aria-hidden="true">
+                <i class="pi pi-plus" />
+              </span>
+              <input
+                v-model="aiInput"
+                type="text"
+                :placeholder="t('supportResident.aiAskPlaceholder')"
+                :aria-label="t('supportResident.aiAskPlaceholder')"
+                :disabled="aiSending"
+                @keydown.enter.prevent="sendAiMessage()"
+              />
+              <button
+                type="button"
+                class="ai-composer__send"
+                :disabled="aiSending || !aiInput.trim()"
+                :aria-label="t('supportResident.send')"
+                @click="sendAiMessage()"
+              >
+                <i class="pi pi-arrow-up" aria-hidden="true" />
+              </button>
+            </div>
+            <div class="ai-suggestions">
+              <button type="button" class="ai-suggestion" @click="onAiSuggestion('aiSuggestionFees')">
+                <i class="pi pi-credit-card" aria-hidden="true" />
+                {{ t('supportResident.aiSuggestionFees') }}
+              </button>
+              <button type="button" class="ai-suggestion" @click="onAiSuggestion('aiSuggestionSpaces')">
+                <i class="pi pi-building" aria-hidden="true" />
+                {{ t('supportResident.aiSuggestionSpaces') }}
+              </button>
+              <button type="button" class="ai-suggestion" @click="onAiSuggestion('admin')">
+                <i class="pi pi-user" aria-hidden="true" />
+                {{ t('supportResident.aiSuggestionAdmin') }}
+              </button>
+            </div>
           </div>
-          <div v-else class="support-faq-state">
-            <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>
-          </div>
+
+          <template v-else>
+            <div ref="aiMessagesEl" class="ai-thread" role="log" aria-live="polite">
+              <div
+                v-for="m in displayMessages"
+                :key="m.id"
+                class="ai-msg"
+                :class="{
+                  'ai-msg--user': m.role === 'user',
+                  'ai-msg--ai': m.role === 'ai',
+                  'ai-msg--admin': m.role === 'admin',
+                }"
+              >
+                <span class="ai-msg__who">{{ messageWho(m.role) }}</span>
+                <p>{{ m.body }}</p>
+              </div>
+              <div v-if="aiSending" class="ai-msg ai-msg--ai ai-msg--typing">
+                <span class="ai-msg__who">{{ t('supportResident.aiLabel') }}</span>
+                <p>{{ t('supportResident.aiTyping') }}</p>
+              </div>
+            </div>
+            <div class="ai-dock">
+              <div class="ai-composer">
+                <span class="ai-composer__plus" aria-hidden="true">
+                  <i class="pi pi-plus" />
+                </span>
+                <input
+                  v-model="aiInput"
+                  type="text"
+                  :placeholder="t('supportResident.aiAskPlaceholder')"
+                  :aria-label="t('supportResident.aiAskPlaceholder')"
+                  :disabled="aiSending"
+                  @keydown.enter.prevent="sendAiMessage()"
+                />
+                <button
+                  type="button"
+                  class="ai-composer__send"
+                  :disabled="aiSending || !aiInput.trim()"
+                  :aria-label="t('supportResident.send')"
+                  @click="sendAiMessage()"
+                >
+                  <i class="pi pi-arrow-up" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          </template>
         </section>
       </div>
     </div>
-
-    <Dialog
-      v-model:visible="store.state.chatDialogVisible"
-      modal
-      :header="t('supportResident.chatTitle')"
-      :style="{ width: 'min(42rem, 96vw)' }"
-      @hide="store.closeChatDialog()"
-    >
-      <div class="chat-dialog-body">
-        <div ref="messagesEl" class="chat-messages" role="log" aria-live="polite">
-          <div class="chat-bubble chat-bubble--agent">
-            <p>{{ t('supportResident.chatGreeting') }}</p>
-          </div>
-          <div
-            v-for="m in store.state.activeChat?.messages || []"
-            :key="m.id"
-            class="chat-bubble"
-            :class="
-              m.authorRole === 'admin'
-                ? 'chat-bubble--agent'
-                : m.authorRole === 'resident'
-                  ? 'chat-bubble--self'
-                  : 'chat-bubble--neutral'
-            "
-          >
-            <span class="chat-bubble__who">{{
-              m.authorRole === 'admin'
-                ? t('supportResident.labelAdmin')
-                : m.authorRole === 'resident'
-                  ? t('supportResident.labelYou')
-                  : ''
-            }}</span>
-            <p class="chat-bubble__text">{{ m.body }}</p>
-            <span class="chat-bubble__time">{{ formatWhen(m.createdAt) }}</span>
-          </div>
-        </div>
-        <Textarea
-          v-model="chatMessage"
-          rows="3"
-          :placeholder="t('supportResident.messagePlaceholder')"
-          class="support-textarea"
-          autoResize
-          @keydown.enter.exact.prevent="sendChatMessage"
-        />
-      </div>
-      <template #footer>
-        <ConfirmActions
-          :cancel-label="t('supportResident.cancel')"
-          :confirm-label="t('supportResident.send')"
-          cancel-icon="pi pi-times"
-          confirm-icon="pi pi-send"
-          :loading="sending"
-          :disabled="!chatMessage.trim()"
-          @cancel="store.closeChatDialog()"
-          @confirm="sendChatMessage"
-        />
-      </template>
-    </Dialog>
   </div>
 </template>
 
@@ -270,6 +468,11 @@ function previewLast(chat) {
 .app-view {
   padding: 1.75rem 1.5rem 2.5rem;
   max-width: 72rem;
+}
+
+.app-view--ai {
+  max-width: 88rem;
+  padding-top: 1rem;
 }
 
 .app-view__title {
@@ -297,322 +500,289 @@ function previewLast(chat) {
 }
 
 .finance-page {
-  margin-top: 1.5rem;
+  margin-top: 0;
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
 }
 
-.finance-toolbar-row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.5rem;
-}
-
-.finance-toolbar-row__btn :deep(.p-button) {
-  font-weight: 500;
-  font-size: 0.8125rem;
-  padding-block: 0.5rem;
-  padding-inline: 1rem;
-}
-
-.finance-main-row {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  gap: 1.25rem;
-}
-
-.table-panel {
-  flex: 1 1 58%;
-  min-width: 0;
-}
-
-.calendar-widget {
-  flex: 0 1 22rem;
-  min-width: 17rem;
-}
-
-@media (max-width: 1024px) {
-  .finance-main-row {
-    flex-direction: column;
-  }
-
-  .calendar-widget {
-    flex: 1 1 auto;
-    min-width: 0;
-    max-width: none;
-  }
-}
-
-.finance-panel {
-  padding: 1.2rem 1.25rem 1.35rem;
-  border-radius: 16px;
+.ai-shell {
+  display: grid;
+  grid-template-columns: 16.75rem minmax(0, 1fr);
+  min-height: calc(100vh - 8.5rem);
   background: #fff;
   border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 16px;
+  overflow: hidden;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
-.finance-panel--calendar {
-  background: #fafafa;
-}
-
-.finance-panel--table {
-  padding: 1.2rem 1.25rem 1.35rem;
-  overflow: hidden;
-}
-
-.finance-panel__section-title {
-  margin: 0 0 0.85rem;
-  font-size: 1.0625rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.25;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.support-section-spaced {
-  margin-top: 1.35rem;
-}
-
-.support-stack {
+.ai-sidebar {
   display: flex;
   flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.9rem 0.75rem 1rem;
+  background: var(--apple-bg-secondary, #f5f5f7);
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
 }
 
-.support-search-wrap {
-  position: relative;
+.ai-new {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   width: 100%;
-  margin-bottom: 0.15rem;
-}
-
-.support-search-wrap__icon {
-  position: absolute;
-  left: 0.75rem;
-  top: 50%;
-  transform: translateY(-50%);
-  color: #86868b;
-  font-size: 0.85rem;
-  z-index: 1;
-}
-
-.support-search-input {
-  width: 100%;
-  padding-left: 2.35rem;
-  border-radius: 10px;
-  border: 1px solid #d2d2d7;
+  padding: 0.58rem 0.8rem;
+  border: none;
+  border-radius: 12px;
   background: #fff;
-  font-size: 0.875rem;
-  font-weight: 500;
   color: var(--apple-text, #1d1d1f);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
-.support-search-input:focus {
-  outline: none;
-  border-color: #0a84ff;
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.18);
+.ai-new:hover {
+  color: var(--apple-blue, #1e3a8a);
 }
 
-.support-conv-list {
+.ai-recents-label {
+  margin: 0.35rem 0.35rem 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--apple-text-secondary, #86868b);
+}
+
+.ai-recent-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.2rem;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
-.support-conv-card {
+.ai-recent {
   width: 100%;
   text-align: left;
+  padding: 0.52rem 0.7rem;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--apple-text, #1d1d1f);
+  font-size: 0.8125rem;
+  font-weight: 500;
   cursor: pointer;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ai-recent:hover {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.ai-recent.is-active {
+  background: #fff;
+  color: var(--apple-blue, #1e3a8a);
+  font-weight: 600;
+}
+
+.ai-main {
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  font-family: inherit;
-  transition: box-shadow 0.15s ease;
-  appearance: none;
+  background: #fff;
 }
 
-.support-conv-card:hover {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+.ai-stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.5rem 2.25rem;
 }
 
-.support-conv-card__topic {
+.ai-heading {
+  margin: 0 0 1.5rem;
+  font-size: 1.75rem;
   font-weight: 600;
-  font-size: 0.9375rem;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.04em;
   color: var(--apple-text, #1d1d1f);
-}
-
-.support-conv-card__meta {
-  font-size: 0.72rem;
-  color: #86868b;
-  font-weight: 500;
-}
-
-.support-conv-card__preview {
-  font-size: 0.8125rem;
-  color: var(--apple-text-secondary, #6e6e73);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.support-load-error {
-  color: #d70015;
-  font-size: 0.8125rem;
-  margin: 0 0 0.65rem;
-}
-
-.support-empty-chats {
-  margin: 0;
-  padding: 0.5rem 0;
-}
-
-.empty-list {
-  color: var(--apple-text-secondary, #6e6e73);
-  font-size: 0.8125rem;
   text-align: center;
 }
 
-.support-faq-panel {
-  overflow: hidden;
-}
-
-.support-faq-state {
+.ai-composer {
+  width: min(40rem, 100%);
   display: flex;
-  justify-content: center;
   align-items: center;
-  min-height: 12rem;
-  color: #aeaeb2;
-  font-size: 1.75rem;
-}
-
-.finance-card {
-  padding: 1.1rem 1.2rem;
-  border-radius: 12px;
-  background: #fafafa;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  transition: box-shadow 0.15s ease;
-}
-
-.faq-accordion :deep(.p-accordionheader) {
+  gap: 0.4rem;
+  padding: 0.4rem 0.4rem 0.4rem 0.85rem;
+  border: 1px solid var(--apple-border-hairline, #d2d2d7);
+  border-radius: 980px;
   background: #fff;
+  box-shadow: var(--apple-shadow-md, 0 4px 24px rgba(0, 0, 0, 0.06));
+}
+
+.ai-composer:focus-within {
+  border-color: var(--apple-blue, #1e3a8a);
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.16);
+}
+
+.ai-composer__plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  color: var(--apple-text-secondary, #86868b);
+  font-size: 0.85rem;
+}
+
+.ai-composer input {
+  flex: 1;
+  min-width: 0;
   border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 0.95rem;
   color: var(--apple-text, #1d1d1f);
-  font-weight: 600;
-  font-size: 0.9rem;
-  padding: 1rem 1.1rem;
-  border-radius: 0;
 }
 
-.faq-accordion :deep(.p-accordionpanel:last-child .p-accordionheader) {
-  border-bottom: none;
+.ai-composer__send {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  border: none;
+  border-radius: 50%;
+  background: var(--apple-blue, #1e3a8a);
+  color: #fff;
+  cursor: pointer;
 }
 
-.faq-accordion :deep(.p-accordioncontent-content) {
-  padding: 0 1.1rem 1.1rem;
-  background: #fff;
+.ai-composer__send:hover:not(:disabled) {
+  background: var(--apple-blue-hover, #172554);
 }
 
-.faq-answer {
-  color: var(--apple-text-secondary, #6e6e73);
-  line-height: 1.55;
-  margin: 0;
+.ai-composer__send:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.ai-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.35rem 1.35rem;
+  margin-top: 1.35rem;
+}
+
+.ai-suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: none;
+  background: none;
+  color: var(--apple-text-tertiary, #6e6e73);
   font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0.3rem 0;
 }
 
-/* Chat dialog */
-.chat-dialog-body {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding-top: 0.25rem;
+.ai-suggestion:hover {
+  color: var(--apple-blue, #1e3a8a);
 }
 
-.chat-messages {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  max-height: 22rem;
+.ai-thread {
+  flex: 1;
   overflow-y: auto;
-  padding: 0.25rem 0.15rem 0.5rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  width: min(44rem, 100%);
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem 0.75rem;
 }
 
-.chat-bubble {
-  padding: 0.75rem 1rem;
-  border-radius: 12px;
-  max-width: 92%;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+.ai-msg {
+  max-width: 86%;
+  padding: 0.8rem 1rem;
+  border-radius: 16px;
 }
 
-.chat-bubble p {
+.ai-msg p {
   margin: 0;
-}
-
-.chat-bubble--agent {
-  align-self: flex-start;
-  background: #f2f2f7;
-  color: var(--apple-text, #1d1d1f);
-  border: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.chat-bubble--self {
-  align-self: flex-end;
-  background: rgba(10, 132, 255, 0.12);
-  color: #0066cc;
-  border: 1px solid rgba(10, 132, 255, 0.22);
-}
-
-.chat-bubble--neutral {
-  align-self: flex-start;
-  background: #fafafa;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.chat-bubble__who {
-  display: block;
-  font-size: 0.65rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.055em;
-  color: #86868b;
-  margin-bottom: 0.35rem;
-}
-
-.chat-bubble--self .chat-bubble__who {
-  color: #0a84ff;
-}
-
-.chat-bubble__text {
-  font-size: 0.875rem;
-  line-height: 1.45;
+  font-size: 0.9rem;
+  line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.chat-bubble__time {
+.ai-msg__who {
   display: block;
-  margin-top: 0.4rem;
-  font-size: 0.68rem;
-  color: #86868b;
+  margin-bottom: 0.3rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--apple-text-secondary, #86868b);
 }
 
-.support-textarea {
-  width: 100%;
-  border-radius: 10px;
-  border: 1px solid #d2d2d7;
-  font-size: 0.875rem;
+.ai-msg--ai {
+  align-self: flex-start;
+  background: var(--apple-bg-secondary, #f5f5f7);
+  color: var(--apple-text, #1d1d1f);
 }
 
-.support-textarea:focus {
-  outline: none;
-  border-color: #0a84ff;
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.18);
+.ai-msg--user {
+  align-self: flex-end;
+  background: rgba(30, 58, 138, 0.1);
+  color: var(--apple-blue, #1e3a8a);
+}
+
+.ai-msg--admin {
+  align-self: flex-start;
+  background: rgba(10, 132, 255, 0.12);
+  color: var(--apple-text, #1d1d1f);
+  border: 1px solid rgba(10, 132, 255, 0.2);
+}
+
+.ai-msg--typing p {
+  color: var(--apple-text-secondary, #86868b);
+}
+
+.ai-dock {
+  padding: 0.75rem 1.25rem 1.35rem;
+  display: flex;
+  justify-content: center;
+}
+
+@media (max-width: 860px) {
+  .ai-shell {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .ai-sidebar {
+    border-right: none;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  }
+
+  .ai-recent-list {
+    max-height: 8rem;
+  }
+
+  .ai-stage {
+    min-height: 22rem;
+  }
 }
 </style>

@@ -1,5 +1,12 @@
 import { reactive } from 'vue'
 import { supportApi } from '../infrastructure/supportApi.js'
+import {
+  appendAdminMessage,
+  createAdminChat,
+  getAdminChat,
+  listAdminChatsForResident,
+} from '../infrastructure/realtimeSupportDb.js'
+import { getActiveDataOwnerId } from '@/iam/application/sessionStore.js'
 
 const state = reactive({
   faqs: [],
@@ -24,12 +31,13 @@ export function useSupportStore() {
   const loadMyChats = async (residentId) => {
     state.loadChatsError = null
     const cleanId = residentId != null ? String(residentId) : ''
-    if (!cleanId) {
+    const ownerId = getActiveDataOwnerId()
+    if (!cleanId || !ownerId) {
       state.myChats = []
       return
     }
     try {
-      state.myChats = await supportApi.listChatsForResident(cleanId)
+      state.myChats = await listAdminChatsForResident(ownerId, cleanId)
     } catch (e) {
       state.loadChatsError = 'CHATS_LOAD_FAILED'
       console.error(e)
@@ -48,8 +56,9 @@ export function useSupportStore() {
 
   const openChatDialog = async (chat) => {
     state.error = null
+    const ownerId = getActiveDataOwnerId()
     try {
-      const full = await supportApi.getChatById(chat.id)
+      const full = ownerId ? await getAdminChat(ownerId, chat.id) : chat
       setActiveChat(full)
       state.chatDialogVisible = true
     } catch (e) {
@@ -67,10 +76,12 @@ export function useSupportStore() {
     state.isSubmittingTicket = true
     state.error = null
     try {
-      const newChat = await supportApi.createChat({
+      const newChat = await createAdminChat({
+        ownerId: getActiveDataOwnerId(),
         residentId,
         residentName,
         topic: topic || 'Soporte',
+        source: 'resident',
       })
       await loadMyChats(residentId)
       setActiveChat(newChat)
@@ -91,12 +102,14 @@ export function useSupportStore() {
    */
   const sendResidentMessage = async (body, residentProfile = {}) => {
     const chatId = state.activeChat?.id
-    if (!chatId || !body.trim()) return null
-    const updated = await supportApi.appendMessage(chatId, {
+    const ownerId = getActiveDataOwnerId()
+    if (!chatId || !ownerId || !body.trim()) return null
+    await appendAdminMessage(ownerId, chatId, {
       authorRole: 'resident',
       body,
       authorName: residentProfile.name,
     })
+    const updated = await getAdminChat(ownerId, chatId)
     setActiveChat(updated)
     const rid = updated?.residentId
     if (rid) await loadMyChats(rid)

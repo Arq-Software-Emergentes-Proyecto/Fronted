@@ -1,5 +1,11 @@
 import { apiClient } from '@/shared/infrastructure/api/apiClient.js'
 import { apiError } from '@/shared/infrastructure/api/utils.js'
+import {
+  checkoutReturnUrl,
+  readMercadoPagoPayment,
+  startMercadoPagoCheckout,
+} from '@/shared/infrastructure/mercadoPagoCheckoutClient.js'
+import { AppPaths } from '@/shared/domain/appRoutes.js'
 
 function parseSubscription(data) {
   if (!data || typeof data !== 'object') return null
@@ -26,24 +32,52 @@ export const subscriptionApi = {
 
   async checkout(planId) {
     const frontendBaseUrl = typeof window !== 'undefined' ? window.location.origin : undefined
-    const { data } = await apiClient.post('/api/v1/subscription/checkout', {
-      planId,
-      ...(frontendBaseUrl ? { frontendBaseUrl } : {}),
-    })
-    return {
-      preferenceId: data?.preferenceId ?? data?.PreferenceId ?? null,
-      initPoint: data?.initPoint ?? data?.InitPoint ?? null,
-      demo: Boolean(data?.demo ?? data?.Demo),
-      amount: Number(data?.amount ?? data?.Amount ?? 0),
-      planId: String(data?.planId ?? data?.PlanId ?? planId),
+    try {
+      const { data } = await apiClient.post('/api/v1/subscription/checkout', {
+        planId,
+        ...(frontendBaseUrl ? { frontendBaseUrl } : {}),
+      })
+      if (data?.initPoint && !data?.demo && !data?.Demo) {
+        return {
+          preferenceId: data?.preferenceId ?? data?.PreferenceId ?? null,
+          initPoint: data.initPoint ?? data.InitPoint,
+          demo: false,
+          amount: Number(data?.amount ?? data?.Amount ?? 0),
+          planId: String(data?.planId ?? data?.PlanId ?? planId),
+        }
+      }
+    } catch {
+      /* fall through to Checkout Pro on this app */
     }
+
+    return startMercadoPagoCheckout({
+      kind: 'subscription',
+      planId,
+      title: `BuildingFex ${planId}`,
+      externalReference: `subscription:${planId}`,
+      successUrl: checkoutReturnUrl(AppPaths.APP_SETTINGS),
+      failureUrl: checkoutReturnUrl(AppPaths.APP_SETTINGS, { subscription: 'failure' }),
+      pendingUrl: checkoutReturnUrl(AppPaths.APP_SETTINGS, { subscription: 'pending' }),
+    })
   },
 
-  async confirm({ planId, paymentId = null, demo = false }) {
+  async confirm({ planId, paymentId = null }) {
+    if (paymentId == null || !String(paymentId).length) {
+      const error = new Error('PAYMENT_REQUIRED')
+      error.code = 'PAYMENT_REQUIRED'
+      throw error
+    }
+    const payment = await readMercadoPagoPayment(paymentId)
+    if (!payment.approved) {
+      const error = new Error('PAYMENT_NOT_APPROVED')
+      error.code = 'PAYMENT_NOT_APPROVED'
+      throw error
+    }
+
     const { data } = await apiClient.post('/api/v1/subscription/confirm', {
       planId,
       paymentId,
-      demo,
+      demo: false,
     })
     const subscription = parseSubscription(data?.subscription ?? data?.Subscription)
     return {

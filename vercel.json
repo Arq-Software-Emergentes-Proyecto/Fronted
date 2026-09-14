@@ -1,8 +1,10 @@
 {
   "rewrites": [
+    { "source": "/mp/checkout", "destination": "/api/mp" },
+    { "source": "/mp/payment", "destination": "/api/mp" },
     {
-      "source": "/api/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/api/:path*"
+      "source": "/api/v1/:path*",
+      "destination": "https://backend-production-5e544.up.railway.app/api/v1/:path*"
     },
     {
       "source": "/users/:path*",

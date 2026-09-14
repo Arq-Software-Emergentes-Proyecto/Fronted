@@ -20,6 +20,10 @@ import {
   checkoutMaintenanceFees,
   confirmMaintenancePayment,
 } from '@/finances/infrastructure/mercadoPagoService.js'
+import {
+  clearPendingCheckout,
+  MpPendingKeys,
+} from '@/shared/infrastructure/mercadoPagoCheckoutClient.js'
 import { useResidentPaymentStore } from '@/finances/application/residentPaymentStore.js'
 
 const { t, locale } = useI18n()
@@ -46,43 +50,62 @@ onMounted(async () => {
 })
 
 async function handlePaymentReturnFromRoute() {
-  const status = route.query.payment
-  if (!status || !profile.value.id) return
+  if (!profile.value.id) return
 
-  if (status === 'failure') {
+  const status = String(
+    route.query.status ?? route.query.collection_status ?? route.query.payment ?? '',
+  ).toLowerCase()
+  const paymentRaw = route.query.payment_id ?? route.query.collection_id
+  const hasReturn = Boolean(status || paymentRaw)
+  if (!hasReturn) return
+
+  const clearReturn = () => {
+    clearPendingCheckout(MpPendingKeys.maintenance)
+    router.replace({ path: route.path })
+  }
+
+  if (status === 'failure' || status === 'rejected' || status === 'cancelled' || status === 'null') {
     toast.add({
       severity: 'error',
       summary: t('residentFinance.paymentErrorTitle'),
       detail: t('residentFinance.paymentErrorDetail'),
       life: 5000,
     })
-    router.replace({ path: route.path })
+    clearReturn()
     return
   }
 
-  if (status === 'pending') {
+  if (status === 'pending' || status === 'in_process' || status === 'in_mediation') {
     toast.add({
       severity: 'warn',
       summary: t('residentFinance.paymentPendingTitle'),
       detail: t('residentFinance.paymentPendingDetail'),
       life: 5000,
     })
-    router.replace({ path: route.path })
+    clearReturn()
     return
   }
 
-  if (status !== 'success') return
+  if (status && status !== 'success' && status !== 'approved') return
 
   try {
-    const paymentRaw = route.query.payment_id ?? route.query.collection_id
     const paymentId = paymentRaw != null && String(paymentRaw).length ? Number(paymentRaw) : null
 
-    if (Number.isFinite(paymentId)) {
-      await confirmMaintenancePayment({
-        residentId: profile.value.id,
-        paymentId,
+    if (!Number.isFinite(paymentId)) {
+      toast.add({
+        severity: 'warn',
+        summary: t('residentFinance.paymentPendingTitle'),
+        detail: t('residentFinance.paymentPendingDetail'),
+        life: 5000,
       })
+      clearReturn()
+      return
     }
+
+    await confirmMaintenancePayment({
+      residentId: profile.value.id,
+      paymentId,
+    })
 
     await loadData(profile.value.id)
     toast.add({
@@ -100,7 +123,7 @@ async function handlePaymentReturnFromRoute() {
       life: 5000,
     })
   } finally {
-    router.replace({ path: route.path })
+    clearReturn()
   }
 }
 
@@ -112,22 +135,9 @@ async function startMaintenanceCheckout() {
     const checkout = await checkoutMaintenanceFees({
       residentId: profile.value.id,
       payerEmail: profile.value.email || undefined,
+      amount: pendingTotal.value,
+      title: t('residentFinance.payNow'),
     })
-
-    if (checkout.demo) {
-      await confirmMaintenancePayment({
-        residentId: profile.value.id,
-        demo: true,
-      })
-      await loadData(profile.value.id)
-      toast.add({
-        severity: 'success',
-        summary: t('residentFinance.paymentSuccessTitle'),
-        detail: t('residentFinance.paymentSuccessDetail'),
-        life: 4000,
-      })
-      return
-    }
 
     if (checkout.initPoint) {
       window.location.assign(checkout.initPoint)

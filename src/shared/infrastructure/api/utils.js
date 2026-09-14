@@ -44,6 +44,7 @@ export function publicResident(user) {
     floor: user.floor ?? '',
     code: user.code ?? '',
     email: user.email ?? '',
+    ownerAdminId: user.ownerAdminId ?? null,
     admissionDate: admissionMatch ? admissionMatch[1] : '',
     billFromNextMonth: Boolean(user.billFromNextMonth),
     hasCredentials:

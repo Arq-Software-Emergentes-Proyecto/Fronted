@@ -11,6 +11,11 @@ import {
   maxResidentsForSubscriptionPlan,
 } from '@/shared/domain/subscriptionPlans.js'
 import { subscriptionApi } from '@/shared/infrastructure/subscriptionApi.js'
+import {
+  clearPendingCheckout,
+  MpPendingKeys,
+  readPendingCheckout,
+} from '@/shared/infrastructure/mercadoPagoCheckoutClient.js'
 import { residentsApi } from '@/residents/infrastructure/residentsApi.js'
 import { useFinancesStore } from '@/finances/application/financesStore.js'
 import { formatDayMonth, normalizeAdmissionPayRange, normalizeSettings } from '@/finances/domain/billingCycle.js'
@@ -125,27 +130,39 @@ async function loadSubscription() {
 }
 
 async function handleSubscriptionReturnFromRoute() {
-  const status = route.query.subscription
-  const plan = route.query.plan
-  if (!status || !plan || !isAdmin.value) return
+  if (!isAdmin.value) return
 
-  if (status === 'failure') {
+  const pending = readPendingCheckout(MpPendingKeys.subscription)
+  const status = String(
+    route.query.status ?? route.query.collection_status ?? route.query.subscription ?? '',
+  ).toLowerCase()
+  const plan = route.query.plan || pending?.planId
+  const paymentRaw = route.query.payment_id ?? route.query.collection_id
+  const hasReturn = Boolean(status || paymentRaw || route.query.subscription)
+  if (!hasReturn) return
+
+  const clearReturn = () => {
+    clearPendingCheckout(MpPendingKeys.subscription)
+    router.replace({ name: AppRouteNames.APP_SETTINGS })
+  }
+
+  if (status === 'failure' || status === 'rejected' || status === 'cancelled') {
     planError.value = t('app.settingsPlanPaymentFailed')
-    router.replace({ name: AppRouteNames.APP_SETTINGS })
+    clearReturn()
     return
   }
 
-  if (status === 'pending') {
+  if (status === 'pending' || status === 'in_process' || status === 'in_mediation') {
     planSaveNotice.value = t('app.settingsPlanPaymentPending')
-    router.replace({ name: AppRouteNames.APP_SETTINGS })
+    clearReturn()
     return
   }
 
-  if (status !== 'success') return
+  if (status && status !== 'success' && status !== 'approved') return
+  if (!plan) return
 
   planCheckoutPlanId.value = String(plan)
   try {
-    const paymentRaw = route.query.payment_id ?? route.query.collection_id
     const paymentId = paymentRaw != null && String(paymentRaw).length ? Number(paymentRaw) : null
     const result = await subscriptionApi.confirm({
       planId: String(plan),
@@ -157,7 +174,7 @@ async function handleSubscriptionReturnFromRoute() {
     planError.value = t('app.settingsPlanConfirmError')
   } finally {
     planCheckoutPlanId.value = null
-    router.replace({ name: AppRouteNames.APP_SETTINGS })
+    clearReturn()
   }
 }
 
@@ -291,16 +308,11 @@ async function selectPlan(planId) {
   let checkout = null
   try {
     checkout = await subscriptionApi.checkout(planId)
-    if (checkout.demo) {
-      const result = await subscriptionApi.confirm({ planId, demo: true })
-      if (result.subscription) syncFromSubscription(result.subscription)
-      planSaveNotice.value = t('app.settingsPlanSavedDemo')
-    } else if (checkout.initPoint) {
+    if (checkout.initPoint) {
       window.location.assign(checkout.initPoint)
       return
-    } else {
-      planError.value = t('app.settingsPlanCheckoutError')
     }
+    planError.value = t('app.settingsPlanCheckoutError')
   } catch (error) {
     planError.value = error?.payload?.message || error?.message || t('app.settingsPlanCheckoutError')
   } finally {

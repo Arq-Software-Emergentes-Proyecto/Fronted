@@ -1,25 +1,26 @@
 <script setup>
-import { onMounted, ref, computed, watch, nextTick } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Button from 'primevue/button'
 import Textarea from 'primevue/textarea'
 
-import { supportApi } from '@/support/infrastructure/supportApi.js'
-import { useSession } from '@/iam/application/sessionStore.js'
+import { appendAdminMessage, watchAdminChats } from '@/support/infrastructure/realtimeSupportDb.js'
+import { useSession, getActiveDataOwnerId } from '@/iam/application/sessionStore.js'
 
 const { t, locale } = useI18n()
 const { state: sessionState } = useSession()
 
 const chats = ref([])
 const selectedId = ref(null)
-const selected = ref(null)
-const loadError = ref('')
 const replyText = ref('')
 const sending = ref(false)
-const loadingList = ref(false)
+const loadingList = ref(true)
+const loadError = ref('')
 const messagesEl = ref(null)
 
 const adminName = computed(() => sessionState.profile?.name ?? '')
+const ownerId = computed(() => getActiveDataOwnerId() || sessionState.profile?.id || '')
+const selected = computed(() => chats.value.find((row) => row.id === selectedId.value) || null)
 
 function formatWhen(iso) {
   if (!iso) return ''
@@ -33,30 +34,50 @@ function formatWhen(iso) {
   }
 }
 
-async function loadChats() {
-  loadError.value = ''
-  loadingList.value = true
-  try {
-    chats.value = await supportApi.listChatsForAdmin()
-  } catch (e) {
-    loadError.value = t('supportAdmin.loadError')
-    console.error(e)
-    chats.value = []
-  } finally {
-    loadingList.value = false
-  }
+function bubbleRole(role) {
+  if (role === 'admin') return t('supportAdmin.badgeAdmin')
+  if (role === 'resident') return t('supportAdmin.badgeResident')
+  if (role === 'assistant' || role === 'ai') return t('supportAdmin.badgeAssistant')
+  return role
 }
 
-async function selectChat(row) {
-  selectedId.value = row.id
-  try {
-    selected.value = await supportApi.getChatById(row.id)
-  } catch (e) {
-    console.error(e)
-    selected.value = null
+function previewLast(row) {
+  const msgs = row.messages
+  if (!Array.isArray(msgs) || !msgs.length) return '—'
+  const last = msgs[msgs.length - 1]
+  return typeof last?.body === 'string' ? last.body : '—'
+}
+
+let stopChats = null
+
+function bindChats() {
+  stopChats?.()
+  stopChats = null
+  chats.value = []
+  loadError.value = ''
+  if (!ownerId.value) {
+    loadingList.value = false
+    loadError.value = t('supportAdmin.loadError')
+    return
   }
-  await nextTick()
-  scrollToBottom()
+  loadingList.value = true
+  stopChats = watchAdminChats(ownerId.value, (list, error) => {
+    loadingList.value = false
+    if (error) {
+      loadError.value = t('supportAdmin.loadError')
+      chats.value = []
+      return
+    }
+    loadError.value = ''
+    chats.value = list
+    if (selectedId.value && !list.some((row) => row.id === selectedId.value)) {
+      selectedId.value = null
+    }
+  })
+}
+
+function selectChat(row) {
+  selectedId.value = row.id
 }
 
 async function scrollToBottom() {
@@ -70,37 +91,31 @@ watch(
   () => scrollToBottom(),
 )
 
+watch(ownerId, () => bindChats(), { immediate: true })
+
+onUnmounted(() => {
+  stopChats?.()
+})
+
 async function sendReply() {
   const id = selected.value?.id
   const text = replyText.value.trim()
-  if (!id || !text || sending.value) return
+  if (!id || !text || sending.value || !ownerId.value) return
   sending.value = true
   try {
-    const updated = await supportApi.appendMessage(id, {
+    await appendAdminMessage(ownerId.value, id, {
       authorRole: 'admin',
       body: text,
       authorName: adminName.value,
     })
-    selected.value = updated
     replyText.value = ''
-    await loadChats()
-    const still = chats.value.find((c) => c.id === id)
-    if (still) Object.assign(still, { updatedAt: updated.updatedAt, messages: updated.messages })
   } catch (e) {
     console.error(e)
+    loadError.value = t('supportAdmin.loadError')
   } finally {
     sending.value = false
   }
 }
-
-function previewLast(row) {
-  const msgs = row.messages
-  if (!Array.isArray(msgs) || !msgs.length) return '—'
-  const last = msgs[msgs.length - 1]
-  return typeof last?.body === 'string' ? last.body : '—'
-}
-
-onMounted(loadChats)
 </script>
 
 <template>
@@ -119,7 +134,7 @@ onMounted(loadChats)
           icon="pi pi-refresh"
           class="finance-toolbar-row__btn"
           :loading="loadingList"
-          @click="loadChats"
+          @click="bindChats"
         />
       </div>
 
@@ -145,7 +160,11 @@ onMounted(loadChats)
                 @click="selectChat(c)"
               >
                 <span class="help-chat-row__name">{{ c.residentName || c.residentId }}</span>
-                <span class="help-chat-row__topic">{{ c.topic }}</span>
+                <span class="help-chat-row__topic">{{
+                  c.source === 'ai-escalation'
+                    ? `${c.topic} · ${t('supportAdmin.fromAssistant')}`
+                    : c.topic
+                }}</span>
                 <span class="help-chat-row__time">{{ formatWhen(c.updatedAt || c.createdAt) }}</span>
                 <span class="help-chat-row__preview">{{ previewLast(c) }}</span>
               </button>
@@ -178,13 +197,7 @@ onMounted(loadChats)
                     : 'help-bubble--other'
               "
             >
-              <span class="help-bubble__label">{{
-                m.authorRole === 'admin'
-                  ? t('supportAdmin.badgeAdmin')
-                  : m.authorRole === 'resident'
-                    ? t('supportAdmin.badgeResident')
-                    : m.authorRole
-              }}</span>
+              <span class="help-bubble__label">{{ bubbleRole(m.authorRole) }}</span>
               <span v-if="m.authorName" class="help-bubble__name">{{ m.authorName }}</span>
               <p class="help-bubble__body">{{ m.body }}</p>
               <span class="help-bubble__time">{{ formatWhen(m.createdAt) }}</span>

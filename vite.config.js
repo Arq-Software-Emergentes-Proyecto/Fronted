@@ -2,6 +2,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { mercadoPagoCheckoutPlugin } from './server/viteMercadoPagoPlugin.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -29,9 +30,13 @@ const API_ROUTE_PREFIXES = [
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const apiTarget = env.VITE_API_PROXY_TARGET || 'http://localhost:5001'
+  if (env.MP_ACCESS_TOKEN) process.env.MP_ACCESS_TOKEN = env.MP_ACCESS_TOKEN
+  if (env.MERCADOPAGO_ACCESS_TOKEN) {
+    process.env.MERCADOPAGO_ACCESS_TOKEN = env.MERCADOPAGO_ACCESS_TOKEN
+  }
 
   return {
-    plugins: [vue()],
+    plugins: [vue(), mercadoPagoCheckoutPlugin()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, 'src'),
