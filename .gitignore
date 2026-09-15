@@ -4,3 +4,4 @@ dist
 *.local
 .vercel
 .idea
+server/.local-mock-db.json

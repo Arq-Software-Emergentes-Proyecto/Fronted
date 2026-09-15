@@ -1,13 +1,12 @@
 <script setup>
 import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import DataTable from 'primevue/datatable'
-import Column from 'primevue/column'
-import Tag from 'primevue/tag'
 import Chart from 'primevue/chart'
 import { financesApi } from '@/finances/infrastructure/financesApi.js'
 import { adminManagementExpensesApi } from '@/finances/infrastructure/adminManagementExpensesApi.js'
 import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
+import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.js'
+import { spacesApi } from '@/socialSpaces/infrastructure/spacesApi.js'
 
 const { t, locale } = useI18n()
 
@@ -19,8 +18,39 @@ const kpi = ref({
 })
 
 const recentIncidents = ref([])
+const reservations = ref([])
+const spacesById = ref(new Map())
 const isLoading = ref(true)
 const chartHasData = ref(false)
+
+function todayKey() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function spaceName(spaceId) {
+  return spacesById.value.get(spaceId)?.name ?? t('app.spaceFallbackName')
+}
+
+function guestCount(row) {
+  return Array.isArray(row?.guests) ? row.guests.filter((g) => String(g?.name ?? '').trim()).length : 0
+}
+
+const todayReservations = computed(() => {
+  const key = todayKey()
+  return reservations.value
+    .filter((row) => String(row.date ?? '') === key)
+    .slice()
+    .sort((a, b) => String(a.startTime ?? '').localeCompare(String(b.startTime ?? '')))
+})
+
+const todayGuestSummary = computed(() => {
+  const withGuests = todayReservations.value.filter((row) => guestCount(row) > 0).length
+  return {
+    depts: todayReservations.value.length,
+    withGuests,
+  }
+})
 
 const nfPen = computed(
   () => (value) =>
@@ -138,11 +168,14 @@ async function loadAdminChart(kpiData) {
 
 onMounted(async () => {
   try {
-    const [kpiData, incidentsData] = await Promise.all([
+    const [kpiResult, incidentsResult, reservationsResult, spacesResult] = await Promise.allSettled([
       financesApi.getDashboardKpis(),
       incidentsApi.list(),
+      reservationsApi.listAllForAdmin(),
+      spacesApi.list(),
     ])
 
+    const kpiData = kpiResult.status === 'fulfilled' ? kpiResult.value : null
     if (kpiData && typeof kpiData === 'object') {
       kpi.value = {
         totalResidents: Number(kpiData.totalResidents) || 0,
@@ -154,30 +187,23 @@ onMounted(async () => {
       await loadAdminChart(kpiData)
     }
 
+    const incidentsData = incidentsResult.status === 'fulfilled' ? incidentsResult.value : []
     if (Array.isArray(incidentsData)) {
       recentIncidents.value = [...incidentsData]
         .sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))
         .slice(0, 5)
     }
+
+    const reservationsData = reservationsResult.status === 'fulfilled' ? reservationsResult.value : []
+    const spaces = spacesResult.status === 'fulfilled' ? spacesResult.value : []
+    reservations.value = Array.isArray(reservationsData) ? reservationsData : []
+    spacesById.value = new Map((Array.isArray(spaces) ? spaces : []).map((s) => [s.id, s]))
   } catch (error) {
     console.error('Error loading dashboard data:', error)
   } finally {
     isLoading.value = false
   }
 })
-
-function incidentSeverity(status) {
-  switch (status) {
-    case 'open':
-      return 'danger'
-    case 'in-progress':
-      return 'warning'
-    case 'resolved':
-      return 'success'
-    default:
-      return 'info'
-  }
-}
 
 function incidentStatusLabel(status) {
   switch (status) {
@@ -190,6 +216,23 @@ function incidentStatusLabel(status) {
     default:
       return String(status ?? '—')
   }
+}
+
+function departmentLabel(row) {
+  const code = String(row?.residentCode ?? '').trim()
+  if (code) return t('dashboard.deptLabel', { code })
+  return t('dashboard.deptUnknown')
+}
+
+function guestNames(row) {
+  return (Array.isArray(row?.guests) ? row.guests : [])
+    .map((g) => String(g?.name ?? '').trim())
+    .filter(Boolean)
+    .join(', ')
+}
+
+function slotLabel(row) {
+  return `${row.startTime ?? ''} – ${row.endTime ?? ''}`
 }
 
 const nfDate = computed(
@@ -238,21 +281,19 @@ const chartOptions = ref({
 </script>
 
 <template>
-  <div class="app-view">
-    <div class="page-header">
-      <h1 class="page-title">{{ t('dashboard.title') }}</h1>
-      <p class="page-subtitle">{{ t('dashboard.subtitle') }}</p>
-    </div>
+  <div class="app-view app-view--ai">
+    <header class="dash-head">
+      <h1 class="dash-head__title">{{ t('dashboard.title') }}</h1>
+      <p class="dash-head__sub">{{ t('dashboard.subtitle') }}</p>
+    </header>
 
     <div class="finance-page">
       <section class="finance-panel" aria-labelledby="dashboard-kpi-heading">
-        <h2 id="dashboard-kpi-heading" class="finance-panel__section-title mb-4">
+        <h2 id="dashboard-kpi-heading" class="finance-panel__section-title">
           {{ t('dashboard.financialOverview') }}
         </h2>
-        
-        <!-- Premium KPI Grid -->
+
         <div class="kpi-grid custom-scrollbar">
-          <!-- Card 1: Total Residents -->
           <div class="kpi-card">
             <div class="kpi-header">
               <div class="kpi-icon icon-blue">
@@ -261,12 +302,9 @@ const chartOptions = ref({
               <span class="kpi-label">{{ t('dashboard.totalResidents') }}</span>
             </div>
             <div class="kpi-value">{{ isLoading ? '…' : kpi.totalResidents }}</div>
-            <span class="kpi-subtext">
-              <i class="pi pi-verified" aria-hidden="true"></i> Usuarios registrados
-            </span>
+            <span class="kpi-subtext">{{ t('dashboard.kpiRegistered') }}</span>
           </div>
 
-          <!-- Card 2: Occupied Units -->
           <div class="kpi-card">
             <div class="kpi-header">
               <div class="kpi-icon icon-green">
@@ -275,12 +313,9 @@ const chartOptions = ref({
               <span class="kpi-label">{{ t('dashboard.occupiedUnits') }}</span>
             </div>
             <div class="kpi-value">{{ isLoading ? '…' : kpi.occupiedUnits }}</div>
-            <span class="kpi-subtext">
-              <i class="pi pi-check-circle" aria-hidden="true"></i> Departamentos activos
-            </span>
+            <span class="kpi-subtext">{{ t('dashboard.kpiActiveDepts') }}</span>
           </div>
 
-          <!-- Card 3: Empty Units -->
           <div class="kpi-card">
             <div class="kpi-header">
               <div class="kpi-icon icon-orange">
@@ -289,12 +324,9 @@ const chartOptions = ref({
               <span class="kpi-label">{{ t('dashboard.emptyUnits') }}</span>
             </div>
             <div class="kpi-value">{{ isLoading ? '…' : kpi.emptyUnits }}</div>
-            <span class="kpi-subtext">
-              <i class="pi pi-info-circle" aria-hidden="true"></i> Disponibles
-            </span>
+            <span class="kpi-subtext">{{ t('dashboard.kpiAvailable') }}</span>
           </div>
 
-          <!-- Card 4: Critical Delinquency -->
           <div class="kpi-card card-danger">
             <div class="kpi-header">
               <div class="kpi-icon icon-red">
@@ -303,58 +335,84 @@ const chartOptions = ref({
               <span class="kpi-label">{{ t('dashboard.criticalDelinquency') }}</span>
             </div>
             <div class="kpi-value text-red">{{ isLoading ? '…' : nfPen(kpi.totalDebt) }}</div>
-            <span class="kpi-subtext subtext-red">
-              <i class="pi pi-arrow-up" aria-hidden="true"></i> Deuda acumulada
-            </span>
+            <span class="kpi-subtext subtext-red">{{ t('dashboard.kpiAccumulatedDebt') }}</span>
           </div>
         </div>
       </section>
 
+      <section class="finance-panel" aria-labelledby="dashboard-reservations-heading">
+        <div class="panel-head">
+          <h2 id="dashboard-reservations-heading" class="finance-panel__section-title">
+            {{ t('dashboard.todayReservations') }}
+          </h2>
+          <p v-if="!isLoading && todayReservations.length" class="panel-head__meta">
+            {{
+              t('dashboard.todaySummary', {
+                depts: todayGuestSummary.depts,
+                withGuests: todayGuestSummary.withGuests,
+              })
+            }}
+          </p>
+        </div>
+        <p class="panel-hint">{{ t('dashboard.todayReservationsHint') }}</p>
+
+        <p v-if="isLoading" class="dash-empty">{{ t('dashboard.todayReservationsLoading') }}</p>
+        <p v-else-if="!todayReservations.length" class="dash-empty">
+          {{ t('dashboard.todayReservationsEmpty') }}
+        </p>
+        <ul v-else class="dash-list" role="list">
+          <li v-for="row in todayReservations" :key="row.id" class="dash-row">
+            <div class="dash-row__main">
+              <span class="dash-row__title">{{ departmentLabel(row) }}</span>
+              <span class="dash-row__meta">
+                {{ row.residentName || '—' }} · {{ spaceName(row.spaceId) }} · {{ slotLabel(row) }}
+              </span>
+            </div>
+            <div class="dash-row__side">
+              <span
+                class="guest-badge"
+                :class="guestCount(row) ? 'guest-badge--yes' : 'guest-badge--no'"
+              >
+                {{
+                  guestCount(row)
+                    ? t('dashboard.guestCount', { n: guestCount(row) })
+                    : t('dashboard.guestNone')
+                }}
+              </span>
+              <span v-if="guestCount(row)" class="dash-row__guests">{{ guestNames(row) }}</span>
+            </div>
+          </li>
+        </ul>
+      </section>
+
       <div class="grid-layout">
-        <!-- Incidents Table -->
         <section class="finance-panel flex-1" aria-labelledby="dashboard-incidents-heading">
-          <h2 id="dashboard-incidents-heading" class="finance-panel__section-title mb-3">
+          <h2 id="dashboard-incidents-heading" class="finance-panel__section-title">
             {{ t('dashboard.recentIncidents') }}
           </h2>
-          
-          <p v-if="!recentIncidents.length && !isLoading" class="text-center text-color-secondary my-5">
-            No hay incidentes reportados recientemente.
+
+          <p v-if="!recentIncidents.length && !isLoading" class="dash-empty">
+            {{ t('dashboard.incidentsEmpty') }}
           </p>
-          
-          <DataTable
-            v-else
-            :value="recentIncidents"
-            responsiveLayout="scroll"
-            :loading="isLoading"
-            class="premium-table"
-          >
-            <Column field="description" :header="t('app.incidentDescription')" />
-            <Column field="residentName" :header="t('app.incidentResidentName')">
-              <template #body="{ data }">
-                <span class="font-semibold">{{ data.residentName }}</span>
-              </template>
-            </Column>
-            <Column :header="t('app.incidentDate')">
-              <template #body="{ data }">
-                <span class="text-500">{{ nfDate(data.createdAt) }}</span>
-              </template>
-            </Column>
-            <Column :header="t('dashboard.incidentStatus')">
-              <template #body="{ data }">
-                <Tag
-                  class="px-3"
-                  :value="incidentStatusLabel(data.status)"
-                  :severity="incidentSeverity(data.status)"
-                  rounded
-                />
-              </template>
-            </Column>
-          </DataTable>
+
+          <ul v-else class="dash-list" role="list">
+            <li v-for="row in recentIncidents" :key="row.id" class="dash-row">
+              <div class="dash-row__main">
+                <span class="dash-row__title">{{ row.description }}</span>
+                <span class="dash-row__meta">
+                  {{ row.residentName || '—' }}
+                  <template v-if="row.createdAt"> · {{ nfDate(row.createdAt) }}</template>
+                </span>
+              </div>
+              <span class="inc-badge" :class="`inc-badge--${row.status || 'open'}`">
+                {{ incidentStatusLabel(row.status) }}
+              </span>
+            </li>
+          </ul>
         </section>
 
-        <!-- Income/Expenses Chart -->
         <section class="finance-panel flex-1" aria-labelledby="dashboard-chart-heading">
-          <h2 id="dashboard-chart-heading" class="finance-panel__section-title mb-3">
+          <h2 id="dashboard-chart-heading" class="finance-panel__section-title">
             {{ t('dashboard.income') }} / {{ t('dashboard.expenses') }}
           </h2>
           <div class="dashboard-chart-wrap">
@@ -377,69 +435,100 @@ const chartOptions = ref({
 
 <style scoped>
 .app-view {
-  padding: 1.5rem;
-  max-width: 1200px;
-  margin: 0 auto;
+  padding: 1.75rem 1.5rem 2.5rem;
+  max-width: 72rem;
 }
 
-/* Page Header */
-.page-header {
-  margin-bottom: 2rem;
+.app-view--ai {
+  max-width: 88rem;
+  padding-top: 1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 1rem;
 }
-.page-title {
-  font-size: 1.75rem;
-  font-weight: 700;
-  margin: 0;
-  color: var(--surface-900);
-  letter-spacing: -0.02em;
+
+.dash-head {
+  padding: 0.15rem 0.15rem 0.25rem;
 }
-.page-subtitle {
+
+.dash-head__title {
   margin: 0;
-  font-size: 1.125rem;
-  color: var(--surface-500);
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--apple-text, #1d1d1f);
+}
+
+.dash-head__sub {
+  margin: 0.2rem 0 0;
+  font-size: 0.875rem;
+  color: var(--apple-text-secondary, #6e6e73);
 }
 
 .finance-page {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1rem;
 }
 
 .finance-panel {
-  padding: 1.5rem;
+  padding: 1.2rem 1.25rem 1.35rem;
   border-radius: 16px;
-  background: var(--surface-0, #ffffff);
-  border: 1px solid var(--surface-200, #e2e8f0);
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.03);
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
 .finance-panel__section-title {
-  margin: 0 0 1rem;
-  font-size: 1.125rem;
+  margin: 0 0 0.85rem;
+  font-size: 1.0625rem;
   font-weight: 600;
-  color: var(--surface-900);
+  letter-spacing: -0.02em;
+  color: var(--apple-text, #1d1d1f);
 }
 
-/* KPI GRID CSS */
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.panel-head .finance-panel__section-title {
+  margin-bottom: 0;
+}
+
+.panel-head__meta {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--apple-blue, #1e3a8a);
+}
+
+.panel-hint {
+  margin: 0.35rem 0 0.85rem;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
 .kpi-grid {
   display: flex;
   flex-direction: row;
-  gap: 1.25rem;
+  gap: 0.85rem;
   overflow-x: auto;
-  padding-bottom: 0.5rem;
+  padding-bottom: 0.15rem;
 }
 
 .kpi-card {
   flex: 1;
-  min-width: 250px;
-  background: var(--surface-0, #ffffff);
-  border: 1px solid var(--surface-200, #e2e8f0);
-  border-radius: 16px;
-  padding: 1.5rem;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.02);
+  min-width: 12.5rem;
+  background: #f5f5f7;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  border-radius: 14px;
+  padding: 1rem 1.05rem 1.1rem;
   display: flex;
   flex-direction: column;
 }
@@ -447,50 +536,49 @@ const chartOptions = ref({
 .kpi-header {
   display: flex;
   align-items: center;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
 }
 
 .kpi-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-right: 1rem;
-  font-size: 1.2rem;
+  margin-right: 0.7rem;
+  font-size: 0.95rem;
 }
 
-.icon-blue { background: #e0f2fe; color: #0284c7; }
-.icon-green { background: #dcfce7; color: #16a34a; }
-.icon-orange { background: #ffedd5; color: #ea580c; }
-.icon-red { background: #fee2e2; color: #dc2626; }
+.icon-blue { background: #e8eefc; color: #1e3a8a; }
+.icon-green { background: #e8f5e9; color: #1b7a3d; }
+.icon-orange { background: #fff3e0; color: #e65100; }
+.icon-red { background: #fdecee; color: #b42318; }
 
 .kpi-label {
-  color: var(--surface-500, #64748b);
+  color: #6e6e73;
   font-weight: 500;
-  font-size: 0.9rem;
+  font-size: 0.8125rem;
+  letter-spacing: -0.01em;
 }
 
 .kpi-value {
-  color: var(--surface-900, #0f172a);
-  font-weight: 700;
-  font-size: 1.8rem;
-  margin-bottom: 0.5rem;
+  color: #1d1d1f;
+  font-weight: 650;
+  font-size: 1.55rem;
+  letter-spacing: -0.03em;
+  margin-bottom: 0.3rem;
 }
 
 .kpi-subtext {
-  color: var(--surface-500, #64748b);
-  font-size: 0.8rem;
+  color: #86868b;
+  font-size: 0.75rem;
   font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
 }
 
-.subtext-red { color: #dc2626; }
-.text-red { color: #dc2626 !important; }
-.card-danger { background: #fff5f5; border-color: #fecaca; }
+.subtext-red { color: #b42318; }
+.text-red { color: #b42318; }
+.card-danger { background: #fff7f7; }
 
 .custom-scrollbar::-webkit-scrollbar {
   height: 6px;
@@ -499,50 +587,119 @@ const chartOptions = ref({
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: var(--surface-300);
+  background-color: #d2d2d7;
   border-radius: 10px;
+}
+
+.dash-empty {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: #6e6e73;
+}
+
+.dash-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.dash-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 12px;
+  background: #f5f5f7;
+}
+
+.dash-row__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.dash-row__title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #1d1d1f;
+}
+
+.dash-row__meta {
+  font-size: 0.78rem;
+  color: #6e6e73;
+  line-height: 1.4;
+}
+
+.dash-row__side {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.28rem;
+  max-width: 14rem;
+}
+
+.dash-row__guests {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: #6e6e73;
+  text-align: right;
+}
+
+.guest-badge,
+.inc-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.5rem;
+  border-radius: 980px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.guest-badge--yes {
+  background: #e8eefc;
+  color: #1e3a8a;
+}
+
+.guest-badge--no {
+  background: #eeeef0;
+  color: #6e6e73;
+}
+
+.inc-badge--open {
+  background: #fdecee;
+  color: #b42318;
+}
+
+.inc-badge--in-progress {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.inc-badge--resolved {
+  background: #e8f5e9;
+  color: #1b7a3d;
 }
 
 .grid-layout {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1rem;
 }
 @media (min-width: 1024px) {
   .grid-layout {
     flex-direction: row;
   }
-}
-
-/* Premium DataTable Styling */
-.premium-table :deep(.p-datatable-header) {
-  background: transparent;
-  border: none;
-}
-.premium-table :deep(.p-datatable-thead > tr > th) {
-  background: transparent;
-  color: var(--surface-500);
-  font-weight: 500;
-  font-size: 0.85rem;
-  text-transform: capitalize;
-  border: none;
-  border-bottom: 1px solid var(--surface-200);
-  padding: 1rem;
-}
-.premium-table :deep(.p-datatable-tbody > tr) {
-  background: transparent;
-}
-.premium-table :deep(.p-datatable-tbody > tr:hover) {
-  background: var(--surface-50);
-}
-.premium-table :deep(.p-datatable-tbody > tr > td) {
-  border: none;
-  border-bottom: 1px solid var(--surface-100);
-  padding: 1rem;
-  vertical-align: middle;
-}
-.premium-table :deep(.p-datatable-wrapper) {
-  border-radius: 12px;
 }
 
 .dashboard-chart-wrap {
@@ -556,11 +713,24 @@ const chartOptions = ref({
   align-items: center;
   justify-content: center;
   text-align: center;
-  color: var(--surface-500, #64748b);
-  font-size: 0.9375rem;
+  color: #6e6e73;
+  font-size: 0.875rem;
   padding: 1rem;
 }
 .dashboard-chart {
   height: 100%;
+}
+
+@media (max-width: 720px) {
+  .dash-row {
+    flex-direction: column;
+  }
+  .dash-row__side {
+    align-items: flex-start;
+    max-width: none;
+  }
+  .dash-row__guests {
+    text-align: left;
+  }
 }
 </style>

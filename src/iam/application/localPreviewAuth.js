@@ -39,6 +39,29 @@ export function resolvePreviewRole(email) {
   return /resident/i.test(String(email ?? '')) ? SessionRoles.RESIDENT : SessionRoles.ADMIN
 }
 
+export function previewAdminAuthResult({ email, name } = {}) {
+  const profile = buildPreviewProfile({
+    email,
+    name,
+    role: SessionRoles.ADMIN,
+  })
+  return {
+    user: {
+      ...profile,
+      role: SessionRoles.ADMIN,
+      dni: '',
+      address: '',
+      company: '',
+      ruc: '',
+    },
+    token: createPreviewAccessToken({
+      role: SessionRoles.ADMIN,
+      email: profile.email,
+      sub: profile.id,
+    }),
+  }
+}
+
 export function buildPreviewProfile({ email, name, role }) {
   const trimmedEmail = String(email ?? '').trim()
   const displayName =

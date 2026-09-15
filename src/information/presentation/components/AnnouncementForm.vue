@@ -1,31 +1,30 @@
 <script setup>
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 
 const { t } = useI18n()
 
-const emit = defineEmits(['submit'])
+const emit = defineEmits(['submit', 'cancel'])
 
-const title    = ref('')
-const body     = ref('')
+const title = ref('')
+const body = ref('')
 const priority = ref('normal')
 const duration = ref(7)
 const submitting = ref(false)
-const error    = ref('')
-const showModal = ref(false)
+const error = ref('')
 
-function openModal() {
-  title.value    = ''
-  body.value     = ''
-  priority.value = 'normal'
-  duration.value = 7
-  error.value    = ''
-  showModal.value = true
-}
+const priorities = [
+  { id: 'normal', icon: 'pi pi-megaphone', labelKey: 'information.priorityNormal' },
+  { id: 'important', icon: 'pi pi-exclamation-circle', labelKey: 'information.priorityImportant' },
+  { id: 'urgent', icon: 'pi pi-exclamation-triangle', labelKey: 'information.priorityUrgent' },
+]
 
-function closeModal() {
-  showModal.value = false
+const durations = [7, 15, 30]
+
+function durationLabel(days) {
+  if (days === 7) return t('information.duration7')
+  if (days === 15) return t('information.duration15')
+  return t('information.duration30')
 }
 
 async function handleSubmit() {
@@ -36,254 +35,218 @@ async function handleSubmit() {
   error.value = ''
   submitting.value = true
   emit('submit', {
-    title:    title.value.trim(),
-    body:     body.value.trim(),
+    title: title.value.trim(),
+    body: body.value.trim(),
     priority: priority.value,
     duration: duration.value,
   })
   submitting.value = false
-  closeModal()
 }
 </script>
 
 <template>
-  <button
-    id="btn-new-announcement"
-    type="button"
-    class="ann-form__trigger"
-    @click="openModal"
-  >
-    <i class="pi pi-plus ann-form__trigger-icon" aria-hidden="true" />
-    {{ t('information.newAnnouncement') }}
-  </button>
+  <section class="ann-form" aria-labelledby="ann-form-heading">
+    <h2 id="ann-form-heading" class="ann-form__title">{{ t('information.newAnnouncement') }}</h2>
 
-  <Teleport to="body">
-    <Transition name="ann-modal">
-      <div v-if="showModal" class="ann-modal-overlay bf-modal-backdrop" @click.self="closeModal">
-        <div class="ann-modal bf-modal-panel" role="dialog" :aria-label="t('information.newAnnouncement')">
-          <header class="ann-modal__header">
-            <h2 class="ann-modal__title">{{ t('information.newAnnouncement') }}</h2>
-            <button
-              type="button"
-              class="ann-modal__close"
-              :aria-label="t('information.close')"
-              @click="closeModal"
-            >
-              <i class="pi pi-times" aria-hidden="true" />
-            </button>
-          </header>
+    <label class="ann-form__field" for="input-announcement-title">
+      <span>{{ t('information.titleLabel') }}</span>
+      <input
+        id="input-announcement-title"
+        v-model="title"
+        type="text"
+        :placeholder="t('information.titlePlaceholder')"
+        maxlength="120"
+        :disabled="submitting"
+      />
+    </label>
 
-          <form class="ann-modal__body" @submit.prevent="handleSubmit">
-            <label class="ann-field">
-              <span class="ann-field__label">{{ t('information.titleLabel') }}</span>
-              <input
-                id="input-announcement-title"
-                v-model="title"
-                type="text"
-                class="ann-field__input"
-                :placeholder="t('information.titlePlaceholder')"
-                maxlength="120"
-              />
-            </label>
+    <label class="ann-form__field" for="input-announcement-body">
+      <span>{{ t('information.bodyLabel') }}</span>
+      <textarea
+        id="input-announcement-body"
+        v-model="body"
+        rows="6"
+        :placeholder="t('information.bodyPlaceholder')"
+        :disabled="submitting"
+      />
+    </label>
 
-            <label class="ann-field">
-              <span class="ann-field__label">{{ t('information.bodyLabel') }}</span>
-              <textarea
-                id="input-announcement-body"
-                v-model="body"
-                class="ann-field__textarea"
-                :placeholder="t('information.bodyPlaceholder')"
-                rows="5"
-              />
-            </label>
-
-            <label class="ann-field">
-              <span class="ann-field__label">{{ t('information.priorityLabel') }}</span>
-              <select
-                id="select-announcement-priority"
-                v-model="priority"
-                class="ann-field__select"
-              >
-                <option value="normal">{{ t('information.priorityNormal') }}</option>
-                <option value="important">{{ t('information.priorityImportant') }}</option>
-                <option value="urgent">{{ t('information.priorityUrgent') }}</option>
-              </select>
-            </label>
-
-            <label class="ann-field">
-              <span class="ann-field__label">{{ t('information.durationLabel') }}</span>
-              <select
-                id="select-announcement-duration"
-                v-model="duration"
-                class="ann-field__select"
-              >
-                <option :value="7">{{ t('information.duration7') }}</option>
-                <option :value="15">{{ t('information.duration15') }}</option>
-                <option :value="30">{{ t('information.duration30') }}</option>
-              </select>
-              <span class="ann-field__hint">{{ t('information.durationHint') }}</span>
-            </label>
-
-            <p v-if="error" class="ann-modal__error">{{ error }}</p>
-
-            <ConfirmActions
-              :cancel-label="t('information.cancel')"
-              :confirm-label="submitting ? t('information.sending') : t('information.send')"
-              confirm-type="submit"
-              :loading="submitting"
-              :disabled="submitting"
-              :cancel-disabled="submitting"
-              @cancel="closeModal"
-            />
-          </form>
-        </div>
+    <fieldset class="ann-form__group">
+      <legend>{{ t('information.priorityLabel') }}</legend>
+      <div class="ann-form__chips" role="group">
+        <button
+          v-for="item in priorities"
+          :key="item.id"
+          type="button"
+          class="ann-chip"
+          :class="{ 'is-active': priority === item.id, [`ann-chip--${item.id}`]: true }"
+          @click="priority = item.id"
+        >
+          <i :class="item.icon" aria-hidden="true" />
+          {{ t(item.labelKey) }}
+        </button>
       </div>
-    </Transition>
-  </Teleport>
+    </fieldset>
+
+    <fieldset class="ann-form__group">
+      <legend>{{ t('information.durationLabel') }}</legend>
+      <p class="ann-form__hint">{{ t('information.durationHint') }}</p>
+      <div class="ann-form__chips" role="group">
+        <button
+          v-for="days in durations"
+          :key="days"
+          type="button"
+          class="ann-chip"
+          :class="{ 'is-active': duration === days }"
+          @click="duration = days"
+        >
+          <i class="pi pi-clock" aria-hidden="true" />
+          {{ durationLabel(days) }}
+        </button>
+      </div>
+    </fieldset>
+
+    <p v-if="error" class="ann-form__error" role="alert">{{ error }}</p>
+
+    <div class="bf-actions">
+      <button type="button" class="bf-btn bf-btn--cancel" :disabled="submitting" @click="emit('cancel')">
+        {{ t('information.cancel') }}
+      </button>
+      <button
+        type="button"
+        class="bf-btn bf-btn--confirm"
+        :disabled="submitting || !title.trim() || !body.trim()"
+        @click="handleSubmit"
+      >
+        {{ submitting ? t('information.sending') : t('information.send') }}
+      </button>
+    </div>
+  </section>
 </template>
 
 <style scoped>
-/* ── trigger button ── */
-.ann-form__trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.55rem 1.1rem;
-  border: none;
-  border-radius: 980px;
-  background: #0071e3;
-  color: #fff;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background 0.18s ease;
-}
-.ann-form__trigger:hover { background: #0077ed; }
-.ann-form__trigger:focus-visible {
-  outline: 2px solid #0071e3;
-  outline-offset: 2px;
-}
-.ann-form__trigger-icon { font-size: 0.75rem; }
-
-/* ── modal overlay ── */
-.ann-modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 9000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-}
-
-.ann-modal {
-  background: #fff;
-  border-radius: 18px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
-  width: 95%;
-  max-width: 32rem;
-  overflow: hidden;
-  animation: ann-modal-in 0.28s cubic-bezier(0.34, 1.2, 0.64, 1);
-}
-
-@keyframes ann-modal-in {
-  from { opacity: 0; transform: translateY(12px) scale(0.97); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-.ann-modal__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1.15rem 1.35rem 0.75rem;
-  border-bottom: 1px solid #e8e8ed;
-}
-.ann-modal__title {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: #1d1d1f;
-}
-.ann-modal__close {
-  background: none;
-  border: none;
-  font-size: 1rem;
-  color: #86868b;
-  cursor: pointer;
-  padding: 0.25rem;
-  border-radius: 6px;
-}
-.ann-modal__close:hover { color: #1d1d1f; }
-.ann-modal__close:focus-visible {
-  outline: 2px solid #0071e3;
-  outline-offset: 2px;
-}
-
-.ann-modal__body {
-  padding: 1.15rem 1.35rem 1.35rem;
+.ann-form {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  padding: 1.2rem 1.25rem 1.35rem;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
-/* ── fields ── */
-.ann-field {
+.ann-form__title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--apple-text, #1d1d1f);
+}
+
+.ann-form__field {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-}
-.ann-field__label {
-  font-size: 0.75rem;
+  gap: 0.4rem;
+  font-size: 0.8125rem;
   font-weight: 600;
-  color: #6e6e73;
-  letter-spacing: -0.01em;
+  color: var(--apple-text, #1d1d1f);
 }
-.ann-field__input,
-.ann-field__textarea,
-.ann-field__select {
-  font-family: inherit;
-  font-size: 0.875rem;
-  padding: 0.55rem 0.7rem;
-  border: 1px solid #d2d2d7;
-  border-radius: 10px;
-  background: #fafafa;
-  color: #1d1d1f;
-  transition: border-color 0.15s ease;
-}
-.ann-field__input:focus,
-.ann-field__textarea:focus,
-.ann-field__select:focus {
+
+.ann-form__field input,
+.ann-form__field textarea {
+  width: 100%;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--apple-border-hairline, #d2d2d7);
+  border-radius: 12px;
+  background: #fff;
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 400;
+  color: var(--apple-text, #1d1d1f);
   outline: none;
+}
+
+.ann-form__field textarea {
+  min-height: 8rem;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.ann-form__field input:focus,
+.ann-form__field textarea:focus {
   border-color: #0071e3;
-  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.12);
-}
-.ann-field__textarea { resize: vertical; min-height: 5.5rem; }
-.ann-field__select { cursor: pointer; }
-.ann-field__hint {
-  font-size: 0.68rem;
-  color: #86868b;
-  margin-top: 0.1rem;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.16);
 }
 
-/* ── error ── */
-.ann-modal__error {
+.ann-form__group {
   margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.ann-form__group legend {
+  padding: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--apple-text, #1d1d1f);
+}
+
+.ann-form__hint {
+  margin: 0.3rem 0 0.55rem;
   font-size: 0.78rem;
-  color: #b42318;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.ann-form__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.ann-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.42rem 0.75rem;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 980px;
+  background: #f5f5f7;
+  color: #4b5563;
+  font: inherit;
+  font-size: 0.8125rem;
   font-weight: 500;
+  cursor: pointer;
 }
 
-.ann-modal__body .bf-actions {
-  padding-top: 0.25rem;
+.ann-chip:hover {
+  color: var(--apple-text, #1d1d1f);
 }
 
-/* ── transitions ── */
-.ann-modal-enter-active,
-.ann-modal-leave-active { transition: opacity 0.2s ease; }
-.ann-modal-enter-from,
-.ann-modal-leave-to { opacity: 0; }
+.ann-chip.is-active {
+  background: #fff;
+  color: #0071e3;
+  border-color: rgba(0, 113, 227, 0.28);
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.ann-chip--urgent.is-active {
+  color: #b42318;
+  border-color: rgba(180, 35, 24, 0.28);
+}
+
+.ann-chip--important.is-active {
+  color: #e65100;
+  border-color: rgba(230, 81, 0, 0.28);
+}
+
+.ann-form__error {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #b42318;
+}
 </style>

@@ -119,12 +119,36 @@
       "destination": "https://backend-production-5e544.up.railway.app/teamWorkers"
     },
     {
+      "source": "/serviceProviders/:path*",
+      "destination": "https://backend-production-5e544.up.railway.app/serviceProviders/:path*"
+    },
+    {
+      "source": "/serviceProviders",
+      "destination": "https://backend-production-5e544.up.railway.app/serviceProviders"
+    },
+    {
       "source": "/importUploads/:path*",
       "destination": "https://backend-production-5e544.up.railway.app/importUploads/:path*"
     },
     {
       "source": "/importUploads",
       "destination": "https://backend-production-5e544.up.railway.app/importUploads"
+    },
+    {
+      "source": "/importFolders/:path*",
+      "destination": "https://backend-production-5e544.up.railway.app/importFolders/:path*"
+    },
+    {
+      "source": "/importFolders",
+      "destination": "https://backend-production-5e544.up.railway.app/importFolders"
+    },
+    {
+      "source": "/residentExtraCharges/:path*",
+      "destination": "https://backend-production-5e544.up.railway.app/residentExtraCharges/:path*"
+    },
+    {
+      "source": "/residentExtraCharges",
+      "destination": "https://backend-production-5e544.up.railway.app/residentExtraCharges"
     },
     {
       "source": "/supportChats/:path*",

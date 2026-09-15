@@ -945,5 +945,21 @@
       "dataUrl": "data:text/plain;base64,VHUgZW50cmVnYSBzZSByZWFsaXrDsyBjb3JyZWN0YW1lbnRlLiBzdWNjZXNzZnVsIQpDdXJzbzogMUFTSTA2MzktMjYxMC02ODE4LCBUYWxsZXIgZGUgRGVzZW1wZcOxbyBQcm9mZXNpb25hbCAtIFByZXNlbmNpYWwKRXZhbHVhY2nDs246IEFjdGl2aWRhZDogSW5mb3JtZXMgZGVsIEVzdGFkbyBkZWwgQXJ0ZSAoQXJ0w61jdWxvcyAxIOKAkyA4KQoKRmVjaGEgZGUgZW50cmVnYTogMTAvNS8yNiAyMDo0NyAoVVRDLTUpClRhbWHDsW8gZGUgZW50cmVnYTogdW5kZWZpbmVkClJlbWl0ZW50ZTogU2ViYXN0aWFuIE1hcnRpbiBCZWluZ29sZWEgTW9udGFsdm8KTsO6bWVybyBkZSBjb25maXJtYWNpw7NuOiA1NGFmNmRlMjc5MDI0YzVlODllYzAzYjAyM2EzODZhNw==",
       "ownerAdminId": "admin-seed-1"
     }
+  ],
+  "serviceProviders": [
+    {
+      "id": "provider-electricistas",
+      "name": "Electricistas SAC",
+      "phone": "999000111",
+      "specialty": "Electricidad",
+      "ownerAdminId": "admin-seed-1"
+    },
+    {
+      "id": "provider-cerrajeros",
+      "name": "Cerrajeros Lima",
+      "phone": "999000222",
+      "specialty": "Cerrajería",
+      "ownerAdminId": "admin-seed-1"
+    }
   ]
 }

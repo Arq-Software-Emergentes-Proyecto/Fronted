@@ -9,18 +9,47 @@ import { apiError, normalizeEmail } from '@/shared/infrastructure/api/utils.js'
 import { getFirebaseAuth, getFirebaseDb } from './firebaseApp.js'
 
 function mapAuthError(error) {
+  if (
+    error?.code === 'INVALID_PASSWORD' ||
+    error?.code === 'RESIDENT_USE_GOOGLE' ||
+    error?.code === 'EMAIL_NOT_FOUND' ||
+    error?.code === 'EMAIL_ALREADY_EXISTS' ||
+    error?.code === 'TOO_MANY_REQUESTS'
+  ) {
+    return error
+  }
+
   const code = String(error?.code ?? '')
-  if (code === 'auth/email-already-in-use') return apiError('EMAIL_ALREADY_EXISTS')
-  if (code === 'auth/user-not-found' || code === 'auth/invalid-email') {
+  const details = `${code} ${error?.message ?? ''}`.toLowerCase()
+
+  if (code === 'auth/email-already-in-use' || details.includes('email_exists')) {
+    return apiError('EMAIL_ALREADY_EXISTS')
+  }
+  if (
+    code === 'auth/user-not-found' ||
+    code === 'auth/invalid-email' ||
+    details.includes('email_not_found')
+  ) {
     return apiError('EMAIL_NOT_FOUND')
   }
-  if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+  if (
+    code === 'auth/wrong-password' ||
+    code === 'auth/invalid-credential' ||
+    code === 'auth/invalid-login-credentials' ||
+    code === 'auth/missing-password' ||
+    code === 'auth/weak-password' ||
+    details.includes('invalid_login_credentials') ||
+    details.includes('invalid-credential') ||
+    details.includes('wrong-password') ||
+    details.includes('missing_password')
+  ) {
     return apiError('INVALID_PASSWORD')
   }
-  if (code === 'auth/weak-password') return apiError('INVALID_PASSWORD')
-  if (code === 'auth/too-many-requests') return apiError('AUTH_ERROR')
+  if (code === 'auth/too-many-requests' || details.includes('too_many_attempts')) {
+    return apiError('TOO_MANY_REQUESTS')
+  }
+  if (code === 'auth/network-request-failed') return apiError('NETWORK_ERROR')
   if (error?.code && String(error.code).startsWith('EMAIL_')) return error
-  if (error?.code === 'INVALID_PASSWORD' || error?.code === 'RESIDENT_USE_GOOGLE') return error
   return apiError('AUTH_ERROR', error?.message)
 }
 

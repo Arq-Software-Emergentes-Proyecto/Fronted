@@ -110,6 +110,12 @@ const residentNavItems = computed(() => [
   },
 ])
 
+const lockChatPageScroll = computed(
+  () =>
+    route.name === AppRouteNames.APP_RESIDENT_SUPPORT ||
+    route.name === AppRouteNames.APP_RESIDENT_HELP,
+)
+
 const appNavPrimaryItems = computed(() =>
   isResident.value ? residentNavItems.value : adminNavPrimary.value,
 )
@@ -135,7 +141,7 @@ function toggleAppLocale() {
 </script>
 
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="{ 'app-shell--chat': lockChatPageScroll }">
     <SkipLink />
     <aside class="app-shell__sidebar">
       <header class="app-shell__top">
@@ -243,7 +249,13 @@ function toggleAppLocale() {
         </button>
       </footer>
     </aside>
-    <main id="main-content" class="app-shell__main" role="main" tabindex="-1">
+    <main
+      id="main-content"
+      class="app-shell__main"
+      :class="{ 'app-shell__main--chat': lockChatPageScroll }"
+      role="main"
+      tabindex="-1"
+    >
       <RouterView />
     </main>
   </div>
@@ -301,6 +313,22 @@ function toggleAppLocale() {
   max-width: 100%;
   overflow-x: auto;
   background: var(--apple-bg, #ffffff);
+}
+
+.app-shell--chat {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.app-shell__main--chat {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100vh;
+  max-height: 100dvh;
+  overflow: hidden;
 }
 
 .app-shell__top {
@@ -737,6 +765,18 @@ function toggleAppLocale() {
     flex: 1;
     min-width: 0;
     min-height: 0;
+  }
+
+  .app-shell--chat {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .app-shell__main--chat {
+    height: auto;
+    max-height: none;
+    overflow: hidden;
   }
 
   .app-shell__divider,

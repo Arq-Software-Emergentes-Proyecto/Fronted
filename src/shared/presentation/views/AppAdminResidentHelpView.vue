@@ -1,8 +1,6 @@
 <script setup>
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import Button from 'primevue/button'
-import Textarea from 'primevue/textarea'
 
 import { appendAdminMessage, watchAdminChats } from '@/support/infrastructure/realtimeSupportDb.js'
 import { useSession, getActiveDataOwnerId } from '@/iam/application/sessionStore.js'
@@ -41,11 +39,16 @@ function bubbleRole(role) {
   return role
 }
 
-function previewLast(row) {
-  const msgs = row.messages
-  if (!Array.isArray(msgs) || !msgs.length) return '—'
-  const last = msgs[msgs.length - 1]
-  return typeof last?.body === 'string' ? last.body : '—'
+function chatTitle(row) {
+  return row?.topic || row?.residentName || row?.residentId || '—'
+}
+
+function chatMeta(row) {
+  const name = row?.residentName || row?.residentId || ''
+  if (row?.source === 'ai-escalation') {
+    return name ? `${name} · ${t('supportAdmin.fromAssistant')}` : t('supportAdmin.fromAssistant')
+  }
+  return name
 }
 
 let stopChats = null
@@ -119,118 +122,94 @@ async function sendReply() {
 </script>
 
 <template>
-  <div class="app-view">
-    <h1 class="app-view__title">{{ t('supportAdmin.title') }}</h1>
-    <p class="app-view__subtitle">{{ t('supportAdmin.subtitle') }}</p>
-
+  <div class="app-view app-view--ai">
     <div class="finance-page">
-      <div class="finance-toolbar-row">
-        <Button
-          type="button"
-          rounded
-          outlined
-          severity="secondary"
-          :label="t('supportAdmin.refresh')"
-          icon="pi pi-refresh"
-          class="finance-toolbar-row__btn"
-          :loading="loadingList"
-          @click="bindChats"
-        />
-      </div>
+      <p v-if="loadError" class="app-view__subtitle support-session-hint" role="alert">
+        {{ loadError }}
+      </p>
 
-      <p v-if="loadError" class="support-load-error" role="alert">{{ loadError }}</p>
-
-      <div class="finance-main-row">
-        <aside
-          class="finance-panel finance-panel--calendar calendar-widget help-inbox"
-          aria-labelledby="help-inbox-heading"
-        >
-          <h2 id="help-inbox-heading" class="finance-panel__section-title">
-            {{ t('supportAdmin.inboxHeading') }}
-          </h2>
-          <p v-if="!loadingList && !chats.length" class="empty-list help-inbox__empty">
+      <div class="ai-shell">
+        <aside class="ai-sidebar" :aria-label="t('supportAdmin.inboxHeading')">
+          <button type="button" class="ai-new" :disabled="loadingList" @click="bindChats">
+            <i class="pi pi-refresh" aria-hidden="true" />
+            {{ t('supportAdmin.refresh') }}
+          </button>
+          <p class="ai-recents-label">{{ t('supportAdmin.inboxHeading') }}</p>
+          <p v-if="!loadingList && !chats.length" class="ai-empty">
             {{ t('supportAdmin.emptyList') }}
           </p>
-          <ul v-else class="help-chat-rows">
+          <ul v-else class="ai-recent-list" role="list">
             <li v-for="c in chats" :key="c.id">
               <button
                 type="button"
-                class="help-chat-row"
-                :class="{ 'help-chat-row--active': c.id === selectedId }"
+                class="ai-recent"
+                :class="{ 'is-active': c.id === selectedId }"
                 @click="selectChat(c)"
               >
-                <span class="help-chat-row__name">{{ c.residentName || c.residentId }}</span>
-                <span class="help-chat-row__topic">{{
-                  c.source === 'ai-escalation'
-                    ? `${c.topic} · ${t('supportAdmin.fromAssistant')}`
-                    : c.topic
-                }}</span>
-                <span class="help-chat-row__time">{{ formatWhen(c.updatedAt || c.createdAt) }}</span>
-                <span class="help-chat-row__preview">{{ previewLast(c) }}</span>
+                <span class="ai-recent__title">{{ chatTitle(c) }}</span>
+                <span class="ai-recent__meta">{{ chatMeta(c) }}</span>
               </button>
             </li>
           </ul>
         </aside>
 
-        <section
-          v-if="selected"
-          class="finance-panel finance-panel--table table-panel help-thread"
-          aria-labelledby="thread-heading"
-        >
-          <h2 id="thread-heading" class="finance-panel__section-title help-thread__resident">
-            {{ selected.residentName || selected.residentId }}
-          </h2>
-          <p class="app-view__subtitle help-thread__meta">
-            {{ t('supportAdmin.topicLabel') }}: {{ selected.topic }} · {{ formatWhen(selected.createdAt) }}
-          </p>
-
-          <div ref="messagesEl" class="help-thread__messages" role="log">
-            <div
-              v-for="m in selected.messages || []"
-              :key="m.id"
-              class="help-bubble"
-              :class="
-                m.authorRole === 'admin'
-                  ? 'help-bubble--admin'
-                  : m.authorRole === 'resident'
-                    ? 'help-bubble--resident'
-                    : 'help-bubble--other'
-              "
-            >
-              <span class="help-bubble__label">{{ bubbleRole(m.authorRole) }}</span>
-              <span v-if="m.authorName" class="help-bubble__name">{{ m.authorName }}</span>
-              <p class="help-bubble__body">{{ m.body }}</p>
-              <span class="help-bubble__time">{{ formatWhen(m.createdAt) }}</span>
-            </div>
+        <section class="ai-main" aria-labelledby="help-prompt-heading">
+          <div v-if="!selected" class="ai-stage">
+            <h2 id="help-prompt-heading" class="ai-heading">{{ t('supportAdmin.emptyHeading') }}</h2>
+            <p class="ai-stage__sub">{{ t('supportAdmin.selectPrompt') }}</p>
           </div>
 
-          <div class="help-thread__compose">
-            <Textarea
-              v-model="replyText"
-              rows="3"
-              class="support-textarea"
-              :placeholder="t('supportAdmin.messagePlaceholder')"
-              autoResize
-              @keydown.enter.exact.prevent="sendReply"
-            />
-            <div class="help-thread__actions">
-              <Button
-                type="button"
-                rounded
-                :label="t('supportAdmin.send')"
-                icon="pi pi-send"
-                class="finance-toolbar-row__btn"
-                :disabled="!replyText.trim()"
-                :loading="sending"
-                @click="sendReply"
-              />
+          <template v-else>
+            <header class="ai-thread-head">
+              <h2 id="help-prompt-heading" class="ai-thread-head__name">
+                {{ selected.residentName || selected.residentId }}
+              </h2>
+              <p class="ai-thread-head__meta">
+                {{ t('supportAdmin.topicLabel') }}: {{ selected.topic || '—' }}
+                <span v-if="selected.createdAt"> · {{ formatWhen(selected.createdAt) }}</span>
+              </p>
+            </header>
+            <div ref="messagesEl" class="ai-thread" role="log" aria-live="polite">
+              <div
+                v-for="m in selected.messages || []"
+                :key="m.id"
+                class="ai-msg"
+                :class="{
+                  'ai-msg--user': m.authorRole === 'admin',
+                  'ai-msg--resident': m.authorRole === 'resident',
+                  'ai-msg--ai': m.authorRole === 'assistant' || m.authorRole === 'ai',
+                }"
+              >
+                <span class="ai-msg__who">{{ bubbleRole(m.authorRole) }}</span>
+                <p>{{ m.body }}</p>
+              </div>
             </div>
-          </div>
+            <div class="ai-dock">
+              <div class="ai-composer">
+                <span class="ai-composer__plus" aria-hidden="true">
+                  <i class="pi pi-plus" />
+                </span>
+                <input
+                  v-model="replyText"
+                  type="text"
+                  :placeholder="t('supportAdmin.messagePlaceholder')"
+                  :aria-label="t('supportAdmin.messagePlaceholder')"
+                  :disabled="sending"
+                  @keydown.enter.prevent="sendReply()"
+                />
+                <button
+                  type="button"
+                  class="ai-composer__send"
+                  :disabled="sending || !replyText.trim()"
+                  :aria-label="t('supportAdmin.send')"
+                  @click="sendReply()"
+                >
+                  <i class="pi pi-arrow-up" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          </template>
         </section>
-
-        <div v-else class="finance-panel table-panel help-placeholder">
-          <p class="app-view__subtitle help-placeholder__text">{{ t('supportAdmin.selectPrompt') }}</p>
-        </div>
       </div>
     </div>
   </div>
@@ -242,13 +221,17 @@ async function sendReply() {
   max-width: 72rem;
 }
 
-.app-view__title {
-  margin: 0;
-  font-size: 1.75rem;
-  font-weight: 600;
-  letter-spacing: -0.035em;
-  line-height: 1.15;
-  color: var(--apple-text, #1d1d1f);
+.app-view--ai {
+  max-width: 88rem;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  padding: 1rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .app-view__subtitle {
@@ -261,279 +244,334 @@ async function sendReply() {
   color: var(--apple-text-secondary, #6e6e73);
 }
 
+.support-session-hint {
+  margin: 0 0 0.75rem;
+  color: #b42318;
+}
+
 .finance-page {
-  margin-top: 1.5rem;
+  margin-top: 0;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 0.75rem;
 }
 
-.finance-toolbar-row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.5rem;
-}
-
-.finance-toolbar-row__btn :deep(.p-button) {
-  font-weight: 500;
-  font-size: 0.8125rem;
-  padding-block: 0.5rem;
-  padding-inline: 1rem;
-}
-
-.finance-main-row {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  gap: 1.25rem;
-}
-
-.table-panel {
-  flex: 1 1 58%;
-  min-width: 0;
-}
-
-.calendar-widget {
-  flex: 0 1 22rem;
-  min-width: 17rem;
-}
-
-@media (max-width: 1024px) {
-  .finance-main-row {
-    flex-direction: column;
-  }
-
-  .calendar-widget {
-    flex: 1 1 auto;
-    min-width: 0;
-    max-width: none;
-  }
-}
-
-.finance-panel {
-  padding: 1.2rem 1.25rem 1.35rem;
-  border-radius: 16px;
+.ai-shell {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 16.75rem minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   background: #fff;
   border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 16px;
+  overflow: hidden;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
-.finance-panel--calendar {
-  background: #fafafa;
-}
-
-.finance-panel--table {
-  padding: 1.2rem 1.25rem 1.35rem;
+.ai-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-height: 0;
   overflow: hidden;
+  padding: 0.9rem 0.75rem 1rem;
+  background: var(--apple-bg-secondary, #f5f5f7);
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
 }
 
-.finance-panel__section-title {
-  margin: 0 0 0.85rem;
-  font-size: 1.0625rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.25;
+.ai-new {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.58rem 0.8rem;
+  border: none;
+  border-radius: 12px;
+  background: #fff;
   color: var(--apple-text, #1d1d1f);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
-.support-load-error {
-  color: #d70015;
+.ai-new:hover:not(:disabled) {
+  color: var(--apple-blue, #1e3a8a);
+}
+
+.ai-new:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.ai-recents-label {
+  flex-shrink: 0;
+  margin: 0.35rem 0.35rem 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--apple-text-secondary, #86868b);
+}
+
+.ai-empty {
+  margin: 0.35rem 0.35rem 0;
   font-size: 0.8125rem;
-  margin: 0;
-}
-
-.help-inbox {
-  max-height: 70vh;
-  overflow-y: auto;
-}
-
-.help-inbox__empty {
-  margin: 0;
-  padding: 0.35rem 0 0.5rem;
-  text-align: left;
-}
-
-.empty-list {
+  line-height: 1.4;
   color: var(--apple-text-secondary, #6e6e73);
-  font-size: 0.8125rem;
 }
 
-.help-chat-rows {
+.ai-recent-list {
   list-style: none;
   margin: 0;
   padding: 0;
-}
-
-.help-chat-row {
-  width: 100%;
-  text-align: left;
-  border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  padding: 0.75rem 0.35rem;
-  background: transparent;
-  cursor: pointer;
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  font-family: inherit;
-  transition: background 0.12s ease;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ai-recent {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.12rem;
+  text-align: left;
+  padding: 0.52rem 0.7rem;
+  border: none;
   border-radius: 10px;
+  background: transparent;
+  color: var(--apple-text, #1d1d1f);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
 }
 
-.help-chat-row:hover {
-  background: rgba(0, 0, 0, 0.03);
+.ai-recent:hover {
+  background: rgba(255, 255, 255, 0.8);
 }
 
-.help-chat-row--active {
-  background: rgba(10, 132, 255, 0.1);
-}
-
-.help-chat-row__name {
+.ai-recent.is-active {
+  background: #fff;
+  color: var(--apple-blue, #1e3a8a);
   font-weight: 600;
-  font-size: 0.875rem;
+}
+
+.ai-recent__title,
+.ai-recent__meta {
+  display: block;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ai-recent__meta {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--apple-text-secondary, #86868b);
+}
+
+.ai-recent.is-active .ai-recent__meta {
+  color: rgba(30, 58, 138, 0.72);
+}
+
+.ai-main {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.ai-stage {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.5rem 2.25rem;
+}
+
+.ai-heading {
+  margin: 0 0 0.65rem;
+  font-size: 1.75rem;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  color: var(--apple-text, #1d1d1f);
+  text-align: center;
+}
+
+.ai-stage__sub {
+  margin: 0;
+  max-width: 26rem;
+  text-align: center;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.ai-thread-head {
+  flex-shrink: 0;
+  padding: 0.95rem 1.5rem 0.8rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.ai-thread-head__name {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
   color: var(--apple-text, #1d1d1f);
 }
 
-.help-chat-row__topic {
+.ai-thread-head__meta {
+  margin: 0.2rem 0 0;
   font-size: 0.78rem;
   color: var(--apple-text-secondary, #6e6e73);
 }
 
-.help-chat-row__time {
-  font-size: 0.72rem;
-  color: #86868b;
-}
-
-.help-chat-row__preview {
-  font-size: 0.8rem;
-  color: #6e6e73;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.help-thread__resident {
-  margin-bottom: 0.35rem;
-}
-
-.help-thread__meta {
-  margin: 0 0 1rem;
-  max-width: none;
-}
-
-.help-thread__messages {
-  flex: 1;
-  overflow-y: auto;
+.ai-composer {
+  width: min(40rem, 100%);
   display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-  padding: 0.25rem 0 1rem;
-  max-height: 42vh;
-  min-height: 10rem;
-}
-
-.help-bubble {
-  max-width: 95%;
-  padding: 0.65rem 0.85rem;
-  border-radius: 12px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-}
-
-.help-bubble--resident {
-  align-self: flex-start;
-  background: #fafafa;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.help-bubble--admin {
-  align-self: flex-end;
-  background: rgba(10, 132, 255, 0.1);
-  border: 1px solid rgba(10, 132, 255, 0.22);
-}
-
-.help-bubble--other {
-  align-self: flex-start;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.4rem 0.4rem 0.85rem;
+  border: 1px solid var(--apple-border-hairline, #d2d2d7);
+  border-radius: 980px;
   background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: var(--apple-shadow-md, 0 4px 24px rgba(0, 0, 0, 0.06));
 }
 
-.help-bubble__label {
-  font-size: 0.65rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.055em;
-  color: #86868b;
+.ai-composer:focus-within {
+  border-color: var(--apple-blue, #1e3a8a);
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.16);
 }
 
-.help-bubble__name {
-  display: block;
-  font-size: 0.72rem;
-  color: #6e6e73;
-  margin-bottom: 0.2rem;
-}
-
-.help-bubble__body {
-  margin: 0.25rem 0 0;
-  font-size: 0.875rem;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.help-bubble__time {
-  display: block;
-  margin-top: 0.35rem;
-  font-size: 0.68rem;
-  color: #86868b;
-}
-
-.help-thread {
-  display: flex;
-  flex-direction: column;
-  min-height: 28rem;
-}
-
-.help-thread__compose {
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-  padding-top: 0.75rem;
-  margin-top: auto;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.help-thread__actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.support-textarea {
-  width: 100%;
-  border-radius: 10px;
-  border: 1px solid #d2d2d7;
-  font-size: 0.875rem;
-}
-
-.support-textarea:focus {
-  outline: none;
-  border-color: #0a84ff;
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.18);
-}
-
-.help-placeholder {
+.ai-composer__plus {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 28rem;
-  background: #fafafa;
+  width: 1.6rem;
+  color: var(--apple-text-secondary, #86868b);
+  font-size: 0.85rem;
 }
 
-.help-placeholder__text {
+.ai-composer input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--apple-text, #1d1d1f);
+}
+
+.ai-composer__send {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  border: none;
+  border-radius: 50%;
+  background: var(--apple-blue, #1e3a8a);
+  color: #fff;
+  cursor: pointer;
+}
+
+.ai-composer__send:hover:not(:disabled) {
+  background: var(--apple-blue-hover, #172554);
+}
+
+.ai-composer__send:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.ai-thread {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  width: 100%;
   margin: 0;
-  text-align: center;
-  max-width: 22rem;
+  padding: 1.5rem max(1.5rem, calc(50% - 22rem)) 0.75rem;
+}
+
+.ai-msg {
+  max-width: 86%;
+  padding: 0.8rem 1rem;
+  border-radius: 16px;
+}
+
+.ai-msg p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-msg__who {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--apple-text-secondary, #86868b);
+}
+
+.ai-msg--ai,
+.ai-msg--resident {
+  align-self: flex-start;
+  background: var(--apple-bg-secondary, #f5f5f7);
+  color: var(--apple-text, #1d1d1f);
+}
+
+.ai-msg--user {
+  align-self: flex-end;
+  background: rgba(30, 58, 138, 0.1);
+  color: var(--apple-blue, #1e3a8a);
+}
+
+.ai-dock {
+  flex-shrink: 0;
+  padding: 0.75rem 1.25rem 1.35rem;
+  display: flex;
+  justify-content: center;
+}
+
+@media (max-width: 860px) {
+  .ai-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .ai-sidebar {
+    border-right: none;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  }
+
+  .ai-recent-list {
+    max-height: 8rem;
+  }
 }
 </style>

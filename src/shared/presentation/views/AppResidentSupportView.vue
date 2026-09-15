@@ -472,7 +472,15 @@ function onAiSuggestion(kind) {
 
 .app-view--ai {
   max-width: 88rem;
-  padding-top: 1rem;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  padding: 1rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .app-view__title {
@@ -501,15 +509,19 @@ function onAiSuggestion(kind) {
 
 .finance-page {
   margin-top: 0;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 0.75rem;
 }
 
 .ai-shell {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 16.75rem minmax(0, 1fr);
-  min-height: calc(100vh - 8.5rem);
+  grid-template-rows: minmax(0, 1fr);
   background: #fff;
   border: 1px solid rgba(0, 0, 0, 0.06);
   border-radius: 16px;
@@ -521,12 +533,15 @@ function onAiSuggestion(kind) {
   display: flex;
   flex-direction: column;
   gap: 0.7rem;
+  min-height: 0;
+  overflow: hidden;
   padding: 0.9rem 0.75rem 1rem;
   background: var(--apple-bg-secondary, #f5f5f7);
   border-right: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 .ai-new {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -547,6 +562,7 @@ function onAiSuggestion(kind) {
 }
 
 .ai-recents-label {
+  flex-shrink: 0;
   margin: 0.35rem 0.35rem 0;
   font-size: 0.68rem;
   font-weight: 700;
@@ -595,6 +611,9 @@ function onAiSuggestion(kind) {
 
 .ai-main {
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   background: #fff;
@@ -602,6 +621,8 @@ function onAiSuggestion(kind) {
 
 .ai-stage {
   flex: 1;
+  min-height: 0;
+  overflow: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -703,14 +724,17 @@ function onAiSuggestion(kind) {
 }
 
 .ai-thread {
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
-  width: min(44rem, 100%);
-  margin: 0 auto;
-  padding: 1.5rem 1.5rem 0.75rem;
+  width: 100%;
+  margin: 0;
+  padding: 1.5rem max(1.5rem, calc(50% - 22rem)) 0.75rem;
 }
 
 .ai-msg {
@@ -761,6 +785,7 @@ function onAiSuggestion(kind) {
 }
 
 .ai-dock {
+  flex-shrink: 0;
   padding: 0.75rem 1.25rem 1.35rem;
   display: flex;
   justify-content: center;
@@ -769,7 +794,7 @@ function onAiSuggestion(kind) {
 @media (max-width: 860px) {
   .ai-shell {
     grid-template-columns: 1fr;
-    min-height: auto;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .ai-sidebar {
@@ -779,10 +804,6 @@ function onAiSuggestion(kind) {
 
   .ai-recent-list {
     max-height: 8rem;
-  }
-
-  .ai-stage {
-    min-height: 22rem;
   }
 }
 </style>

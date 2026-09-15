@@ -7,10 +7,6 @@ import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.j
 import { spacesApi } from '@/socialSpaces/infrastructure/spacesApi.js'
 import { buildGuestInviteUrl } from '@/socialSpaces/infrastructure/guestInviteUrl.js'
 import { reservationInviteExpiresAtMs } from '@/shared/infrastructure/api/utils.js'
-import Button from 'primevue/button'
-import Dialog from 'primevue/dialog'
-import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
-import InputText from 'primevue/inputtext'
 
 const MAX_GUESTS = 5
 
@@ -22,24 +18,34 @@ const reservations = ref([])
 const spacesById = ref(new Map())
 const loading = ref(false)
 const loadError = ref(false)
-
-const expandedId = ref(null)
-const guestsModalOpen = ref(false)
-const modalReservation = ref(null)
-const guestDraftRows = ref(
-  Array.from({ length: MAX_GUESTS }, () => ({
-    id: '',
-    name: '',
-  })),
-)
+const selectedId = ref(null)
+const draftGuest = ref('')
 const savingGuests = ref(false)
-const guestsModalError = ref(false)
+const guestsError = ref(false)
 
 const nowMs = ref(Date.now())
 const qrByReservationId = ref({})
 const copiedReservationId = ref(null)
 
 let inviteClock
+
+const myReservations = computed(() => {
+  const id = String(profile.value.id ?? '').trim()
+  if (!id) return []
+  return reservations.value
+    .filter((r) => String(r.residentId ?? '') === id)
+    .slice()
+    .sort((a, b) => {
+      if (a.date !== b.date) return b.date.localeCompare(a.date)
+      return String(b.startTime).localeCompare(String(a.startTime))
+    })
+})
+
+const selected = computed(
+  () => myReservations.value.find((row) => String(row.id) === String(selectedId.value)) || null,
+)
+
+const selectedGuestCount = computed(() => selected.value?.guests?.length ?? 0)
 
 function inviteExpiryMs(r) {
   return reservationInviteExpiresAtMs(r.date, r.startTime)
@@ -61,17 +67,31 @@ function formatExpiryClockFromReservation(r) {
   })
 }
 
-const myReservations = computed(() => {
-  const id = String(profile.value.id ?? '').trim()
-  if (!id) return []
-  return reservations.value
-    .filter((r) => String(r.residentId ?? '') === id)
-    .slice()
-    .sort((a, b) => {
-      if (a.date !== b.date) return b.date.localeCompare(a.date)
-      return String(b.startTime).localeCompare(String(a.startTime))
-    })
-})
+function spaceName(spaceId) {
+  return spacesById.value.get(spaceId)?.name ?? t('app.spaceFallbackName')
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return ''
+  const [y, m, d] = dateStr.split('-').map(Number)
+  if (!y || !m || !d) return dateStr
+  return new Date(y, m - 1, d).toLocaleDateString(locale.value === 'es' ? 'es-PE' : 'en-US', {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+function slotLabel(r) {
+  return `${formatDate(r.date)} · ${r.startTime} – ${r.endTime}`
+}
+
+function selectReservation(id) {
+  selectedId.value = id
+  draftGuest.value = ''
+  guestsError.value = false
+}
 
 async function syncInviteQrs() {
   const next = { ...qrByReservationId.value }
@@ -109,68 +129,36 @@ async function copyInviteLink(r) {
   }
 }
 
-function spaceName(spaceId) {
-  return spacesById.value.get(spaceId)?.name ?? t('app.spaceFallbackName')
-}
-
-function formatDate(dateStr) {
-  if (!dateStr) return ''
-  const [y, m, d] = dateStr.split('-').map(Number)
-  if (!y || !m || !d) return dateStr
-  return new Date(y, m - 1, d).toLocaleDateString(locale.value === 'es' ? 'es-PE' : 'en-US', {
-    weekday: 'short',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-}
-
-function toggleExpand(reservationId) {
-  const id = String(reservationId ?? '')
-  expandedId.value = expandedId.value === id ? null : id
-}
-
-function openGuestsModal(r) {
-  modalReservation.value = r
-  guestsModalError.value = false
-  const list = Array.isArray(r.guests) ? r.guests : []
-  guestDraftRows.value = Array.from({ length: MAX_GUESTS }, (_, i) => ({
-    id: String(list[i]?.id ?? '').trim(),
-    name: String(list[i]?.name ?? '').trim(),
-  }))
-  guestsModalOpen.value = true
-}
-
-function closeGuestsModal() {
-  guestsModalOpen.value = false
-  modalReservation.value = null
-}
-
-async function confirmGuests() {
-  const res = modalReservation.value
+async function persistGuests(nextGuests) {
+  const res = selected.value
   if (!res?.id) return
   savingGuests.value = true
-  guestsModalError.value = false
+  guestsError.value = false
   try {
-    const payload = guestDraftRows.value
-      .map((row) => ({
-        id: String(row.id ?? '').trim(),
-        name: String(row.name ?? '').trim(),
-      }))
-      .filter((g) => g.name.length > 0)
-      .slice(0, MAX_GUESTS)
-    const updated = await reservationsApi.updateGuests(res.id, payload)
+    const updated = await reservationsApi.updateGuests(res.id, nextGuests)
     const idx = reservations.value.findIndex((x) => x.id === updated.id)
     if (idx !== -1) {
       reservations.value[idx] = updated
     }
     void syncInviteQrs()
-    closeGuestsModal()
   } catch {
-    guestsModalError.value = true
+    guestsError.value = true
   } finally {
     savingGuests.value = false
   }
+}
+
+async function addGuest() {
+  const name = draftGuest.value.trim()
+  const current = Array.isArray(selected.value?.guests) ? selected.value.guests : []
+  if (!name || savingGuests.value || current.length >= MAX_GUESTS) return
+  draftGuest.value = ''
+  await persistGuests([...current, { name }])
+}
+
+async function removeGuest(guestId) {
+  const current = Array.isArray(selected.value?.guests) ? selected.value.guests : []
+  await persistGuests(current.filter((g) => String(g.id) !== String(guestId)))
 }
 
 async function load() {
@@ -188,6 +176,9 @@ async function load() {
     ])
     reservations.value = resList
     spacesById.value = new Map(spaces.map((s) => [s.id, s]))
+    if (selectedId.value && !resList.some((row) => String(row.id) === String(selectedId.value))) {
+      selectedId.value = null
+    }
   } catch {
     loadError.value = true
     reservations.value = []
@@ -211,7 +202,7 @@ watch(
     if (newId && newId !== oldId) {
       void load()
     }
-  }
+  },
 )
 
 watch(
@@ -230,105 +221,97 @@ watch(
 onUnmounted(() => {
   if (inviteClock) window.clearInterval(inviteClock)
 })
-
-watch(guestsModalOpen, (open) => {
-  if (!open) {
-    modalReservation.value = null
-    guestsModalError.value = false
-  }
-})
 </script>
 
 <template>
-  <div class="app-view">
-    <h1 class="app-view__title">{{ t('resident.generationTitle') }}</h1>
-    <p class="app-view__subtitle">{{ t('resident.generationSubtitle', { name: profile.name || '' }) }}</p>
-
+  <div class="app-view app-view--ai">
     <div class="finance-page">
-      <section class="finance-panel gen-panel" :aria-label="t('resident.generationTitle')">
-        <p v-if="loading" class="gen-status">{{ t('resident.generationLoading') }}</p>
-        <p v-else-if="loadError" class="gen-alert" role="alert">{{ t('resident.generationLoadError') }}</p>
-        <p v-else-if="!profile.id" class="gen-alert" role="alert">{{ t('app.reservationProfileMissing') }}</p>
-        <p v-else-if="!myReservations.length" class="gen-empty">{{ t('resident.generationEmpty') }}</p>
+      <p v-if="loadError" class="app-view__subtitle support-session-hint" role="alert">
+        {{ t('resident.generationLoadError') }}
+      </p>
+      <p v-else-if="!profile.id" class="app-view__subtitle support-session-hint" role="alert">
+        {{ t('app.reservationProfileMissing') }}
+      </p>
+      <p v-if="guestsError" class="app-view__subtitle support-session-hint" role="alert">
+        {{ t('resident.generationGuestsSaveError') }}
+      </p>
 
-        <ul v-else class="gen-list">
-          <li v-for="r in myReservations" :key="r.id" class="gen-card">
-            <div class="gen-card__row">
+      <div class="ai-shell">
+        <aside class="ai-sidebar" :aria-label="t('resident.generationTitle')">
+          <p class="ai-recents-label">{{ t('resident.generationTitle') }}</p>
+          <p v-if="loading" class="ai-empty">{{ t('resident.generationLoading') }}</p>
+          <p v-else-if="!myReservations.length" class="ai-empty">{{ t('resident.generationEmpty') }}</p>
+          <ul v-else class="ai-recent-list" role="list">
+            <li v-for="r in myReservations" :key="r.id">
               <button
                 type="button"
-                class="gen-card__toggle"
-                :aria-expanded="expandedId === r.id"
-                :aria-label="t('resident.generationExpandGuests')"
-                @click="toggleExpand(r.id)"
+                class="ai-recent"
+                :class="{ 'is-active': String(r.id) === String(selectedId) }"
+                @click="selectReservation(r.id)"
               >
-                <div class="gen-card__main">
-                  <i class="pi pi-map-marker gen-card__icon" aria-hidden="true" />
-                  <div class="gen-card__text">
-                    <p class="gen-card__space">{{ spaceName(r.spaceId) }}</p>
-                    <p class="gen-card__meta">
-                      {{ formatDate(r.date) }}
-                      <span class="gen-card__dot" aria-hidden="true">·</span>
-                      {{ r.startTime }} – {{ r.endTime }}
-                    </p>
-                  </div>
-                </div>
-                <i
-                  class="gen-card__chev pi"
-                  :class="expandedId === r.id ? 'pi-chevron-up' : 'pi-chevron-down'"
-                  aria-hidden="true"
-                />
+                <span class="ai-recent__title">{{ spaceName(r.spaceId) }}</span>
+                <span class="ai-recent__meta">{{ slotLabel(r) }}</span>
               </button>
-              <Button
-                type="button"
-                class="gen-card__add"
-                :label="t('resident.generationAddGuest')"
-                severity="secondary"
-                outlined
-                size="small"
-                @click.stop="openGuestsModal(r)"
-              />
-            </div>
+            </li>
+          </ul>
+        </aside>
 
-            <div v-show="expandedId === r.id" class="gen-card__guests" role="region">
-              <p class="gen-card__guests-title">{{ t('resident.generationGuestsSection') }}</p>
-              <ul v-if="r.guests?.length" class="gen-guest-list">
-                <li v-for="g in r.guests" :key="g.id" class="gen-guest-list__item">
-                  <span class="gen-guest-list__name">{{ g.name }}</span>
-                  <span
-                    class="gen-guest-list__status"
-                    :class="g.checkedIn ? 'gen-guest-list__status--in' : 'gen-guest-list__status--out'"
-                  >
+        <section class="ai-main" aria-labelledby="gen-prompt-heading">
+          <template v-if="selected">
+            <header class="ai-thread-head">
+              <h2 id="gen-prompt-heading" class="ai-thread-head__name">
+                {{ spaceName(selected.spaceId) }}
+              </h2>
+              <p class="ai-thread-head__meta">{{ slotLabel(selected) }}</p>
+            </header>
+            <div class="ai-thread">
+              <p v-if="!selected.guests?.length" class="ai-thread__empty">
+                {{ t('resident.generationGuestsEmpty') }}
+              </p>
+              <div
+                v-for="g in selected.guests || []"
+                :key="g.id"
+                class="ai-msg"
+                :class="g.checkedIn ? 'ai-msg--user' : 'ai-msg--ai'"
+              >
+                <div class="ai-msg__row">
+                  <span class="ai-msg__who">
                     {{ g.checkedIn ? t('resident.generationGuestEntered') : t('resident.generationGuestNotEntered') }}
                   </span>
-                </li>
-              </ul>
-              <p v-else class="gen-card__guests-empty">{{ t('resident.generationGuestsEmpty') }}</p>
+                  <button
+                    v-if="!g.checkedIn"
+                    type="button"
+                    class="ai-msg__remove"
+                    :aria-label="t('resident.generationGuestRemove')"
+                    :disabled="savingGuests"
+                    @click="removeGuest(g.id)"
+                  >
+                    <i class="pi pi-times" aria-hidden="true" />
+                  </button>
+                </div>
+                <p>{{ g.name }}</p>
+              </div>
 
-              <div v-if="r.guestInviteToken && r.guests?.length" class="gen-invite">
-                <p class="gen-invite__title">{{ t('resident.generationInviteTitle') }}</p>
+              <div v-if="selected.guestInviteToken && selected.guests?.length" class="gen-invite">
+                <p class="ai-msg__who">{{ t('resident.generationInviteTitle') }}</p>
                 <p class="gen-invite__hint">{{ t('resident.generationInviteQrHelp') }}</p>
                 <div class="gen-invite__row">
-                  <InputText
+                  <input
                     readonly
                     class="gen-invite__url"
-                    :model-value="buildGuestInviteUrl(r.guestInviteToken)"
+                    :value="buildGuestInviteUrl(selected.guestInviteToken)"
                   />
-                  <Button
-                    type="button"
-                    :label="t('resident.generationInviteCopy')"
-                    size="small"
-                    severity="secondary"
-                    outlined
-                    @click="copyInviteLink(r)"
-                  />
+                  <button type="button" class="gen-invite__copy" @click="copyInviteLink(selected)">
+                    {{ t('resident.generationInviteCopy') }}
+                  </button>
                 </div>
-                <p v-if="copiedReservationId === r.id" class="gen-invite__copied" role="status">
+                <p v-if="copiedReservationId === selected.id" class="gen-invite__copied" role="status">
                   {{ t('resident.generationInviteCopied') }}
                 </p>
-                <template v-if="!inviteLinkExpired(r)">
-                  <div v-if="qrByReservationId[r.id]" class="gen-invite__qr">
+                <template v-if="!inviteLinkExpired(selected)">
+                  <div v-if="qrByReservationId[selected.id]" class="gen-invite__qr">
                     <img
-                      :src="qrByReservationId[r.id]"
+                      :src="qrByReservationId[selected.id]"
                       width="200"
                       height="200"
                       alt=""
@@ -337,49 +320,45 @@ watch(guestsModalOpen, (open) => {
                   </div>
                 </template>
                 <p v-else class="gen-invite__expired" role="alert">
-                  {{ t('resident.generationInviteExpired', { time: formatExpiryClockFromReservation(r) }) }}
+                  {{ t('resident.generationInviteExpired', { time: formatExpiryClockFromReservation(selected) }) }}
                 </p>
               </div>
             </div>
-          </li>
-        </ul>
-      </section>
-    </div>
+            <div class="ai-dock">
+              <p v-if="selectedGuestCount >= MAX_GUESTS" class="ai-dock__hint">
+                {{ t('resident.generationGuestsFull') }}
+              </p>
+              <div class="ai-composer">
+                <span class="ai-composer__plus" aria-hidden="true">
+                  <i class="pi pi-plus" />
+                </span>
+                <input
+                  v-model="draftGuest"
+                  type="text"
+                  :placeholder="t('resident.generationGuestPlaceholder')"
+                  :disabled="savingGuests || selectedGuestCount >= MAX_GUESTS"
+                  @keydown.enter.prevent="addGuest"
+                />
+                <button
+                  type="button"
+                  class="ai-composer__send"
+                  :disabled="savingGuests || !draftGuest.trim() || selectedGuestCount >= MAX_GUESTS"
+                  :aria-label="t('resident.generationAddGuest')"
+                  @click="addGuest"
+                >
+                  <i class="pi pi-arrow-up" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          </template>
 
-    <Dialog
-      v-model:visible="guestsModalOpen"
-      modal
-      :header="t('resident.generationGuestsModalTitle')"
-      :style="{ width: 'min(22rem, 100vw - 2rem)' }"
-      :dismissable-mask="true"
-    >
-      <p class="gen-modal__hint">{{ t('resident.generationGuestsModalHint') }}</p>
-      <div class="gen-modal__fields">
-        <label v-for="i in MAX_GUESTS" :key="i" class="gen-modal__field">
-          <span class="gen-modal__sr">{{ t('resident.generationGuestPlaceholder') }} {{ i }}</span>
-          <InputText
-            v-model="guestDraftRows[i - 1].name"
-            class="gen-modal__input"
-            :placeholder="`${t('resident.generationGuestPlaceholder')} ${i}`"
-            autocomplete="off"
-          />
-        </label>
+          <div v-else class="ai-stage">
+            <h2 id="gen-prompt-heading" class="ai-heading">{{ t('resident.generationEmptyHeading') }}</h2>
+            <p class="ai-stage__sub">{{ t('resident.generationSelectPrompt') }}</p>
+          </div>
+        </section>
       </div>
-      <p v-if="guestsModalError" class="gen-modal__error" role="alert">
-        {{ t('resident.generationGuestsSaveError') }}
-      </p>
-      <template #footer>
-        <ConfirmActions
-          :cancel-label="t('resident.generationGuestsCancel')"
-          :confirm-label="t('resident.generationGuestsConfirm')"
-          :loading="savingGuests"
-          :disabled="savingGuests"
-          :cancel-disabled="savingGuests"
-          @cancel="closeGuestsModal"
-          @confirm="confirmGuests"
-        />
-      </template>
-    </Dialog>
+    </div>
   </div>
 </template>
 
@@ -389,18 +368,14 @@ watch(guestsModalOpen, (open) => {
   max-width: 72rem;
 }
 
-.app-view__title {
-  margin: 0;
-  font-size: 1.75rem;
-  font-weight: 600;
-  letter-spacing: -0.035em;
-  line-height: 1.15;
-  color: var(--apple-text, #1d1d1f);
+.app-view--ai {
+  max-width: 88rem;
+  padding-top: 1rem;
 }
 
 .app-view__subtitle {
   margin: 0.5rem 0 0;
-  max-width: 40rem;
+  max-width: 42rem;
   font-size: 0.875rem;
   font-weight: 400;
   line-height: 1.45;
@@ -408,252 +383,333 @@ watch(guestsModalOpen, (open) => {
   color: var(--apple-text-secondary, #6e6e73);
 }
 
-.finance-page {
-  margin-top: 1.5rem;
-}
-
-.finance-panel {
-  padding: 1.2rem 1.25rem 1.35rem;
-  border-radius: 16px;
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-}
-
-.gen-status,
-.gen-empty {
-  margin: 0;
-  font-size: 0.875rem;
-  color: #6e6e73;
-}
-
-.gen-alert {
-  margin: 0;
-  font-size: 0.875rem;
-  font-weight: 500;
+.support-session-hint {
+  margin: 0 0 0.75rem;
   color: #b42318;
 }
 
-.gen-list {
+.finance-page {
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.ai-shell {
+  display: grid;
+  grid-template-columns: 16.75rem minmax(0, 1fr);
+  min-height: calc(100vh - 8.5rem);
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.ai-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.9rem 0.75rem 1rem;
+  background: var(--apple-bg-secondary, #f5f5f7);
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.ai-recents-label {
+  margin: 0.35rem 0.35rem 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--apple-text-secondary, #86868b);
+}
+
+.ai-empty {
+  margin: 0.35rem 0.35rem 0;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.ai-recent-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.2rem;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
-.gen-card {
+.ai-recent {
+  width: 100%;
   display: flex;
   flex-direction: column;
-  padding: 0;
-  border-radius: 12px;
-  background: #fafafa;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  overflow: hidden;
-}
-
-.gen-card__row {
-  display: flex;
-  align-items: stretch;
-  gap: 0.5rem;
-  padding: 0.85rem 1rem;
-  min-width: 0;
-}
-
-.gen-card__toggle {
-  flex: 1;
-  min-width: 0;
-  display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin: 0;
-  padding: 0;
-  border: none;
-  background: transparent;
-  cursor: pointer;
+  gap: 0.12rem;
   text-align: left;
-  font: inherit;
-  color: inherit;
-  border-radius: 8px;
-}
-
-.gen-card__toggle:hover {
-  background: rgba(0, 0, 0, 0.03);
-}
-
-.gen-card__toggle:focus-visible {
-  outline: 2px solid var(--p-primary-color, #2563eb);
-  outline-offset: 2px;
-}
-
-.gen-card__main {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.65rem;
-  min-width: 0;
-}
-
-.gen-card__text {
-  min-width: 0;
-}
-
-.gen-card__icon {
-  margin-top: 0.15rem;
-  color: #86868b;
-  font-size: 1rem;
-  flex-shrink: 0;
-}
-
-.gen-card__chev {
-  margin-top: 0.2rem;
-  color: #86868b;
-  font-size: 0.75rem;
-  flex-shrink: 0;
-}
-
-.gen-card__space {
-  margin: 0;
-  font-size: 0.9375rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+  padding: 0.52rem 0.7rem;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
   color: var(--apple-text, #1d1d1f);
-}
-
-.gen-card__meta {
-  margin: 0.2rem 0 0;
   font-size: 0.8125rem;
-  color: #6e6e73;
+  font-weight: 500;
+  cursor: pointer;
 }
 
-.gen-card__dot {
-  margin: 0 0.25rem;
-  opacity: 0.6;
+.ai-recent:hover {
+  background: rgba(255, 255, 255, 0.8);
 }
 
-.gen-card__add {
-  flex-shrink: 0;
-  align-self: center;
+.ai-recent.is-active {
+  background: #fff;
+  color: var(--apple-blue, #1e3a8a);
+  font-weight: 600;
 }
 
-.gen-card__guests {
-  padding: 0 1rem 0.9rem;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
+.ai-recent__title,
+.ai-recent__meta {
+  display: block;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ai-recent__meta {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--apple-text-secondary, #86868b);
+}
+
+.ai-recent.is-active .ai-recent__meta {
+  color: rgba(30, 58, 138, 0.72);
+}
+
+.ai-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   background: #fff;
 }
 
-.gen-card__guests-title {
-  margin: 0.65rem 0 0.35rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #86868b;
-}
-
-.gen-card__guests-empty {
-  margin: 0 0 0.25rem;
-  font-size: 0.8125rem;
-  color: #6e6e73;
-  line-height: 1.4;
-}
-
-.gen-guest-list {
-  margin: 0;
-  padding: 0 0 0.25rem 1rem;
-  font-size: 0.875rem;
-  color: var(--apple-text, #1d1d1f);
-  line-height: 1.45;
-}
-
-.gen-guest-list__item {
-  margin: 0.2rem 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.35rem 0.75rem;
-}
-
-.gen-guest-list__name {
-  font-weight: 500;
-}
-
-.gen-guest-list__status {
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.gen-guest-list__status--in {
-  color: #047857;
-}
-
-.gen-guest-list__status--out {
-  color: #86868b;
-}
-
-.gen-modal__hint {
-  margin: 0 0 1rem;
-  font-size: 0.8125rem;
-  color: #6e6e73;
-  line-height: 1.45;
-}
-
-.gen-modal__fields {
+.ai-stage {
+  flex: 1;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.5rem 2.25rem;
+}
+
+.ai-heading {
+  margin: 0 0 0.65rem;
+  font-size: 1.75rem;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  color: var(--apple-text, #1d1d1f);
+  text-align: center;
+}
+
+.ai-stage__sub {
+  margin: 0;
+  max-width: 26rem;
+  text-align: center;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.ai-thread-head {
+  flex-shrink: 0;
+  padding: 0.95rem 1.5rem 0.8rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.ai-thread-head__name {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--apple-text, #1d1d1f);
+}
+
+.ai-thread-head__meta {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.ai-thread {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  width: min(44rem, 100%);
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem 0.75rem;
+}
+
+.ai-thread__empty {
+  margin: 0 auto;
+  max-width: 22rem;
+  text-align: center;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.ai-msg {
+  max-width: 86%;
+  padding: 0.8rem 1rem;
+  border-radius: 16px;
+}
+
+.ai-msg p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-msg__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 0.5rem;
 }
 
-.gen-modal__field {
+.ai-msg__who {
   display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--apple-text-secondary, #86868b);
 }
 
-.gen-modal__sr {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
+.ai-msg__remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  margin-top: -0.2rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--apple-text-secondary, #86868b);
+  cursor: pointer;
 }
 
-.gen-modal__input {
-  width: 100%;
-}
-
-.gen-modal__error {
-  margin: 0.75rem 0 0;
-  font-size: 0.8125rem;
-  font-weight: 500;
+.ai-msg__remove:hover {
   color: #b42318;
+  background: rgba(180, 35, 24, 0.08);
+}
+
+.ai-msg--ai {
+  align-self: flex-start;
+  background: var(--apple-bg-secondary, #f5f5f7);
+  color: var(--apple-text, #1d1d1f);
+}
+
+.ai-msg--user {
+  align-self: flex-end;
+  background: rgba(30, 58, 138, 0.1);
+  color: var(--apple-blue, #1e3a8a);
+}
+
+.ai-dock {
+  padding: 0.75rem 1.25rem 1.35rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.ai-dock__hint {
+  margin: 0 0 0.55rem;
+  font-size: 0.78rem;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.ai-composer {
+  width: min(40rem, 100%);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.4rem 0.4rem 0.85rem;
+  border: 1px solid var(--apple-border-hairline, #d2d2d7);
+  border-radius: 980px;
+  background: #fff;
+  box-shadow: var(--apple-shadow-md, 0 4px 24px rgba(0, 0, 0, 0.06));
+}
+
+.ai-composer:focus-within {
+  border-color: var(--apple-blue, #1e3a8a);
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.16);
+}
+
+.ai-composer__plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  color: var(--apple-text-secondary, #86868b);
+  font-size: 0.85rem;
+}
+
+.ai-composer input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--apple-text, #1d1d1f);
+}
+
+.ai-composer__send {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  border: none;
+  border-radius: 50%;
+  background: var(--apple-blue, #1e3a8a);
+  color: #fff;
+  cursor: pointer;
+}
+
+.ai-composer__send:hover:not(:disabled) {
+  background: var(--apple-blue-hover, #172554);
+}
+
+.ai-composer__send:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .gen-invite {
-  margin-top: 1rem;
-  padding-top: 0.85rem;
-  border-top: 1px dashed rgba(0, 0, 0, 0.1);
-}
-
-.gen-invite__title {
-  margin: 0 0 0.35rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #86868b;
+  align-self: stretch;
+  max-width: 86%;
+  padding: 0.8rem 1rem 1rem;
+  border-radius: 16px;
+  background: var(--apple-bg-secondary, #f5f5f7);
 }
 
 .gen-invite__hint {
   margin: 0 0 0.65rem;
   font-size: 0.8125rem;
   line-height: 1.45;
-  color: #6e6e73;
+  color: var(--apple-text-secondary, #6e6e73);
 }
 
 .gen-invite__row {
@@ -666,7 +722,30 @@ watch(guestsModalOpen, (open) => {
 .gen-invite__url {
   flex: 1;
   min-width: 0;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--apple-border-hairline, #d2d2d7);
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
   font-size: 0.75rem;
+  color: var(--apple-text, #1d1d1f);
+}
+
+.gen-invite__copy {
+  border: none;
+  border-radius: 10px;
+  padding: 0.45rem 0.8rem;
+  background: #fff;
+  color: var(--apple-text, #1d1d1f);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.gen-invite__copy:hover {
+  color: var(--apple-blue, #1e3a8a);
 }
 
 .gen-invite__copied {
@@ -692,5 +771,25 @@ watch(guestsModalOpen, (open) => {
   font-weight: 500;
   color: #9a3412;
   line-height: 1.4;
+}
+
+@media (max-width: 860px) {
+  .ai-shell {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .ai-sidebar {
+    border-right: none;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  }
+
+  .ai-recent-list {
+    max-height: 8rem;
+  }
+
+  .ai-stage {
+    min-height: 22rem;
+  }
 }
 </style>

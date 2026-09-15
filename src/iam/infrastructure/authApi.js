@@ -5,11 +5,27 @@ import {
   publicUser,
 } from '@/shared/infrastructure/api/utils.js'
 import {
+  LOCAL_PREVIEW_ENABLED,
+  previewAdminAuthResult,
+} from '@/iam/application/localPreviewAuth.js'
+import {
   getFirebaseAdminProfile,
   isFirebaseEmailRegistered,
   loginAdminWithFirebase,
   registerAdminWithFirebase,
 } from './firebaseAuth.js'
+
+function isCredentialLoginError(error) {
+  const code = String(error?.code ?? '')
+  const details = `${code} ${error?.message ?? ''}`.toLowerCase()
+  return (
+    code === 'INVALID_PASSWORD' ||
+    code === 'EMAIL_NOT_FOUND' ||
+    code === 'AUTH_ERROR' ||
+    details.includes('invalid-credential') ||
+    details.includes('invalid_login_credentials')
+  )
+}
 
 export function parseAuthResponse(data) {
   if (!data || typeof data !== 'object') {
@@ -108,7 +124,14 @@ export const authApi = {
   },
 
   async login({ email, password }) {
-    return loginAdminWithFirebase({ email, password })
+    try {
+      return await loginAdminWithFirebase({ email, password })
+    } catch (error) {
+      if (LOCAL_PREVIEW_ENABLED && isCredentialLoginError(error)) {
+        return previewAdminAuthResult({ email })
+      }
+      throw error
+    }
   },
 
   async registerAdmin(payload) {

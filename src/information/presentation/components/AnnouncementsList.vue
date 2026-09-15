@@ -1,20 +1,40 @@
 <script setup>
 import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 defineProps({
   announcements: { type: Array, required: true },
   loading: { type: Boolean, default: false },
-  isAdmin: { type: Boolean, default: false },
-  /** When `finance`, use the same card grid / surfaces as Finanzas (admin information). */
-  layout: { type: String, default: 'default' },
+  canDelete: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['delete'])
 
-function priorityClass(priority) {
-  return `ann-badge--${priority}`
+function formatWhen(iso) {
+  if (!iso) return ''
+  try {
+    return new Date(iso).toLocaleString(locale.value === 'es' ? 'es-PE' : 'en-US', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    })
+  } catch {
+    return String(iso)
+  }
+}
+
+function formatExpiry(iso) {
+  if (!iso) return ''
+  return new Date(iso).toLocaleDateString(locale.value === 'es' ? 'es-PE' : 'en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+function isExpired(iso) {
+  if (!iso) return false
+  return new Date() > new Date(iso)
 }
 
 function priorityLabel(priority) {
@@ -26,317 +46,188 @@ function priorityLabel(priority) {
   return map[priority] ?? map.normal
 }
 
-function formatDate(iso) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return d.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-function formatExpiry(iso) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return d.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-}
-
-function durationLabel(days) {
-  if (!days) return ''
-  if (days === 7)  return t('information.duration7')
-  if (days === 15) return t('information.duration15')
-  if (days === 30) return t('information.duration30')
-  return `${days} ${t('information.durationDays')}`
-}
-
-function isExpired(iso) {
-  if (!iso) return false
-  return new Date() > new Date(iso)
+function onDelete(id) {
+  if (!window.confirm(t('information.deleteConfirm'))) return
+  emit('delete', id)
 }
 </script>
 
 <template>
-  <div class="ann-list" :class="{ 'ann-list--finance': layout === 'finance' }">
-    <!-- loading -->
-    <p v-if="loading" class="ann-list__status">
-      <i class="pi pi-spin pi-spinner" aria-hidden="true" />
-      {{ t('information.loading') }}
-    </p>
-
-    <!-- empty -->
-    <div v-else-if="!announcements.length" class="ann-list__empty">
-      <i class="pi pi-megaphone ann-list__empty-icon" aria-hidden="true" />
-      <p class="ann-list__empty-text">{{ t('information.empty') }}</p>
-    </div>
-
-    <!-- cards -->
-    <TransitionGroup v-else name="ann-card" tag="div" class="ann-list__grid">
+  <p v-if="loading" class="ann-status">{{ t('information.loading') }}</p>
+  <p v-else-if="!announcements.length" class="ann-status">{{ t('information.empty') }}</p>
+  <ul v-else class="ann-board" role="list">
+    <li v-for="ann in announcements" :key="ann.id">
       <article
-        v-for="ann in announcements"
-        :key="ann.id"
         class="ann-card"
-        :class="{
-          'ann-card--urgent': ann.priority === 'urgent',
-          'ann-card--expired': isExpired(ann.expiresAt),
-        }"
+        :class="[
+          `ann-card--${ann.priority || 'normal'}`,
+          { 'is-expired': isExpired(ann.expiresAt) },
+        ]"
       >
-        <header class="ann-card__header">
-          <span class="ann-badge" :class="priorityClass(ann.priority)">
-            {{ priorityLabel(ann.priority) }}
-          </span>
-          <div class="ann-card__header-right">
-            <span v-if="ann.duration" class="ann-duration-badge">
-              <i class="pi pi-clock" aria-hidden="true" />
-              {{ durationLabel(ann.duration) }}
+        <header class="ann-card__head">
+          <div class="ann-card__badges">
+            <span class="ann-badge" :class="`ann-badge--${ann.priority || 'normal'}`">
+              {{ priorityLabel(ann.priority) }}
             </span>
-            <button
-              v-if="isAdmin"
-              type="button"
-              class="ann-card__delete"
-              :aria-label="t('information.delete')"
-              @click="emit('delete', ann.id)"
-            >
-              <i class="pi pi-trash" aria-hidden="true" />
-            </button>
+            <span v-if="isExpired(ann.expiresAt)" class="ann-badge ann-badge--expired">
+              {{ t('information.expired') }}
+            </span>
           </div>
+          <button
+            v-if="canDelete"
+            type="button"
+            class="ann-card__delete"
+            :aria-label="t('information.delete')"
+            @click="onDelete(ann.id)"
+          >
+            <i class="pi pi-trash" aria-hidden="true" />
+          </button>
         </header>
-
         <h3 class="ann-card__title">{{ ann.title }}</h3>
         <p class="ann-card__body">{{ ann.body }}</p>
-
-        <footer class="ann-card__footer">
-          <span class="ann-card__author">
+        <footer class="ann-card__meta">
+          <span>
             <i class="pi pi-user" aria-hidden="true" />
-            {{ ann.authorName }}
+            {{ ann.authorName || t('information.pageTitle') }}
           </span>
-          <div class="ann-card__footer-right">
-            <time class="ann-card__date" :datetime="ann.createdAt">
-              {{ formatDate(ann.createdAt) }}
-            </time>
-            <span v-if="ann.expiresAt" class="ann-card__expiry" :class="{ 'ann-card__expiry--expired': isExpired(ann.expiresAt) }">
-              <i class="pi pi-calendar-times" aria-hidden="true" />
-              {{ isExpired(ann.expiresAt) ? t('information.expired') : t('information.expiresOn', { date: formatExpiry(ann.expiresAt) }) }}
-            </span>
-          </div>
+          <time v-if="ann.createdAt" :datetime="ann.createdAt">{{ formatWhen(ann.createdAt) }}</time>
+          <span v-if="ann.expiresAt && !isExpired(ann.expiresAt)">
+            {{ t('information.expiresOn', { date: formatExpiry(ann.expiresAt) }) }}
+          </span>
         </footer>
       </article>
-    </TransitionGroup>
-  </div>
+    </li>
+  </ul>
 </template>
 
 <style scoped>
-/* Finance-style admin layout (matches AppFinanceView history cards) */
-.ann-list--finance .ann-list__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 1rem;
-}
-
-.ann-list--finance .ann-card {
-  background: #fafafa;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 12px;
-  padding: 1.1rem 1.2rem;
-  box-shadow: none;
-}
-
-.ann-list--finance .ann-card:hover {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-  border-color: rgba(0, 0, 0, 0.08);
-}
-
-.ann-list--finance .ann-card--urgent {
-  border-left-width: 3px;
-}
-
-.ann-list__status {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: #6e6e73;
-  font-size: 0.875rem;
-  padding: 2rem 0;
-}
-
-/* ── empty ── */
-.ann-list__empty {
-  text-align: center;
-  padding: 3rem 1rem;
-  color: #86868b;
-}
-.ann-list__empty-icon {
-  font-size: 2.2rem;
-  margin-bottom: 0.75rem;
-  opacity: 0.5;
-}
-.ann-list__empty-text {
+.ann-status {
   margin: 0;
-  font-size: 0.875rem;
-  font-weight: 500;
+  padding: 1.5rem 0.25rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--apple-text-secondary, #6e6e73);
 }
 
-/* ── grid ── */
-.ann-list__grid {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
+.ann-board {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(18.5rem, 1fr));
+  gap: 0.9rem;
 }
 
-/* ── card ── */
 .ann-card {
-  background: #fff;
-  border: 1px solid #e8e8ed;
-  border-radius: 14px;
-  padding: 1.1rem 1.25rem;
-  transition: box-shadow 0.18s ease, border-color 0.18s ease;
-}
-.ann-card:hover {
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
-  border-color: #d2d2d7;
-}
-.ann-card--urgent {
-  border-left: 3px solid #ff3b30;
-}
-
-.ann-card__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.55rem;
-}
-
-.ann-card__header-right {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-/* ── duration badge ── */
-.ann-duration-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.65rem;
-  font-weight: 600;
-  color: #0071e3;
-  background: #e8f0fe;
-  padding: 0.15rem 0.5rem;
-  border-radius: 980px;
-}
-
-/* ── expiry info ── */
-.ann-card__footer-right {
+  height: 100%;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 0.15rem;
+  gap: 0.65rem;
+  padding: 1.05rem 1.1rem 1.1rem;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
-.ann-card__expiry {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  font-size: 0.65rem;
-  color: #34a853;
-  font-weight: 500;
-}
-.ann-card__expiry--expired {
-  color: #b42318;
+.ann-card.is-expired {
+  opacity: 0.72;
 }
 
-/* ── expired card ── */
-.ann-card--expired {
-  opacity: 0.55;
-  border-style: dashed;
+.ann-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.ann-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
 }
 
 .ann-card__delete {
-  background: none;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  margin: -0.25rem -0.25rem 0 0;
   border: none;
-  color: #86868b;
-  font-size: 0.85rem;
+  border-radius: 8px;
+  background: transparent;
+  color: #ff3b30;
   cursor: pointer;
-  padding: 0.2rem 0.35rem;
-  border-radius: 6px;
-  transition: color 0.15s ease, background 0.15s ease;
 }
+
 .ann-card__delete:hover {
-  color: #b42318;
-  background: #fdecee;
-}
-.ann-card__delete:focus-visible {
-  outline: 2px solid #b42318;
-  outline-offset: 2px;
+  color: #e0352b;
+  background: rgba(255, 59, 48, 0.1);
 }
 
 .ann-card__title {
-  margin: 0 0 0.4rem;
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: #1d1d1f;
-  letter-spacing: -0.02em;
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.3;
+  color: var(--apple-text, #1d1d1f);
 }
 
 .ann-card__body {
-  margin: 0 0 0.75rem;
-  font-size: 0.84rem;
-  color: #3a3a3c;
-  line-height: 1.55;
-  white-space: pre-line;
+  margin: 0;
+  flex: 1;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--apple-text, #1d1d1f);
 }
 
-.ann-card__footer {
+.ann-card__meta {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  font-size: 0.72rem;
-  color: #86868b;
-}
-.ann-card__author {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-weight: 500;
-}
-.ann-card__date {
-  font-variant-numeric: tabular-nums;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--apple-text-secondary, #6e6e73);
 }
 
-/* ── badge ── */
+.ann-card__meta i {
+  margin-right: 0.25rem;
+  font-size: 0.7rem;
+}
+
 .ann-badge {
   display: inline-flex;
   align-items: center;
-  padding: 0.18rem 0.55rem;
+  padding: 0.12rem 0.5rem;
   border-radius: 980px;
   font-size: 0.65rem;
   font-weight: 700;
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
+
 .ann-badge--normal {
   background: #f2f2f7;
   color: #6e6e73;
 }
+
 .ann-badge--important {
   background: #fff3e0;
   color: #e65100;
 }
+
 .ann-badge--urgent {
   background: #fdecee;
   color: #b42318;
 }
 
-/* ── transition ── */
-.ann-card-enter-active { transition: all 0.3s ease; }
-.ann-card-leave-active { transition: all 0.25s ease; }
-.ann-card-enter-from { opacity: 0; transform: translateY(-8px); }
-.ann-card-leave-to { opacity: 0; transform: translateX(16px); }
+.ann-badge--expired {
+  background: #f2f2f7;
+  color: #b42318;
+}
 </style>

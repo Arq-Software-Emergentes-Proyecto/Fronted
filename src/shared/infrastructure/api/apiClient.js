@@ -1,14 +1,16 @@
 import axios from 'axios'
 import { API_BASE_URL } from '@/shared/infrastructure/envConfig.js'
-import { LOCAL_PREVIEW_ENABLED, isPreviewAccessToken } from '@/iam/application/localPreviewAuth.js'
+import { isPreviewAccessToken } from '@/iam/application/localPreviewAuth.js'
 import { clearSession, getAccessToken } from '@/iam/application/sessionStore.js'
-import { localMockAdapter } from '@/shared/infrastructure/mock/mockAdapter.js'
 
 /**
  * Centralized axios instance pointing at the BuildingFex API.
  *
  * Errors are normalized so the rest of the app can branch on `error.code`
  * (e.g. 'NETWORK_ERROR', 'TIMEOUT', 'EMAIL_NOT_FOUND', or 'HTTP_404').
+ *
+ * In `npm run dev`, Vite serves a shared mock API so invite links work in
+ * another browser (incognito). Production uses the real backend.
  */
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -17,7 +19,6 @@ export const apiClient = axios.create({
     'Content-Type': 'application/json',
     Accept: 'application/json',
   },
-  ...(LOCAL_PREVIEW_ENABLED ? { adapter: localMockAdapter } : {}),
 })
 
 apiClient.interceptors.request.use((config) => {

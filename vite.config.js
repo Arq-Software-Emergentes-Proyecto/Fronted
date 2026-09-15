@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { mercadoPagoCheckoutPlugin } from './server/viteMercadoPagoPlugin.js'
+import { previewMockApiPlugin } from './server/vitePreviewMockPlugin.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -23,7 +24,10 @@ const API_ROUTE_PREFIXES = [
   '/sharedUtilityServices',
   '/fixedPayoutRecipients',
   '/teamWorkers',
+  '/serviceProviders',
   '/importUploads',
+  '/importFolders',
+  '/residentExtraCharges',
   '/supportChats',
 ]
 
@@ -36,7 +40,7 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [vue(), mercadoPagoCheckoutPlugin()],
+    plugins: [vue(), previewMockApiPlugin(), mercadoPagoCheckoutPlugin()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, 'src'),

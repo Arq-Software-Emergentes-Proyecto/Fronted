@@ -1,7 +1,7 @@
 import { SUBSCRIPTION_PLAN_PRICES_PEN, SUBSCRIPTION_PLAN_RESIDENT_LIMITS } from '@/shared/domain/subscriptionPlans.js'
 import { createSeedDb, MOCK_DB_VERSION } from './seed.js'
 
-const STORAGE_KEY = 'buildingfex.localMockDb.v2'
+export const MOCK_DB_STORAGE_KEY = 'buildingfex.localMockDb.v2'
 
 const COLLECTIONS = [
   'users',
@@ -18,6 +18,7 @@ const COLLECTIONS = [
   'sharedUtilityServices',
   'fixedPayoutRecipients',
   'teamWorkers',
+  'serviceProviders',
   'importUploads',
   'importFolders',
   'residentExtraCharges',
@@ -25,30 +26,78 @@ const COLLECTIONS = [
   'subscriptions',
 ]
 
+function ensureCollections(db) {
+  if (!db || typeof db !== 'object') return
+  for (const name of COLLECTIONS) {
+    if (!Array.isArray(db[name])) db[name] = []
+  }
+}
+
 let memory = null
+let persistHook = null
+
+export function setMockDbPersistHook(fn) {
+  persistHook = typeof fn === 'function' ? fn : null
+}
+
+export function installNodeSnapshot(snapshot) {
+  if (memory || !snapshot || snapshot.version !== MOCK_DB_VERSION) return false
+  memory = snapshot
+  ensureCollections(memory)
+  return true
+}
+
+export function mergeIncomingDb(incoming) {
+  const db = load()
+  if (!incoming || incoming.version !== MOCK_DB_VERSION || typeof incoming !== 'object') return db
+  for (const name of COLLECTIONS) {
+    if (!Array.isArray(incoming[name])) continue
+    if (!Array.isArray(db[name])) db[name] = []
+    const byId = new Map(db[name].map((row) => [String(row?.id), row]))
+    for (const row of incoming[name]) {
+      const id = String(row?.id ?? '')
+      if (!id || byId.has(id)) continue
+      if (name === 'users' && row.role === 'resident') {
+        const code = String(row.code ?? '').trim()
+        const codeTaken = db.users.some(
+          (user) => user.role === 'resident' && String(user.code ?? '').trim() === code,
+        )
+        if (codeTaken) continue
+      }
+      db[name].push(row)
+      byId.set(id, row)
+    }
+  }
+  persist()
+  return db
+}
 
 function canUseStorage() {
   return typeof window !== 'undefined' && window.localStorage
 }
 
 function persist() {
-  if (!memory || !canUseStorage()) return
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(memory))
-  } catch {
-    // quota / private mode
+  if (!memory) return
+  if (canUseStorage()) {
+    try {
+      window.localStorage.setItem(MOCK_DB_STORAGE_KEY, JSON.stringify(memory))
+    } catch {
+      // quota / private mode
+    }
   }
+  persistHook?.(memory)
 }
 
 function load() {
   if (memory) return memory
   if (canUseStorage()) {
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY)
+      const raw = window.localStorage.getItem(MOCK_DB_STORAGE_KEY)
       if (raw) {
         const parsed = JSON.parse(raw)
         if (parsed?.version === MOCK_DB_VERSION) {
           memory = parsed
+          ensureCollections(memory)
           return memory
         }
       }

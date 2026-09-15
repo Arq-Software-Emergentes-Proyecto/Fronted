@@ -556,14 +556,13 @@ onMounted(() => {
             <h2 id="collections-costs-heading" class="collections-panel__title">
               {{ t('collectionsMgmt.expensesSectionTitle') }}
             </h2>
-            <Button
+            <button
               type="button"
-              rounded
-              :label="t('collectionsMgmt.addCost')"
-              severity="secondary"
               class="collections-panel__btn"
               @click="openModal"
-            />
+            >
+              {{ t('collectionsMgmt.addCost') }}
+            </button>
           </header>
 
         <Dialog
@@ -686,17 +685,24 @@ onMounted(() => {
               {{ nfDate(data.purchaseDate) }}
             </template>
           </Column>
-          <Column :header="t('app.deleteAction')" class="collections-col-actions">
+          <Column
+            :header="t('app.deleteAction')"
+            class="collections-col-actions"
+            header-class="collections-col-actions"
+            body-class="collections-col-actions"
+            :style="{ width: '4.25rem' }"
+            :header-style="{ width: '4.25rem', textAlign: 'right' }"
+            :body-style="{ width: '4.25rem', textAlign: 'right' }"
+          >
             <template #body="{ data }">
-              <Button
+              <button
                 type="button"
-                text
-                rounded
                 class="collections-row-delete"
-                icon="pi pi-trash"
                 :aria-label="t('app.deleteAction')"
                 @click="askDelete('expense', data)"
-              />
+              >
+                <i class="pi pi-trash" aria-hidden="true" />
+              </button>
             </template>
           </Column>
         </DataTable>
@@ -711,14 +717,13 @@ onMounted(() => {
             <h2 id="collections-services-heading" class="collections-panel__title">
               {{ t('sharedServices.sectionTitle') }}
             </h2>
-            <Button
+            <button
               type="button"
-              rounded
-              :label="t('sharedServices.addService')"
-              severity="secondary"
               class="collections-panel__btn"
               @click="openServiceModal"
-            />
+            >
+              {{ t('sharedServices.addService') }}
+            </button>
           </header>
 
           <Dialog
@@ -798,17 +803,24 @@ onMounted(() => {
                 <span v-else>—</span>
               </template>
             </Column>
-            <Column :header="t('app.deleteAction')" class="collections-col-actions">
+            <Column
+              :header="t('app.deleteAction')"
+              class="collections-col-actions"
+              header-class="collections-col-actions"
+              body-class="collections-col-actions"
+              :style="{ width: '4.25rem' }"
+              :header-style="{ width: '4.25rem', textAlign: 'right' }"
+              :body-style="{ width: '4.25rem', textAlign: 'right' }"
+            >
               <template #body="{ data }">
-                <Button
+                <button
                   type="button"
-                  text
-                  rounded
                   class="collections-row-delete"
-                  icon="pi pi-trash"
                   :aria-label="t('app.deleteAction')"
                   @click="askDelete('service', data)"
-                />
+                >
+                  <i class="pi pi-trash" aria-hidden="true" />
+                </button>
               </template>
             </Column>
           </DataTable>
@@ -824,14 +836,13 @@ onMounted(() => {
             <h2 id="collections-fixed-heading" class="collections-panel__title">
               {{ t('fixedPay.sectionTitle') }}
             </h2>
-            <Button
+            <button
               type="button"
-              rounded
-              :label="t('fixedPay.openButton')"
-              severity="secondary"
               class="collections-panel__btn"
               @click="openFixedModal"
-            />
+            >
+              {{ t('fixedPay.openButton') }}
+            </button>
           </header>
 
         <Dialog
@@ -979,17 +990,24 @@ onMounted(() => {
           <Column :header="t('fixedPay.tableNext')">
             <template #body="{ data }">{{ nfDate(data.nextPaymentDate) }}</template>
           </Column>
-          <Column :header="t('app.deleteAction')" class="collections-col-actions">
+          <Column
+            :header="t('app.deleteAction')"
+            class="collections-col-actions"
+            header-class="collections-col-actions"
+            body-class="collections-col-actions"
+            :style="{ width: '4.25rem' }"
+            :header-style="{ width: '4.25rem', textAlign: 'right' }"
+            :body-style="{ width: '4.25rem', textAlign: 'right' }"
+          >
             <template #body="{ data }">
-              <Button
+              <button
                 type="button"
-                text
-                rounded
                 class="collections-row-delete"
-                icon="pi pi-trash"
                 :aria-label="t('app.deleteAction')"
                 @click="askDelete('fixed', data)"
-              />
+              >
+                <i class="pi pi-trash" aria-hidden="true" />
+              </button>
             </template>
           </Column>
         </DataTable>
@@ -1202,13 +1220,29 @@ onMounted(() => {
 
 .collections-panel__btn {
   flex-shrink: 0;
-}
-
-.collections-panel__btn :deep(.p-button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.7rem;
+  padding: 0.22rem 0.85rem;
+  border: none;
+  border-radius: 8px;
+  background: #0071e3;
+  color: #ffffff;
+  font: inherit;
   font-weight: 500;
   font-size: 0.8125rem;
-  padding-block: 0.5rem;
-  padding-inline: 1rem;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.collections-panel__btn:hover {
+  background: #0066cc;
+}
+
+.collections-panel__btn:focus-visible {
+  outline: 2px solid #0071e3;
+  outline-offset: 2px;
 }
 
 .collections-panel__loading {
@@ -1414,13 +1448,48 @@ onMounted(() => {
   font-size: 0.875rem;
 }
 
-.collections-col-actions {
-  width: 5.5rem;
-  text-align: right;
+.collections-data :deep(.p-datatable-table) {
+  table-layout: fixed;
+  width: 100%;
 }
 
-.collections-row-delete :deep(.p-button) {
+/* Pin DELETE to the same right edge on costs / services / fixed tables */
+.collections-table:not(.collections-table--history) :deep(th.collections-col-actions),
+.collections-table:not(.collections-table--history) :deep(td.collections-col-actions),
+.collections-table:not(.collections-table--history) :deep(.p-datatable-thead > tr > th:last-child),
+.collections-table:not(.collections-table--history) :deep(.p-datatable-tbody > tr > td:last-child) {
+  width: 4.25rem !important;
+  min-width: 4.25rem !important;
+  max-width: 4.25rem !important;
+  text-align: right !important;
+  padding-left: 0.35rem !important;
+  padding-right: 0.75rem !important;
+}
+
+.collections-row-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
   color: #ff3b30;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.collections-row-delete:hover {
+  color: #e0352b;
+  background: rgba(255, 59, 48, 0.1);
+}
+
+.collections-row-delete:focus-visible {
+  outline: 2px solid #ff3b30;
+  outline-offset: 2px;
 }
 
 .collections-delete-dialog__text {
@@ -1442,6 +1511,48 @@ onMounted(() => {
 .collections-fixed-dialog :deep(.p-dialog-footer),
 .collections-delete-dialog :deep(.p-dialog-footer) {
   gap: 0.5rem;
+}
+
+.app-view :deep(.bf-btn) {
+  min-height: 1.7rem;
+  padding: 0.22rem 0.85rem;
+  border-radius: 8px;
+  box-shadow: none;
+  transform: none;
+}
+
+.app-view :deep(.bf-btn--confirm) {
+  background: #0071e3;
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.app-view :deep(.bf-btn--confirm:not(:disabled):hover) {
+  background: #0066cc;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.app-view :deep(.bf-btn--confirm:not(:disabled):focus-visible) {
+  animation: none;
+  box-shadow: none;
+}
+
+.app-view :deep(.bf-btn--cancel) {
+  box-shadow: none;
+}
+
+.app-view :deep(.bf-btn--cancel:not(:disabled):hover) {
+  box-shadow: none;
+}
+
+.app-view :deep(.bf-btn--danger) {
+  box-shadow: none;
+}
+
+.app-view :deep(.bf-btn--danger:not(:disabled):hover) {
+  box-shadow: none;
 }
 
 .collections-cost-dialog :deep(.p-inputnumber),

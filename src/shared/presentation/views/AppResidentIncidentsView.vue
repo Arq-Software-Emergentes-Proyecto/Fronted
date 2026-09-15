@@ -4,13 +4,6 @@ import { useI18n } from 'vue-i18n'
 import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
 import { authApi } from '@/iam/infrastructure/authApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
-import DataTable from 'primevue/datatable'
-import Column from 'primevue/column'
-import Tag from 'primevue/tag'
-import Button from 'primevue/button'
-import Textarea from 'primevue/textarea'
-import Dialog from 'primevue/dialog'
-import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 
 const { t, locale } = useI18n()
 const { state } = useSession()
@@ -19,12 +12,53 @@ const profile = computed(() => state.profile ?? {})
 const incidents = ref([])
 const loading = ref(false)
 const error = ref(null)
-const newDescription = ref('')
-const isReportModalOpen = ref(false)
+const composing = ref(false)
+const sending = ref(false)
+const draftDescription = ref('')
+const statusFilter = ref('all')
 
-onMounted(async () => {
-  await loadIncidents()
+const statusOptions = computed(() => [
+  { label: t('incidentStatusOpen'), value: 'open' },
+  { label: t('incidentStatusInProgress'), value: 'in-progress' },
+  { label: t('incidentStatusResolved'), value: 'resolved' },
+])
+
+const filters = computed(() => [
+  { id: 'all', label: t('information.filterAll') },
+  ...statusOptions.value.map((opt) => ({ id: opt.value, label: opt.label })),
+])
+
+const visibleIncidents = computed(() => {
+  if (statusFilter.value === 'all') return incidents.value
+  return incidents.value.filter((row) => (row.status || 'open') === statusFilter.value)
 })
+
+function startCompose() {
+  composing.value = true
+  draftDescription.value = ''
+}
+
+function cancelCompose() {
+  composing.value = false
+  draftDescription.value = ''
+}
+
+function statusLabel(status) {
+  const match = statusOptions.value.find((row) => row.value === status)
+  return match?.label ?? String(status ?? '—')
+}
+
+function formatWhen(iso) {
+  if (!iso) return ''
+  try {
+    return new Date(iso).toLocaleString(locale.value === 'es' ? 'es-PE' : 'en-US', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    })
+  } catch {
+    return String(iso)
+  }
+}
 
 async function loadIncidents() {
   const residentId = profile.value.id
@@ -36,187 +70,145 @@ async function loadIncidents() {
     loading.value = true
     error.value = null
     const all = await incidentsApi.list()
-    incidents.value = all.filter((i) => i.residentId === residentId)
-  } catch (err) {
-    error.value = err
+    incidents.value = all
+      .filter((i) => i.residentId === residentId)
+      .slice()
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+  } catch {
+    error.value = t('app.residentsLoadError')
   } finally {
     loading.value = false
   }
 }
 
-function statusSeverity(status) {
-  switch (status) {
-    case 'open':
-      return 'danger'
-    case 'in-progress':
-      return 'warning'
-    case 'resolved':
-      return 'success'
-    default:
-      return 'info'
-  }
-}
-
-function statusLabel(status) {
-  switch (status) {
-    case 'open':
-      return t('incidentStatusOpen')
-    case 'in-progress':
-      return t('incidentStatusInProgress')
-    case 'resolved':
-      return t('incidentStatusResolved')
-    default:
-      return String(status ?? '—')
-  }
-}
-
-const nfDateTime = computed(
-  () => (iso) => {
-    const s = String(iso ?? '').trim()
-    if (!s) return '—'
-    const d = new Date(s)
-    if (!Number.isFinite(d.getTime())) return s
-    const loc = locale.value === 'es' ? 'es-PE' : 'en-US'
-    return new Intl.DateTimeFormat(loc, {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    }).format(d)
-  },
-)
-
-function openReportModal() {
-  newDescription.value = ''
-  isReportModalOpen.value = true
-}
-
-function closeReportModal() {
-  isReportModalOpen.value = false
-}
-
 async function reportIncident() {
-  const text = newDescription.value?.trim()
-  if (!text) return
+  const text = draftDescription.value.trim()
   const residentId = profile.value.id
   const residentName = profile.value.name || ''
-  if (!residentId) return
+  if (!text || !residentId || sending.value) return
 
-  let ownerAdminId = profile.value.ownerAdminId ?? null
-  if (!ownerAdminId) {
-    const row = await authApi.getProfileById(residentId)
-    ownerAdminId = row?.ownerAdminId ?? null
-  }
-
-  const incident = {
-    id: `incident-${Date.now()}`,
-    residentId,
-    residentName,
-    description: text,
-    status: 'open',
-    createdAt: new Date().toISOString(),
-    provider: '',
-    ...(ownerAdminId ? { ownerAdminId } : {}),
-  }
+  sending.value = true
   try {
-    await incidentsApi.add(incident)
-    newDescription.value = ''
-    isReportModalOpen.value = false
+    error.value = null
+    let ownerAdminId = profile.value.ownerAdminId ?? null
+    if (!ownerAdminId) {
+      const row = await authApi.getProfileById(residentId)
+      ownerAdminId = row?.ownerAdminId ?? null
+    }
+
+    await incidentsApi.add({
+      id: `incident-${Date.now()}`,
+      residentId,
+      residentName,
+      description: text,
+      status: 'open',
+      createdAt: new Date().toISOString(),
+      provider: '',
+      ...(ownerAdminId ? { ownerAdminId } : {}),
+    })
+    cancelCompose()
     await loadIncidents()
-  } catch (err) {
-    error.value = err
+  } catch {
+    error.value = t('app.residentsLoadError')
+  } finally {
+    sending.value = false
   }
 }
+
+onMounted(loadIncidents)
 </script>
 
 <template>
-  <div class="app-view">
-    <h1 class="app-view__title">{{ t('resident.incidentsTitle') }}</h1>
-    <p class="app-view__subtitle">
-      {{ t('resident.incidentsSubtitle', { name: profile.name || '' }) }}
-    </p>
+  <div class="app-view inc-page">
+    <header class="inc-head">
+      <h1 class="visually-hidden">{{ t('resident.incidentsTitle') }}</h1>
+    </header>
 
-    <div class="incidents-page">
-      <section class="incidents-panel" aria-labelledby="resident-incidents-list-heading">
-        <header class="incidents-panel__head">
-          <h2 id="resident-incidents-list-heading" class="incidents-panel__title">
-            {{ t('app.residentIncidentsListTitle') }}
-          </h2>
-          <Button
-            type="button"
-            rounded
-            severity="secondary"
-            :label="t('app.residentIncidentsSubmit')"
-            class="incidents-panel__btn"
-            @click="openReportModal"
-          />
-        </header>
+    <p v-if="error" class="inc-alert" role="alert">{{ error }}</p>
 
-        <DataTable
-          :value="incidents"
-          :loading="loading"
-          responsiveLayout="scroll"
-          class="incidents-data incidents-table"
+    <section v-if="composing" class="inc-form" aria-labelledby="inc-form-heading">
+      <h2 id="inc-form-heading" class="inc-form__title">
+        {{ t('app.residentIncidentsFormTitle') }}
+      </h2>
+      <label class="inc-form__field" for="inc-resident-description">
+        <span>{{ t('app.residentIncidentsDescriptionLabel') }}</span>
+        <textarea
+          id="inc-resident-description"
+          v-model="draftDescription"
+          rows="5"
+          :placeholder="t('app.residentIncidentsDescriptionPlaceholder')"
+          :disabled="sending"
+        />
+      </label>
+      <div class="bf-actions">
+        <button type="button" class="bf-btn bf-btn--cancel" :disabled="sending" @click="cancelCompose">
+          {{ t('app.cancelAction') }}
+        </button>
+        <button
+          type="button"
+          class="bf-btn bf-btn--confirm"
+          :disabled="sending || !draftDescription.trim()"
+          @click="reportIncident"
         >
-          <Column field="id" header="ID" />
-          <Column field="description" :header="t('app.incidentDescription')" />
-          <Column :header="t('app.incidentDate')">
-            <template #body="{ data }">
-              {{ nfDateTime(data.createdAt) }}
-            </template>
-          </Column>
-          <Column :header="t('app.incidentStatus')">
-            <template #body="{ data }">
-              <Tag
-                class="incidents-status-tag"
-                :value="statusLabel(data.status)"
-                :severity="statusSeverity(data.status)"
-              />
-            </template>
-          </Column>
-          <Column :header="t('app.incidentProvider')">
-            <template #body="{ data }">
-              <span class="incidents-provider-cell">{{
-                data.provider || t('app.noProviderAssigned')
-              }}</span>
-            </template>
-          </Column>
-        </DataTable>
+          {{ t('app.residentIncidentsSubmit') }}
+        </button>
+      </div>
+    </section>
 
-        <p v-if="error" class="app-view__error incidents-page__error" role="alert">
-          {{ t('app.residentsLoadError') }}
-        </p>
-      </section>
+    <div class="inc-toolbar">
+      <div
+        v-if="incidents.length"
+        class="inc-filters"
+        role="group"
+        :aria-label="t('app.residentIncidentsListTitle')"
+      >
+        <button
+          v-for="filter in filters"
+          :key="filter.id"
+          type="button"
+          class="inc-filter"
+          :class="{ 'is-active': statusFilter === filter.id }"
+          :aria-pressed="statusFilter === filter.id"
+          @click="statusFilter = filter.id"
+        >
+          {{ filter.label }}
+        </button>
+      </div>
+      <button
+        v-if="!composing"
+        type="button"
+        class="inc-new"
+        @click="startCompose"
+      >
+        <i class="pi pi-plus" aria-hidden="true" />
+        {{ t('app.residentIncidentsSubmit') }}
+      </button>
     </div>
 
-    <Dialog
-      v-model:visible="isReportModalOpen"
-      modal
-      :header="t('app.residentIncidentsFormTitle')"
-      :style="{ width: 'min(32rem, 92vw)' }"
-      class="resident-incidents-dialog"
-      :draggable="false"
-    >
-      <div class="resident-incidents-dialog__form">
-        <div class="resident-incidents-dialog__field">
-          <label for="resident-incident-description">{{ t('app.incidentDescription') }}</label>
-          <Textarea
-            id="resident-incident-description"
-            v-model="newDescription"
-            :placeholder="t('app.residentIncidentsDescriptionPlaceholder')"
-            class="resident-incidents-dialog__textarea"
-            rows="5"
-            auto-resize
-          />
-        </div>
-      </div>
-      <template #footer>
-        <ConfirmActions
-          :cancel-label="t('app.cancelAction')"
-          :confirm-label="t('app.residentIncidentsSubmit')"
-          @cancel="closeReportModal"
-          @confirm="reportIncident"
-        />
-      </template>
-    </Dialog>
+    <p v-if="loading" class="inc-status">{{ t('app.incidentsLoading') }}</p>
+    <p v-else-if="!visibleIncidents.length" class="inc-status">
+      {{ t('resident.incidentsEmpty') }}
+    </p>
+
+    <ul v-else class="inc-board" role="list">
+      <li v-for="row in visibleIncidents" :key="row.id">
+        <article class="inc-card">
+          <header class="inc-card__head">
+            <span class="inc-badge" :class="`inc-badge--${row.status || 'open'}`">
+              {{ statusLabel(row.status) }}
+            </span>
+          </header>
+          <p class="inc-card__body">{{ row.description }}</p>
+          <footer class="inc-card__meta">
+            <span>
+              <i class="pi pi-wrench" aria-hidden="true" />
+              {{ row.provider || t('app.noProviderAssigned') }}
+            </span>
+            <time v-if="row.createdAt" :datetime="row.createdAt">{{ formatWhen(row.createdAt) }}</time>
+          </footer>
+        </article>
+      </li>
+    </ul>
   </div>
 </template>
 
@@ -226,43 +218,73 @@ async function reportIncident() {
   max-width: 72rem;
 }
 
-.app-view__title {
-  margin: 0;
-  font-size: 1.75rem;
-  font-weight: 600;
-  letter-spacing: -0.035em;
-  line-height: 1.15;
-  color: var(--apple-text, #1d1d1f);
+.inc-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
-.app-view__subtitle {
-  margin: 0.5rem 0 0;
-  max-width: 36rem;
-  font-size: 0.875rem;
-  font-weight: 400;
-  line-height: 1.45;
-  letter-spacing: -0.015em;
-  color: var(--apple-text-secondary, #6e6e73);
+.inc-head {
+  display: contents;
 }
 
-.app-view__error {
-  margin: 0.75rem 0 0;
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.inc-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 1.7rem;
+  padding: 0.22rem 0.85rem;
+  border: none;
+  border-radius: 8px;
+  background: #0071e3;
+  color: #fff;
+  font: inherit;
   font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.inc-new:hover {
+  background: #0066cc;
+}
+
+.inc-new:focus-visible {
+  outline: 2px solid #0071e3;
+  outline-offset: 2px;
+}
+
+.inc-alert {
+  margin: 0;
+  font-size: 0.875rem;
   color: #b42318;
 }
 
-.incidents-page {
-  margin-top: 1.5rem;
+.inc-status {
+  margin: 0;
+  padding: 1.5rem 0.25rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.inc-form {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
-}
-
-.incidents-page__error {
-  margin: 0;
-}
-
-.incidents-panel {
+  gap: 1rem;
   padding: 1.2rem 1.25rem 1.35rem;
   border-radius: 16px;
   background: #fff;
@@ -270,161 +292,194 @@ async function reportIncident() {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
-.incidents-panel__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.85rem 1rem;
-  margin-bottom: 0.85rem;
-}
-
-.incidents-panel__title {
+.inc-form__title {
   margin: 0;
   font-size: 1.0625rem;
   font-weight: 600;
   letter-spacing: -0.02em;
-  line-height: 1.25;
-  color: var(--apple-text, #1d1d1f);
-  max-width: min(100%, 18rem);
-}
-
-.incidents-panel__btn {
-  flex-shrink: 0;
-}
-
-.incidents-panel__btn :deep(.p-button) {
-  font-weight: 500;
-  font-size: 0.8125rem;
-  padding-block: 0.5rem;
-  padding-inline: 1rem;
-}
-
-.incidents-table {
-  margin-top: 0.15rem;
-}
-
-.incidents-data :deep(.p-datatable) {
-  font-size: 0.875rem;
-  border: none;
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.incidents-data :deep(.p-datatable-wrapper) {
-  border-radius: 12px;
-}
-
-.incidents-data :deep(.p-datatable-header) {
-  background: transparent;
-  border: none;
-  padding: 0;
-}
-
-.incidents-data :deep(.p-datatable-loading-overlay) {
-  background: rgba(255, 255, 255, 0.75);
-}
-
-.incidents-data :deep(.p-datatable-thead > tr > th) {
-  background: rgba(0, 0, 0, 0.02);
-  color: #86868b;
-  font-weight: 600;
-  font-size: 0.6875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.055em;
-  border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  padding: 0.6rem 0.75rem;
-}
-
-.incidents-data :deep(.p-datatable-tbody > tr) {
-  background: transparent;
-  transition: background 0.12s ease;
-}
-
-.incidents-data :deep(.p-datatable-tbody > tr:hover) {
-  background: rgba(0, 0, 0, 0.02);
-}
-
-.incidents-data :deep(.p-datatable-tbody > tr > td) {
-  border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  padding: 0.7rem 0.75rem;
-  vertical-align: middle;
   color: var(--apple-text, #1d1d1f);
 }
 
-.incidents-data :deep(.p-datatable-tbody > tr:last-child > td) {
-  border-bottom: none;
-}
-
-.incidents-provider-cell {
-  color: var(--apple-text-secondary, #6e6e73);
-  font-size: 0.8125rem;
-}
-
-.incidents-status-tag :deep(.p-tag) {
-  border-radius: 980px;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  padding: 0.3rem 0.65rem;
-}
-
-.resident-incidents-dialog :deep(.p-dialog-header) {
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  color: var(--apple-text, #1d1d1f);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  padding: 1rem 1.25rem;
-}
-
-.resident-incidents-dialog :deep(.p-dialog-content) {
-  padding: 1.15rem 1.25rem 1.25rem;
-}
-
-.resident-incidents-dialog :deep(.p-dialog-footer) {
-  gap: 0.5rem;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-  padding: 0.85rem 1.25rem;
-  display: flex;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-}
-
-.resident-incidents-dialog__form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-}
-
-.resident-incidents-dialog__field {
+.inc-form__field {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-}
-
-.resident-incidents-dialog__field label {
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--apple-text, #1d1d1f);
 }
 
-.resident-incidents-dialog__textarea {
+.inc-form__field textarea {
   width: 100%;
-  min-height: 8rem;
+  min-height: 7rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--apple-border-hairline, #d2d2d7);
+  border-radius: 12px;
+  background: #fff;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--apple-text, #1d1d1f);
+  resize: vertical;
+  outline: none;
 }
 
-.resident-incidents-dialog :deep(.p-textarea) {
-  border-radius: 10px;
-  border: 1px solid #d2d2d7;
-  font-size: 0.9375rem;
+.inc-form__field textarea:focus {
+  border-color: #0071e3;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.16);
+}
+
+.inc-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.inc-toolbar .inc-new {
+  margin-left: auto;
+}
+
+.inc-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.3rem;
+  border-radius: 999px;
+  background: #eef0f3;
+}
+
+.inc-filter {
+  padding: 0.45rem 0.95rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #4b5563;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.inc-filter:hover:not(.is-active) {
+  color: #1d1d1f;
+}
+
+.inc-filter.is-active {
+  background: #fff;
+  color: #1d1d1f;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.inc-filter:focus-visible {
+  outline: 2px solid #0071e3;
+  outline-offset: 2px;
+}
+
+.inc-board {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(18.5rem, 1fr));
+  gap: 0.9rem;
+}
+
+.inc-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1.05rem 1.1rem 1.1rem;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.inc-card__head {
+  display: flex;
+  align-items: flex-start;
+}
+
+.inc-card__body {
+  margin: 0;
+  flex: 1;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
   color: var(--apple-text, #1d1d1f);
 }
 
-.resident-incidents-dialog :deep(.p-textarea:enabled:focus) {
-  outline: none;
-  border-color: #0a84ff;
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.18);
+.inc-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+  font-size: 0.75rem;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.inc-card__meta i {
+  margin-right: 0.25rem;
+  font-size: 0.7rem;
+}
+
+.inc-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.5rem;
+  border-radius: 980px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.inc-badge--open {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.inc-badge--in-progress {
+  background: #e8f1fc;
+  color: #0071e3;
+}
+
+.inc-badge--resolved {
+  background: #e8f5e9;
+  color: #1b7a3d;
+}
+
+.app-view :deep(.bf-btn) {
+  min-height: 1.7rem;
+  padding: 0.22rem 0.85rem;
+  border-radius: 8px;
+  box-shadow: none;
+  transform: none;
+}
+
+.app-view :deep(.bf-btn--confirm) {
+  background: #0071e3;
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.app-view :deep(.bf-btn--confirm:not(:disabled):hover) {
+  background: #0066cc;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.app-view :deep(.bf-btn--confirm:not(:disabled):focus-visible) {
+  animation: none;
+  box-shadow: none;
 }
 </style>

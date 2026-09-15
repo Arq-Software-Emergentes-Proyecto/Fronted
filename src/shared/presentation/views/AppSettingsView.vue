@@ -17,6 +17,7 @@ import {
   readPendingCheckout,
 } from '@/shared/infrastructure/mercadoPagoCheckoutClient.js'
 import { residentsApi } from '@/residents/infrastructure/residentsApi.js'
+import { serviceProvidersApi } from '@/incidents/infrastructure/serviceProvidersApi.js'
 import { useFinancesStore } from '@/finances/application/financesStore.js'
 import { formatDayMonth, normalizeAdmissionPayRange, normalizeSettings } from '@/finances/domain/billingCycle.js'
 import {
@@ -68,6 +69,83 @@ const planSaveNotice = ref('')
 const planError = ref('')
 const planLoading = ref(false)
 const planCheckoutPlanId = ref(null)
+const activeTab = ref('profile')
+
+const settingsTabs = computed(() => [
+  { id: 'profile', label: t('app.settingsTabProfile'), icon: 'pi pi-user' },
+  { id: 'plans', label: t('app.settingsTabPlans'), icon: 'pi pi-id-card' },
+  { id: 'finance', label: t('app.settingsTabFinance'), icon: 'pi pi-wallet' },
+  { id: 'admission', label: t('app.settingsTabAdmission'), icon: 'pi pi-calendar' },
+  { id: 'providers', label: t('app.settingsTabProviders'), icon: 'pi pi-wrench' },
+])
+
+const serviceProviders = ref([])
+const providersLoading = ref(false)
+const providersSaving = ref(false)
+const providersError = ref('')
+const providersNotice = ref('')
+const deletingProviderId = ref('')
+const providerDraft = ref({
+  name: '',
+  phone: '',
+  specialty: '',
+})
+
+function resetProviderDraft() {
+  providerDraft.value = { name: '', phone: '', specialty: '' }
+}
+
+async function loadServiceProviders() {
+  if (!isAdmin.value) return
+  providersLoading.value = true
+  providersError.value = ''
+  try {
+    const list = await serviceProvidersApi.list()
+    serviceProviders.value = list
+      .slice()
+      .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), undefined, { sensitivity: 'base' }))
+  } catch {
+    providersError.value = t('app.settingsProvidersLoadError')
+  } finally {
+    providersLoading.value = false
+  }
+}
+
+async function addServiceProvider() {
+  const name = String(providerDraft.value.name ?? '').trim()
+  if (!name || providersSaving.value) return
+  providersSaving.value = true
+  providersError.value = ''
+  providersNotice.value = ''
+  try {
+    await serviceProvidersApi.add({
+      name,
+      phone: providerDraft.value.phone,
+      specialty: providerDraft.value.specialty,
+    })
+    resetProviderDraft()
+    providersNotice.value = t('app.settingsProvidersSaved')
+    await loadServiceProviders()
+  } catch {
+    providersError.value = t('app.settingsProvidersSaveError')
+  } finally {
+    providersSaving.value = false
+  }
+}
+
+async function removeServiceProvider(id) {
+  if (deletingProviderId.value) return
+  deletingProviderId.value = String(id)
+  providersError.value = ''
+  try {
+    await serviceProvidersApi.remove(id)
+    await loadServiceProviders()
+  } catch {
+    providersError.value = t('app.settingsProvidersDeleteError')
+  } finally {
+    deletingProviderId.value = ''
+  }
+}
 
 const lateFeePerDay = ref(0)
 const lateFeeError = ref('')
@@ -140,6 +218,7 @@ async function handleSubscriptionReturnFromRoute() {
   const paymentRaw = route.query.payment_id ?? route.query.collection_id
   const hasReturn = Boolean(status || paymentRaw || route.query.subscription)
   if (!hasReturn) return
+  activeTab.value = 'plans'
 
   const clearReturn = () => {
     clearPendingCheckout(MpPendingKeys.subscription)
@@ -277,6 +356,7 @@ async function initSettings() {
   await loadSubscription()
   await loadLateFee()
   await handleSubscriptionReturnFromRoute()
+  await loadServiceProviders()
 }
 
 async function selectPlan(planId) {
@@ -357,16 +437,37 @@ watch(admissionRuleNotice, (msg) => {
 </script>
 
 <template>
-  <div class="app-view">
-    <h1 class="app-view__title">{{ t('app.pageSettings') }}</h1>
-    <p class="app-view__subtitle">{{ t('app.settingsProfileSubtitle') }}</p>
+  <div class="app-view app-view--ai">
+    <nav
+      v-if="isAdmin"
+      class="settings-tabs"
+      :aria-label="t('app.pageSettings')"
+    >
+      <button
+        v-for="tab in settingsTabs"
+        :key="tab.id"
+        type="button"
+        class="settings-tabs__item"
+        :class="{ 'is-active': activeTab === tab.id }"
+        @click="activeTab = tab.id"
+      >
+        <i :class="tab.icon" aria-hidden="true" />
+        {{ tab.label }}
+      </button>
+    </nav>
 
+    <div class="ai-shell">
+      <div class="settings-body">
     <p v-if="isLoading" class="app-view__status">{{ t('app.settingsLoadingProfile') }}</p>
     <p v-else-if="loadError" class="app-view__status app-view__status--warn">
       {{ t('app.settingsProfileLoadError') }}
     </p>
 
-    <section v-if="isAdmin" class="settings-card" aria-labelledby="settings-admin-heading">
+    <section
+      v-if="isAdmin && activeTab === 'profile'"
+      class="settings-card"
+      aria-labelledby="settings-admin-heading"
+    >
       <h2 id="settings-admin-heading" class="settings-card__title">
         {{ t('app.settingsAdminProfileTitle') }}
       </h2>
@@ -392,7 +493,11 @@ watch(admissionRuleNotice, (msg) => {
       </ul>
     </section>
 
-    <section v-if="isAdmin" class="settings-card" aria-labelledby="settings-late-fee-heading">
+    <section
+      v-if="isAdmin && activeTab === 'finance'"
+      class="settings-card"
+      aria-labelledby="settings-late-fee-heading"
+    >
       <h2 id="settings-late-fee-heading" class="settings-card__title">
         {{ t('financeAdmin.lateFeePerDay') }}
       </h2>
@@ -421,7 +526,11 @@ watch(admissionRuleNotice, (msg) => {
       </button>
     </section>
 
-    <section v-if="isAdmin" class="settings-card settings-card--admission" aria-labelledby="settings-admission-rules-heading">
+    <section
+      v-if="isAdmin && activeTab === 'admission'"
+      class="settings-card settings-card--admission"
+      aria-labelledby="settings-admission-rules-heading"
+    >
       <h2 id="settings-admission-rules-heading" class="settings-card__title">
         {{ t('financeAdmin.admissionRulesTitle') }}
       </h2>
@@ -532,8 +641,105 @@ watch(admissionRuleNotice, (msg) => {
       </p>
     </section>
 
+    <section
+      v-if="isAdmin && activeTab === 'providers'"
+      class="settings-card settings-card--admission"
+      aria-labelledby="settings-providers-heading"
+    >
+      <h2 id="settings-providers-heading" class="settings-card__title">
+        {{ t('app.settingsProvidersTitle') }}
+      </h2>
+      <p class="settings-card__hint">{{ t('app.settingsProvidersHint') }}</p>
+      <p v-if="providersLoading" class="settings-card__status">
+        {{ t('app.settingsProvidersLoading') }}
+      </p>
+      <div class="settings-provider-fields">
+        <label class="settings-card__field" for="settingsProviderName">
+          <span>{{ t('app.settingsProvidersName') }}</span>
+          <input
+            id="settingsProviderName"
+            v-model="providerDraft.name"
+            type="text"
+            class="settings-card__input"
+            :placeholder="t('app.settingsProvidersNamePlaceholder')"
+            :disabled="providersSaving"
+            maxlength="80"
+            @keydown.enter.prevent="addServiceProvider"
+          />
+        </label>
+        <label class="settings-card__field" for="settingsProviderPhone">
+          <span>{{ t('app.settingsProvidersPhone') }}</span>
+          <input
+            id="settingsProviderPhone"
+            v-model="providerDraft.phone"
+            type="tel"
+            class="settings-card__input"
+            :placeholder="t('app.settingsProvidersPhonePlaceholder')"
+            :disabled="providersSaving"
+            maxlength="30"
+            @keydown.enter.prevent="addServiceProvider"
+          />
+        </label>
+        <label class="settings-card__field" for="settingsProviderSpecialty">
+          <span>{{ t('app.settingsProvidersSpecialty') }}</span>
+          <input
+            id="settingsProviderSpecialty"
+            v-model="providerDraft.specialty"
+            type="text"
+            class="settings-card__input"
+            :placeholder="t('app.settingsProvidersSpecialtyPlaceholder')"
+            :disabled="providersSaving"
+            maxlength="60"
+            @keydown.enter.prevent="addServiceProvider"
+          />
+        </label>
+      </div>
+      <p v-if="providersNotice" class="settings-card__notice" role="status">
+        {{ providersNotice }}
+      </p>
+      <p v-if="providersError" class="settings-card__error" role="alert">
+        {{ providersError }}
+      </p>
+      <button
+        type="button"
+        class="settings-card__save"
+        :disabled="providersSaving || providersLoading || !String(providerDraft.name || '').trim()"
+        @click="addServiceProvider"
+      >
+        {{ t('app.settingsProvidersAdd') }}
+      </button>
+
+      <ul class="admission-resident-list" role="list">
+        <li v-if="!providersLoading && !serviceProviders.length" class="admission-resident-list__empty">
+          {{ t('app.settingsProvidersEmpty') }}
+        </li>
+        <li v-for="provider in serviceProviders" :key="provider.id" class="admission-resident">
+          <div class="admission-resident__info">
+            <strong>{{ provider.name }}</strong>
+            <span>
+              <template v-if="provider.specialty">{{ provider.specialty }}</template>
+              <template v-if="provider.specialty && provider.phone"> · </template>
+              <template v-if="provider.phone">{{ provider.phone }}</template>
+            </span>
+          </div>
+          <button
+            type="button"
+            class="admission-resident__btn"
+            :disabled="Boolean(deletingProviderId) || providersSaving"
+            @click="removeServiceProvider(provider.id)"
+          >
+            {{ t('app.settingsProvidersDelete') }}
+          </button>
+        </li>
+      </ul>
+    </section>
+
     <!-- Subscriptions — solo visible para admin -->
-    <section v-if="isAdmin" class="plans-section" aria-labelledby="settings-plans-heading">
+    <section
+      v-if="isAdmin && activeTab === 'plans'"
+      class="plans-section"
+      aria-labelledby="settings-plans-heading"
+    >
       <h2 id="settings-plans-heading" class="plans-section__title">
         {{ t('app.settingsPlansTitle') }}
       </h2>
@@ -705,28 +911,89 @@ watch(admissionRuleNotice, (msg) => {
         </li>
       </ul>
     </section>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .app-view {
-  padding: 1.75rem 1.5rem 3rem;
+  padding: 1.75rem 1.5rem 2.5rem;
   max-width: 72rem;
 }
 
-.app-view__title {
-  margin: 0;
-  font-size: 1.75rem;
-  font-weight: 600;
-  letter-spacing: -0.035em;
-  line-height: 1.15;
-  color: var(--apple-text, #1d1d1f);
+.app-view--ai {
+  max-width: 88rem;
+  padding-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
-.app-view__subtitle {
-  margin: 0.5rem 0 1.5rem;
+.settings-tabs {
+  align-self: center;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.15rem;
+  max-width: 100%;
+  padding: 0.3rem;
+  overflow-x: auto;
+  border-radius: 999px;
+  background: #eef0f3;
+}
+
+.settings-tabs__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  padding: 0.55rem 1.05rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #4b5563;
+  font: inherit;
   font-size: 0.875rem;
-  color: var(--apple-text-secondary, #6e6e73);
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.settings-tabs__item i {
+  font-size: 0.9rem;
+}
+
+.settings-tabs__item:hover:not(.is-active) {
+  color: #1d1d1f;
+}
+
+.settings-tabs__item.is-active {
+  background: #fff;
+  color: #1d1d1f;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.settings-tabs__item:focus-visible {
+  outline: 2px solid var(--apple-blue, #1e3a8a);
+  outline-offset: 2px;
+}
+
+.ai-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 8.5rem);
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.settings-body {
+  padding: 1.25rem 1.5rem 1.75rem;
 }
 
 .app-view__status {
@@ -813,6 +1080,12 @@ watch(admissionRuleNotice, (msg) => {
   font-size: 0.8125rem;
   font-weight: 500;
   color: #6e6e73;
+}
+
+.settings-provider-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
 }
 
 .settings-card__input {
@@ -952,7 +1225,7 @@ watch(admissionRuleNotice, (msg) => {
 
 /* ── Sección de planes ── */
 .plans-section {
-  margin-top: 2rem;
+  margin-top: 0;
 }
 
 .plans-section__title {

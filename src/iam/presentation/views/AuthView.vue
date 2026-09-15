@@ -245,6 +245,10 @@ async function onLoginSubmit() {
       loginEmailError.value = t('auth.passwordInvalid')
       return
     }
+    if (error?.code === 'TOO_MANY_REQUESTS') {
+      loginEmailError.value = t('auth.tooManyRequests')
+      return
+    }
     if (error?.code === 'RESIDENT_USE_GOOGLE') {
       loginEmailError.value = t('auth.residentUseGoogle')
       return

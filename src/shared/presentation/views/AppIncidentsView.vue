@@ -1,234 +1,321 @@
 <script setup>
-  import { ref, onMounted } from 'vue'
-  import { useI18n } from 'vue-i18n'
-  import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
-  import  DataTable  from 'primevue/datatable'
-  import  Column  from 'primevue/column'
-  import  Tag  from 'primevue/tag'
-  import  Button  from 'primevue/button'
-  import  Dialog  from 'primevue/dialog'
-  import InputText  from 'primevue/inputtext'
-  import  Dropdown  from 'primevue/dropdown'
-  import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
+import { computed, ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
+import { serviceProvidersApi } from '@/incidents/infrastructure/serviceProvidersApi.js'
 
-  const { t } = useI18n()
+const { t, locale } = useI18n()
 
-  const incidents = ref([])
-  const loading = ref(false)
-  const error = ref(null)
+const incidents = ref([])
+const serviceProviders = ref([])
+const loading = ref(false)
+const error = ref(null)
+const composing = ref(false)
+const sending = ref(false)
+const savingId = ref('')
+const draftDescription = ref('')
+const draftProvider = ref('')
+const statusFilter = ref('all')
 
-  const isDialogOpen = ref(false)
-  const selectedIncident = ref(null)
-  const editForm = ref({
-  description: '',
-  status: '',
-  provider: ''
-})
-
-  const statusOptions = [
+const statusOptions = computed(() => [
   { label: t('incidentStatusOpen'), value: 'open' },
   { label: t('incidentStatusInProgress'), value: 'in-progress' },
-  { label: t('incidentStatusResolved'), value: 'resolved' }
-  ]
+  { label: t('incidentStatusResolved'), value: 'resolved' },
+])
 
-  onMounted(async () => {
-  await loadIncidents()
+const filters = computed(() => [
+  { id: 'all', label: t('information.filterAll') },
+  ...statusOptions.value.map((opt) => ({ id: opt.value, label: opt.label })),
+])
+
+const providerOptions = computed(() => {
+  const names = serviceProviders.value
+    .map((row) => String(row?.name ?? '').trim())
+    .filter(Boolean)
+  const unique = [...new Set(names)]
+  unique.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+  const draft = String(draftProvider.value ?? '').trim()
+  if (draft && !unique.includes(draft)) unique.unshift(draft)
+  return unique
 })
 
-  function resolveErrorMessage(err, fallbackKey = 'app.incidentsSaveError') {
-    const payload = err?.payload
-    if (payload && typeof payload === 'object' && typeof payload.message === 'string') {
-      return payload.message
-    }
-    if (err?.code === 'NETWORK_ERROR') return t('app.networkError')
-    if (err?.code === 'TIMEOUT') return t('app.timeoutError')
-    return t(fallbackKey)
-  }
+const visibleIncidents = computed(() => {
+  if (statusFilter.value === 'all') return incidents.value
+  return incidents.value.filter((row) => (row.status || 'open') === statusFilter.value)
+})
 
-  async function loadIncidents() {
-    try {
-      loading.value = true
-      error.value = null
-      incidents.value = await incidentsApi.list()
-    } catch (err) {
-      error.value = resolveErrorMessage(err, 'app.incidentsLoadError')
-    } finally {
-      loading.value = false
-    }
-  }
-
-  function statusSeverity(status) {
-  switch (status) {
-  case 'open': return 'danger'
-  case 'in-progress': return 'warning'
-  case 'resolved': return 'success'
-  default: return 'info'
-}
+function startCompose() {
+  composing.value = true
+  draftDescription.value = ''
+  draftProvider.value = ''
 }
 
-  function openEditDialog(incident) {
-  selectedIncident.value = incident
-  editForm.value = { ...incident }
-  isDialogOpen.value = true
+function cancelCompose() {
+  composing.value = false
+  draftDescription.value = ''
+  draftProvider.value = ''
 }
 
-  async function saveIncident() {
-    try {
-      error.value = null
-      if (selectedIncident.value) {
-        await incidentsApi.update(selectedIncident.value.id, editForm.value)
-      } else {
-        await incidentsApi.add(editForm.value)
-      }
-      await loadIncidents()
-      isDialogOpen.value = false
-    } catch (err) {
-      error.value = resolveErrorMessage(err)
-    }
-  }
-
-  async function deleteIncident(id) {
-    try {
-      error.value = null
-      await incidentsApi.remove(id)
-      await loadIncidents()
-    } catch (err) {
-      error.value = resolveErrorMessage(err)
-    }
-  }
-
-  function newIncident() {
-  selectedIncident.value = null
-  editForm.value = { id: generateIncidentId(), description: '', status: 'open', provider: '' }
-  isDialogOpen.value = true
-
+function statusLabel(status) {
+  const match = statusOptions.value.find((row) => row.value === status)
+  return match?.label ?? String(status ?? '—')
 }
 
-  function generateIncidentId() {
-    // Busca el máximo número actual en los IDs
-    const maxId = incidents.value
-        .map(i => parseInt(i.id.replace('incident-', '')))
-        .reduce((a, b) => Math.max(a, b), 1000) // empieza en 1000 si no hay nada
-    return `incident-${maxId + 1}`
+function formatWhen(iso) {
+  if (!iso) return ''
+  try {
+    return new Date(iso).toLocaleString(locale.value === 'es' ? 'es-PE' : 'en-US', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    })
+  } catch {
+    return String(iso)
   }
+}
 
+function resolveErrorMessage(err, fallbackKey = 'app.incidentsSaveError') {
+  const payload = err?.payload
+  if (payload && typeof payload === 'object' && typeof payload.message === 'string') {
+    return payload.message
+  }
+  if (err?.code === 'NETWORK_ERROR') return t('app.networkError')
+  if (err?.code === 'TIMEOUT') return t('app.timeoutError')
+  return t(fallbackKey)
+}
+
+async function loadServiceProviders() {
+  try {
+    const list = await serviceProvidersApi.list()
+    serviceProviders.value = Array.isArray(list) ? list : []
+  } catch {
+    serviceProviders.value = []
+  }
+}
+
+async function loadIncidents() {
+  try {
+    loading.value = true
+    error.value = null
+    const list = await incidentsApi.list()
+    incidents.value = list
+      .slice()
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+  } catch (err) {
+    error.value = resolveErrorMessage(err, 'app.incidentsLoadError')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function createIncident() {
+  const description = draftDescription.value.trim()
+  if (!description || sending.value) return
+  sending.value = true
+  try {
+    error.value = null
+    await incidentsApi.add({
+      id: `incident-${Date.now()}`,
+      description,
+      status: 'open',
+      provider: draftProvider.value.trim(),
+      residentId: null,
+      residentName: '',
+      createdAt: new Date().toISOString(),
+    })
+    cancelCompose()
+    await loadIncidents()
+  } catch (err) {
+    error.value = resolveErrorMessage(err)
+  } finally {
+    sending.value = false
+  }
+}
+
+async function updateIncident(row, patch) {
+  if (!row?.id || savingId.value) return
+  savingId.value = row.id
+  try {
+    error.value = null
+    await incidentsApi.update(row.id, {
+      ...row,
+      ...patch,
+    })
+    await loadIncidents()
+  } catch (err) {
+    error.value = resolveErrorMessage(err)
+  } finally {
+    savingId.value = ''
+  }
+}
+
+async function deleteIncident(id) {
+  if (!window.confirm(t('app.incidentsDeleteConfirm'))) return
+  try {
+    error.value = null
+    await incidentsApi.remove(id)
+    await loadIncidents()
+  } catch (err) {
+    error.value = resolveErrorMessage(err)
+  }
+}
+
+onMounted(async () => {
+  await Promise.all([loadIncidents(), loadServiceProviders()])
+})
 </script>
 
 <template>
-  <div class="app-view">
-    <h1 class="app-view__title">{{ t('app.pageIncidents') }}</h1>
-    <p class="app-view__subtitle">{{ t('app.incidentsAdminSubtitle') }}</p>
+  <div class="app-view inc-page">
+    <header class="inc-head">
+      <h1 class="visually-hidden">{{ t('app.pageIncidents') }}</h1>
+    </header>
 
-    <div class="finance-page">
-      <section
-        class="finance-panel finance-panel--table import-panel"
-        aria-labelledby="incidents-list-heading"
-      >
-        <div class="mgmt-panel-toolbar">
-          <h2 id="incidents-list-heading" class="finance-panel__section-title">
-            {{ t('app.incidentsAdminListTitle') }}
-          </h2>
-          <Button
-            type="button"
-            rounded
-            severity="secondary"
-            icon="pi pi-plus"
-            :label="t('app.newIncident')"
-            class="import-dropzone__btn"
-            @click="newIncident"
-          />
-        </div>
+    <p v-if="error" class="inc-alert" role="alert">{{ error }}</p>
 
-        <DataTable
-          :value="incidents"
-          :loading="loading"
-          responsiveLayout="scroll"
-          class="finance-data finance-table"
-        >
-        <Column field="id" header="ID" />
-        <Column field="residentName" :header="t('app.incidentResidentName')" />
-        <Column field="description" :header="t('app.incidentDescription')" />
-        <Column field="createdAt" :header="t('app.incidentDate')" />
-        <Column :header="t('app.incidentStatus')">
-          <template #body="{ data }">
-            <Tag
-              class="incidents-status-tag"
-              :value="data.status"
-              :severity="statusSeverity(data.status)"
-            />
-          </template>
-        </Column>
-        <Column :header="t('app.incidentProvider')">
-          <template #body="{ data }">
-            <span class="incidents-provider-cell">{{ data.provider || t('app.noProviderAssigned') }}</span>
-          </template>
-        </Column>
-        <Column :header="t('app.incidentActions')">
-          <template #body="{ data }">
-            <div class="incidents-row-actions">
-              <Button
-                text
-                rounded
-                class="incidents-row-actions__btn"
-                :label="t('app.editAction')"
-                @click="openEditDialog(data)"
-              />
-              <Button
-                text
-                rounded
-                class="incidents-row-actions__btn incidents-row-actions__btn--danger"
-                :label="t('app.deleteAction')"
-                @click="deleteIncident(data.id)"
-              />
-            </div>
-          </template>
-        </Column>
-      </DataTable>
-      </section>
+    <section v-if="composing" class="inc-form" aria-labelledby="inc-form-heading">
+      <h2 id="inc-form-heading" class="inc-form__title">{{ t('app.newIncident') }}</h2>
 
-      <p v-if="error" class="import-alert import-alert--error" role="alert">
-        {{ error }}
+      <label class="inc-form__field" for="inc-draft-provider">
+        <span>{{ t('app.incidentProvider') }}</span>
+        <select id="inc-draft-provider" v-model="draftProvider" :disabled="sending">
+          <option value="">{{ t('app.incidentUnassignProvider') }}</option>
+          <option v-for="name in providerOptions" :key="`draft-${name}`" :value="name">
+            {{ name }}
+          </option>
+        </select>
+      </label>
+      <p v-if="!serviceProviders.length" class="inc-form__hint">
+        {{ t('app.incidentProvidersEmptyHint') }}
       </p>
+
+      <label class="inc-form__field" for="inc-draft-description">
+        <span>{{ t('app.incidentDescription') }}</span>
+        <textarea
+          id="inc-draft-description"
+          v-model="draftDescription"
+          rows="5"
+          :placeholder="t('app.incidentDescription')"
+          :disabled="sending"
+        />
+      </label>
+
+      <div class="bf-actions">
+        <button type="button" class="bf-btn bf-btn--cancel" :disabled="sending" @click="cancelCompose">
+          {{ t('app.cancelAction') }}
+        </button>
+        <button
+          type="button"
+          class="bf-btn bf-btn--confirm"
+          :disabled="sending || !draftDescription.trim()"
+          @click="createIncident"
+        >
+          {{ t('app.newIncident') }}
+        </button>
+      </div>
+    </section>
+
+    <div class="inc-toolbar">
+      <div
+        v-if="incidents.length"
+        class="inc-filters"
+        role="group"
+        :aria-label="t('app.incidentsAdminListTitle')"
+      >
+        <button
+          v-for="filter in filters"
+          :key="filter.id"
+          type="button"
+          class="inc-filter"
+          :class="{ 'is-active': statusFilter === filter.id }"
+          :aria-pressed="statusFilter === filter.id"
+          @click="statusFilter = filter.id"
+        >
+          {{ filter.label }}
+        </button>
+      </div>
+      <button
+        v-if="!composing"
+        type="button"
+        class="inc-new"
+        @click="startCompose"
+      >
+        <i class="pi pi-plus" aria-hidden="true" />
+        {{ t('app.newIncident') }}
+      </button>
     </div>
 
-    <Dialog
-      v-model:visible="isDialogOpen"
-      modal
-      :header="t('app.editIncident')"
-      :style="{ width: 'min(30rem, 92vw)' }"
-      class="incidents-dialog"
-      :draggable="false"
-    >
-      <div class="incidents-dialog__form">
-        <div class="incidents-dialog__field">
-          <label for="description">{{ t('app.incidentDescription') }}</label>
-          <InputText id="description" v-model="editForm.description" class="incidents-dialog__input" />
-        </div>
-        <div class="incidents-dialog__field">
-          <label for="status">{{ t('app.incidentStatus') }}</label>
-          <Dropdown
-            id="status"
-            v-model="editForm.status"
-            class="incidents-dialog__dropdown"
-            :options="statusOptions"
-            option-label="label"
-            option-value="value"
-          />
-        </div>
-        <div class="incidents-dialog__field">
-          <label for="provider">{{ t('app.incidentProvider') }}</label>
-          <InputText id="provider" v-model="editForm.provider" class="incidents-dialog__input" />
-        </div>
-      </div>
-      <template #footer>
-        <ConfirmActions
-          :cancel-label="t('app.cancelAction')"
-          :confirm-label="t('app.saveSpaceUpdateAction')"
-          @cancel="isDialogOpen = false"
-          @confirm="saveIncident"
-        />
-      </template>
-    </Dialog>
+    <p v-if="loading" class="inc-status">{{ t('app.incidentsLoading') }}</p>
+    <p v-else-if="!visibleIncidents.length" class="inc-status">
+      {{ t('app.incidentsEmptyList') }}
+    </p>
+
+    <ul v-else class="inc-board" role="list">
+      <li v-for="row in visibleIncidents" :key="row.id">
+        <article class="inc-card">
+          <header class="inc-card__head">
+            <div class="inc-card__badges">
+              <span class="inc-badge" :class="`inc-badge--${row.status || 'open'}`">
+                {{ statusLabel(row.status) }}
+              </span>
+            </div>
+            <button
+              type="button"
+              class="inc-card__delete"
+              :aria-label="t('app.deleteAction')"
+              @click="deleteIncident(row.id)"
+            >
+              <i class="pi pi-trash" aria-hidden="true" />
+            </button>
+          </header>
+
+          <p class="inc-card__body">{{ row.description }}</p>
+
+          <footer class="inc-card__meta">
+            <span v-if="row.residentName">
+              <i class="pi pi-user" aria-hidden="true" />
+              {{ row.residentName }}
+            </span>
+            <span>
+              <i class="pi pi-wrench" aria-hidden="true" />
+              {{ row.provider || t('app.noProviderAssigned') }}
+            </span>
+            <time v-if="row.createdAt" :datetime="row.createdAt">{{ formatWhen(row.createdAt) }}</time>
+          </footer>
+
+          <div class="inc-card__controls">
+            <label class="inc-card__field">
+              <span>{{ t('app.incidentStatus') }}</span>
+              <select
+                :value="row.status || 'open'"
+                :disabled="savingId === row.id"
+                @change="updateIncident(row, { status: $event.target.value })"
+              >
+                <option v-for="opt in statusOptions" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </option>
+              </select>
+            </label>
+            <label class="inc-card__field">
+              <span>{{ t('app.incidentProvider') }}</span>
+              <select
+                :value="row.provider || ''"
+                :disabled="savingId === row.id"
+                @change="updateIncident(row, { provider: $event.target.value })"
+              >
+                <option value="">{{ t('app.incidentUnassignProvider') }}</option>
+                <option
+                  v-for="name in providerOptions"
+                  :key="`${row.id}-${name}`"
+                  :value="name"
+                >
+                  {{ name }}
+                </option>
+              </select>
+            </label>
+          </div>
+        </article>
+      </li>
+    </ul>
   </div>
 </template>
 
@@ -238,33 +325,73 @@
   max-width: 72rem;
 }
 
-.app-view__title {
-  margin: 0;
-  font-size: 1.75rem;
-  font-weight: 600;
-  letter-spacing: -0.035em;
-  line-height: 1.15;
-  color: var(--apple-text, #1d1d1f);
+.inc-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
-.app-view__subtitle {
-  margin: 0.5rem 0 0;
-  max-width: 40rem;
+.inc-head {
+  display: contents;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.inc-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 1.7rem;
+  padding: 0.22rem 0.85rem;
+  border: none;
+  border-radius: 8px;
+  background: #0071e3;
+  color: #fff;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.inc-new:hover {
+  background: #0066cc;
+}
+
+.inc-new:focus-visible {
+  outline: 2px solid #0071e3;
+  outline-offset: 2px;
+}
+
+.inc-alert {
+  margin: 0;
   font-size: 0.875rem;
-  font-weight: 400;
+  color: #b42318;
+}
+
+.inc-status {
+  margin: 0;
+  padding: 1.5rem 0.25rem;
+  font-size: 0.9rem;
   line-height: 1.45;
-  letter-spacing: -0.015em;
   color: var(--apple-text-secondary, #6e6e73);
 }
 
-.finance-page {
-  margin-top: 1.5rem;
+.inc-form {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
-}
-
-.finance-panel {
+  gap: 1rem;
   padding: 1.2rem 1.25rem 1.35rem;
   border-radius: 16px;
   background: #fff;
@@ -272,198 +399,242 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
-.finance-panel--table {
-  padding: 1.2rem 1.25rem 1.35rem;
-  overflow: hidden;
-}
-
-.finance-panel__section-title {
+.inc-form__title {
   margin: 0;
   font-size: 1.0625rem;
   font-weight: 600;
   letter-spacing: -0.02em;
-  line-height: 1.25;
   color: var(--apple-text, #1d1d1f);
 }
 
-.mgmt-panel-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.import-dropzone__btn :deep(.p-button) {
-  font-weight: 500;
-  font-size: 0.8125rem;
-  padding-block: 0.5rem;
-  padding-inline: 1rem;
-}
-
-.import-alert {
-  margin: 0;
-  padding: 0.65rem 0.85rem;
-  border-radius: 10px;
-  font-size: 0.8125rem;
-  font-weight: 500;
-}
-
-.import-alert--error {
-  color: #b42318;
-  background: rgba(180, 35, 24, 0.06);
-  border: 1px solid rgba(180, 35, 24, 0.12);
-}
-
-.import-panel .finance-table {
-  margin-top: 0.65rem;
-}
-
-.finance-data :deep(.p-datatable) {
-  font-size: 0.875rem;
-  border: none;
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.finance-data :deep(.p-datatable-wrapper) {
-  border-radius: 12px;
-}
-
-.finance-data :deep(.p-datatable-header) {
-  background: transparent;
-  border: none;
-  padding: 0;
-}
-
-.finance-data :deep(.p-datatable-loading-overlay) {
-  background: rgba(255, 255, 255, 0.75);
-}
-
-.finance-data :deep(.p-datatable-thead > tr > th) {
-  background: rgba(0, 0, 0, 0.02);
-  color: #86868b;
-  font-weight: 600;
-  font-size: 0.6875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.055em;
-  border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  padding: 0.6rem 0.75rem;
-}
-
-.finance-data :deep(.p-datatable-tbody > tr) {
-  background: transparent;
-  transition: background 0.12s ease;
-}
-
-.finance-data :deep(.p-datatable-tbody > tr:hover) {
-  background: rgba(0, 0, 0, 0.02);
-}
-
-.finance-data :deep(.p-datatable-tbody > tr > td) {
-  border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  padding: 0.7rem 0.75rem;
-  vertical-align: middle;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.finance-data :deep(.p-datatable-tbody > tr:last-child > td) {
-  border-bottom: none;
-}
-
-.incidents-provider-cell {
-  color: var(--apple-text-secondary, #6e6e73);
-  font-size: 0.8125rem;
-}
-
-.incidents-status-tag :deep(.p-tag) {
-  border-radius: 980px;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  padding: 0.3rem 0.65rem;
-}
-
-.incidents-row-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.15rem 0.35rem;
-  align-items: center;
-}
-
-.incidents-row-actions__btn :deep(.p-button) {
-  font-size: 0.8125rem;
-  font-weight: 500;
-  padding: 0.35rem 0.55rem;
-}
-
-.incidents-row-actions__btn:not(.incidents-row-actions__btn--danger) :deep(.p-button) {
-  color: #0a84ff;
-}
-
-.incidents-row-actions__btn--danger :deep(.p-button) {
-  color: #ff3b30;
-}
-
-.incidents-dialog :deep(.p-dialog-header) {
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  color: var(--apple-text, #1d1d1f);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  padding: 1rem 1.25rem;
-}
-
-.incidents-dialog :deep(.p-dialog-content) {
-  padding: 1.15rem 1.25rem 1.25rem;
-}
-
-.incidents-dialog :deep(.p-dialog-footer) {
-  gap: 0.5rem;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-  padding: 0.85rem 1.25rem;
-  display: flex;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-}
-
-.incidents-dialog__form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-}
-
-.incidents-dialog__field {
+.inc-form__field,
+.inc-card__field {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-}
-
-.incidents-dialog__field label {
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--apple-text, #1d1d1f);
 }
 
-.incidents-dialog__input,
-.incidents-dialog__dropdown {
+.inc-form__field select,
+.inc-form__field textarea,
+.inc-card__field select {
   width: 100%;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--apple-border-hairline, #d2d2d7);
+  border-radius: 12px;
+  background: #fff;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 400;
+  color: var(--apple-text, #1d1d1f);
+  outline: none;
 }
 
-.incidents-dialog :deep(.p-inputtext),
-.incidents-dialog :deep(.p-dropdown) {
-  border-radius: 10px;
-  border: 1px solid #d2d2d7;
-  font-size: 0.9375rem;
+.inc-form__field textarea {
+  min-height: 7rem;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.inc-form__field select:focus,
+.inc-form__field textarea:focus,
+.inc-card__field select:focus {
+  border-color: #0071e3;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.16);
+}
+
+.inc-form__hint {
+  margin: -0.35rem 0 0;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.inc-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.inc-toolbar .inc-new {
+  margin-left: auto;
+}
+
+.inc-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.3rem;
+  border-radius: 999px;
+  background: #eef0f3;
+}
+
+.inc-filter {
+  padding: 0.45rem 0.95rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #4b5563;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.inc-filter:hover:not(.is-active) {
+  color: #1d1d1f;
+}
+
+.inc-filter.is-active {
+  background: #fff;
+  color: #1d1d1f;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.inc-filter:focus-visible {
+  outline: 2px solid #0071e3;
+  outline-offset: 2px;
+}
+
+.inc-board {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(18.5rem, 1fr));
+  gap: 0.9rem;
+}
+
+.inc-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1.05rem 1.1rem 1.1rem;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.inc-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.inc-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.inc-card__delete {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  margin: -0.25rem -0.25rem 0 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #ff3b30;
+  cursor: pointer;
+}
+
+.inc-card__delete:hover {
+  color: #e0352b;
+  background: rgba(255, 59, 48, 0.1);
+}
+
+.inc-card__body {
+  margin: 0;
+  flex: 1;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
   color: var(--apple-text, #1d1d1f);
 }
 
-.incidents-dialog :deep(.p-inputtext:enabled:focus),
-.incidents-dialog :deep(.p-dropdown:not(.p-disabled).p-focus) {
-  outline: none;
-  border-color: #0a84ff;
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.18);
+.inc-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+  font-size: 0.75rem;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.inc-card__meta i {
+  margin-right: 0.25rem;
+  font-size: 0.7rem;
+}
+
+.inc-card__controls {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.inc-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.5rem;
+  border-radius: 980px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.inc-badge--open {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.inc-badge--in-progress {
+  background: #e8f1fc;
+  color: #0071e3;
+}
+
+.inc-badge--resolved {
+  background: #e8f5e9;
+  color: #1b7a3d;
+}
+
+.app-view :deep(.bf-btn) {
+  min-height: 1.7rem;
+  padding: 0.22rem 0.85rem;
+  border-radius: 8px;
+  box-shadow: none;
+  transform: none;
+}
+
+.app-view :deep(.bf-btn--confirm) {
+  background: #0071e3;
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.app-view :deep(.bf-btn--confirm:not(:disabled):hover) {
+  background: #0066cc;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.app-view :deep(.bf-btn--confirm:not(:disabled):focus-visible) {
+  animation: none;
+  box-shadow: none;
 }
 </style>
