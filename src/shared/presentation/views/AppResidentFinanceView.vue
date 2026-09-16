@@ -1,19 +1,8 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSession } from '@/iam/application/sessionStore.js'
-import DataTable from 'primevue/datatable'
-import Column from 'primevue/column'
-import Tag from 'primevue/tag'
-import Button from 'primevue/button'
 import Toast from 'primevue/toast'
-import Tabs from 'primevue/tabs'
-import TabList from 'primevue/tablist'
-import Tab from 'primevue/tab'
-import TabPanels from 'primevue/tabpanels'
-import TabPanel from 'primevue/tabpanel'
-import Card from 'primevue/card'
-import Message from 'primevue/message'
 import { useToast } from 'primevue/usetoast'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -31,23 +20,45 @@ const { state } = useSession()
 const route = useRoute()
 const router = useRouter()
 const { state: paymentState, loadData } = useResidentPaymentStore()
-
-const profile = computed(() => state.profile ?? {})
 const toast = useToast()
 
+const profile = computed(() => state.profile ?? {})
 const todayIso = new Date().toISOString().slice(0, 10)
-
-const fees = computed(() => paymentState.fees || [])
-const paymentHistory = computed(() => paymentState.paymentHistory || [])
-
 const isProcessing = ref(false)
 
+const fees = computed(() => paymentState.fees || [])
+const paymentHistory = computed(() =>
+  [...(paymentState.paymentHistory || [])].sort((a, b) =>
+    String(b.paidAt ?? '').localeCompare(String(a.paidAt ?? '')),
+  ),
+)
+
+const pendingFees = computed(() =>
+  fees.value
+    .filter((f) => f.status === 'Pendiente')
+    .slice()
+    .sort((a, b) => String(a.dueDate ?? '').localeCompare(String(b.dueDate ?? ''))),
+)
+
+const pendingTotal = computed(() =>
+  pendingFees.value.reduce((sum, f) => sum + Number(f.amount || 0), 0),
+)
+
+const hasOverdue = computed(() =>
+  pendingFees.value.some((f) => getDaysUntilDue(f.dueDate) < 0),
+)
+
 onMounted(async () => {
-  if (profile.value.id) {
-    await loadData(profile.value.id)
-  }
+  if (profile.value.id) await loadData(profile.value.id)
   await handlePaymentReturnFromRoute()
 })
+
+watch(
+  () => profile.value.id,
+  async (id, prev) => {
+    if (id && id !== prev) await loadData(id)
+  },
+)
 
 async function handlePaymentReturnFromRoute() {
   if (!profile.value.id) return
@@ -164,50 +175,76 @@ function getDaysUntilDue(dueDate) {
 }
 
 function feeStatusLabel(fee) {
-  if (fee.status === 'Pagado') return t('residentFinance.statusPaid')
   const days = getDaysUntilDue(fee.dueDate)
   if (days < 0) return t('residentFinance.statusOverdue')
   if (days <= 5) return t('residentFinance.statusDueSoon')
   return t('residentFinance.statusPending')
 }
 
-function feeSeverity(fee) {
-  if (fee.status === 'Pagado') return 'success'
+function feeStatusClass(fee) {
   const days = getDaysUntilDue(fee.dueDate)
-  if (days < 0) return 'danger'
-  if (days <= 5) return 'warn'
-  return 'info'
+  if (days < 0) return 'inc-badge--open'
+  if (days <= 5) return 'inc-badge--in-progress'
+  return 'guest-badge--yes'
 }
 
-const pendingTotal = computed(() =>
-  fees.value.filter((f) => f.status === 'Pendiente').reduce((sum, f) => sum + f.amount, 0),
-)
-
-const nextDueFee = computed(() => {
-  const pending = fees.value.filter((f) => f.status === 'Pendiente')
-  return pending.length ? pending[0] : null
-})
-
-const hasOverdue = computed(() =>
-  fees.value.some((f) => f.status === 'Pendiente' && getDaysUntilDue(f.dueDate) < 0),
-)
-
-const totalPaid = computed(() =>
-  paymentHistory.value.reduce((sum, p) => sum + p.amount, 0),
-)
-
-const activeTab = ref('0')
+function formatMoney(val) {
+  return new Intl.NumberFormat(locale.value === 'es' ? 'es-PE' : 'en-US', {
+    style: 'currency',
+    currency: 'PEN',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(val) || 0)
+}
 
 function formatDateTime(iso) {
   if (!iso) return '—'
   const d = new Date(iso)
+  if (!Number.isFinite(d.getTime())) return String(iso)
   const loc = locale.value === 'es' ? 'es-PE' : 'en-US'
-  return d.toLocaleDateString(loc, { day: '2-digit', month: 'short', year: 'numeric' })
-    + ' ' + d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' })
+  return (
+    d.toLocaleDateString(loc, { day: '2-digit', month: 'short', year: 'numeric' }) +
+    ' · ' +
+    d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' })
+  )
 }
 
-const monthNamesEs = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
-const monthNamesEn = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+function formatDueDate(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso + 'T00:00:00')
+  if (!Number.isFinite(d.getTime())) return String(iso)
+  const loc = locale.value === 'es' ? 'es-PE' : 'en-US'
+  return d.toLocaleDateString(loc, { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+const monthNamesEs = [
+  'Enero',
+  'Febrero',
+  'Marzo',
+  'Abril',
+  'Mayo',
+  'Junio',
+  'Julio',
+  'Agosto',
+  'Septiembre',
+  'Octubre',
+  'Noviembre',
+  'Diciembre',
+]
+const monthNamesEn = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
 
 function translateMonth(value) {
   if (!value) return '—'
@@ -220,7 +257,7 @@ function translateMonth(value) {
     return d.toLocaleDateString(loc, { month: 'long', year: 'numeric' })
   }
 
-  const esIdx = monthNamesEs.findIndex(m => str.includes(m))
+  const esIdx = monthNamesEs.findIndex((m) => str.includes(m))
   if (esIdx >= 0) {
     const yearMatch = str.match(/(\d{4})/)
     const year = yearMatch ? yearMatch[1] : ''
@@ -233,334 +270,353 @@ function translateMonth(value) {
 </script>
 
 <template>
-  <div class="view-container">
+  <div class="app-view app-view--ai">
     <Toast position="top-right" />
 
-    <div class="page-header">
-      <h1 class="page-title">{{ t('resident.financeTitle') }}</h1>
-      <p class="page-subtitle">
-        {{ t('resident.financeSubtitle', { name: profile.name || '' }) }}
-      </p>
+    <h1 class="visually-hidden">{{ t('resident.financeTitle') }}</h1>
+
+    <div class="finance-page">
+      <p v-if="paymentState.error" class="dash-error">{{ paymentState.error }}</p>
+
+      <!-- Recibos por pagar -->
+      <section class="finance-panel" aria-labelledby="pending-heading">
+        <div class="panel-head">
+          <h2 id="pending-heading" class="finance-panel__section-title">
+            {{ t('residentFinance.pendingReceiptsTitle') }}
+          </h2>
+          <p v-if="pendingFees.length" class="panel-head__meta">
+            {{ formatMoney(pendingTotal) }}
+          </p>
+        </div>
+
+        <p v-if="paymentState.isLoading" class="dash-empty">…</p>
+        <p v-else-if="!pendingFees.length" class="dash-empty">
+          {{ t('residentFinance.pendingReceiptsEmpty') }}
+        </p>
+        <template v-else>
+          <ul class="dash-list" role="list">
+            <li
+              v-for="fee in pendingFees"
+              :key="fee.id"
+              class="dash-row"
+              :class="{ 'dash-row--danger': getDaysUntilDue(fee.dueDate) < 0 }"
+            >
+              <div class="dash-row__main">
+                <span class="dash-row__title">
+                  {{ fee.concept || t('residentFinance.defaultConcept') }}
+                </span>
+                <span class="dash-row__meta">
+                  {{ translateMonth(fee.month) }}
+                  ·
+                  {{ t('residentFinance.kpiNextFeeDue', { date: formatDueDate(fee.dueDate) }) }}
+                </span>
+              </div>
+              <div class="dash-row__side">
+                <span class="dash-row__amount">{{ formatMoney(fee.amount) }}</span>
+                <span class="inc-badge" :class="feeStatusClass(fee)">
+                  {{ feeStatusLabel(fee) }}
+                </span>
+              </div>
+            </li>
+          </ul>
+
+          <div class="pay-bar">
+            <p class="pay-bar__hint">
+              {{
+                hasOverdue
+                  ? t('residentFinance.kpiOverdueWarning')
+                  : t('residentFinance.securePayment')
+              }}
+            </p>
+            <button
+              type="button"
+              class="pay-btn"
+              :class="{ 'pay-btn--danger': hasOverdue }"
+              :disabled="isProcessing || paymentState.isLoading"
+              @click="startMaintenanceCheckout"
+            >
+              {{
+                isProcessing
+                  ? t('residentFinance.processing')
+                  : t('residentFinance.payAmount', { amount: formatMoney(pendingTotal) })
+              }}
+            </button>
+          </div>
+        </template>
+      </section>
+
+      <!-- Historial de pagos -->
+      <section class="finance-panel" aria-labelledby="history-heading">
+        <h2 id="history-heading" class="finance-panel__section-title">
+          {{ t('residentFinance.paymentHistoryTitle') }}
+        </h2>
+
+        <p v-if="paymentState.isLoading" class="dash-empty">…</p>
+        <p v-else-if="!paymentHistory.length" class="dash-empty">
+          {{ t('residentFinance.noPaymentsYet') }}
+        </p>
+        <ul v-else class="dash-list" role="list">
+          <li v-for="pay in paymentHistory" :key="pay.id" class="dash-row">
+            <div class="dash-row__main">
+              <span class="dash-row__title">
+                {{ pay.concept || t('residentFinance.defaultConcept') }}
+              </span>
+              <span class="dash-row__meta">
+                {{ translateMonth(pay.feeMonth) }}
+                ·
+                {{ formatDateTime(pay.paidAt) }}
+                <template v-if="pay.method"> · {{ pay.method }}</template>
+              </span>
+            </div>
+            <div class="dash-row__side">
+              <span class="dash-row__amount">{{ formatMoney(pay.amount) }}</span>
+              <span class="inc-badge inc-badge--resolved">
+                {{ t('residentFinance.statusPaid') }}
+              </span>
+            </div>
+          </li>
+        </ul>
+      </section>
     </div>
-
-    <Message v-if="paymentState.error" severity="error" :closable="false" class="error-msg">
-      {{ paymentState.error }}
-    </Message>
-
-    <!-- KPI CARDS GRID (Pure CSS Layout) -->
-    <div class="kpi-grid custom-scrollbar">
-      <!-- Card 1: Total Paid -->
-      <div class="kpi-card">
-        <div class="kpi-header">
-          <div class="kpi-icon icon-purple">
-            <i class="pi pi-wallet" aria-hidden="true"></i>
-          </div>
-          <span class="kpi-label">{{ t('residentFinance.kpiTotalPaid') }}</span>
-        </div>
-        <div class="kpi-value">S/ {{ totalPaid.toLocaleString('es-PE', { minimumFractionDigits: 2 }) }}</div>
-        <span class="kpi-subtext subtext-green">
-          <i class="pi pi-arrow-up" aria-hidden="true"></i> {{ t('residentFinance.kpiTotalPaidCount', { n: paymentHistory.length }) }}
-        </span>
-      </div>
-
-      <!-- Card 2: Pending Payments -->
-      <div class="kpi-card" :class="{ 'card-danger': hasOverdue }">
-        <div class="kpi-header">
-          <div class="kpi-icon" :class="hasOverdue ? 'icon-red' : 'icon-orange'">
-            <i class="pi pi-clock" aria-hidden="true"></i>
-          </div>
-          <span class="kpi-label">{{ t('residentFinance.kpiPending') }}</span>
-        </div>
-        <div class="kpi-value" :class="{ 'text-red': hasOverdue }">S/ {{ pendingTotal.toLocaleString('es-PE', { minimumFractionDigits: 2 }) }}</div>
-        <span v-if="hasOverdue" class="kpi-subtext subtext-red">
-          <i class="pi pi-exclamation-triangle" aria-hidden="true"></i> {{ t('residentFinance.kpiOverdueWarning') }}
-        </span>
-        <span v-else class="kpi-subtext">
-          <i class="pi pi-check" aria-hidden="true"></i> {{ t('residentFinance.kpiUpToDate') }}
-        </span>
-      </div>
-
-      <!-- Card 3: Next Fee Month -->
-      <div class="kpi-card relative-overflow">
-        <div class="kpi-header">
-          <div class="kpi-icon icon-blue">
-            <i class="pi pi-calendar" aria-hidden="true"></i>
-          </div>
-          <span class="kpi-label">{{ t('residentFinance.kpiNextFee') }}</span>
-        </div>
-        <div class="kpi-value">{{ translateMonth(nextDueFee?.month) }}</div>
-        <span class="kpi-subtext">
-          {{ nextDueFee?.dueDate ? t('residentFinance.kpiNextFeeDue', { date: nextDueFee.dueDate }) : t('residentFinance.kpiNextFeeNoDebt') }}
-        </span>
-      </div>
-
-      <!-- Card 4: Action / Pay Now -->
-      <div class="kpi-card kpi-action-card">
-        <Button
-          :label="isProcessing ? t('residentFinance.processing') : t('residentFinance.payNow')"
-          icon="pi pi-credit-card"
-          :severity="hasOverdue ? 'danger' : 'primary'"
-          size="large"
-          class="pay-btn"
-          :disabled="pendingTotal === 0 || paymentState.isLoading || isProcessing"
-          :loading="isProcessing"
-          @click="startMaintenanceCheckout"
-        />
-        <span class="kpi-subtext text-center mt-2">
-          {{ t('residentFinance.securePayment') }}
-        </span>
-      </div>
-    </div>
-
-    <Card>
-      <template #content>
-        <Tabs v-model:value="activeTab">
-          <TabList>
-            <Tab value="0">
-              <i class="pi pi-list mr-2" aria-hidden="true"></i>
-              {{ t('residentFinance.feeHistory') }}
-            </Tab>
-            <Tab value="1">
-              <i class="pi pi-check-circle mr-2" aria-hidden="true"></i>
-              {{ t('residentFinance.paymentHistoryTab') }}
-            </Tab>
-          </TabList>
-
-          <TabPanels>
-            <TabPanel value="0">
-              <DataTable :value="fees" responsiveLayout="scroll" :loading="paymentState.isLoading" class="premium-table">
-                <Column field="concept" :header="t('residentFinance.colConcept', 'Concepto')" />
-                <Column :header="t('residentFinance.colMonth')">
-                  <template #body="{ data }">
-                    {{ translateMonth(data.month) }}
-                  </template>
-                </Column>
-                <Column :header="t('residentFinance.colAmount')">
-                  <template #body="{ data }">
-                    <span class="font-semibold text-900">S/ {{ data.amount.toFixed(2) }}</span>
-                  </template>
-                </Column>
-                <Column field="dueDate" :header="t('residentFinance.colDueDate')" />
-                <Column :header="t('residentFinance.colBillingStatus')">
-                  <template #body="{ data }">
-                    <Tag :value="feeStatusLabel(data)" :severity="feeSeverity(data)" rounded class="px-3" />
-                  </template>
-                </Column>
-              </DataTable>
-            </TabPanel>
-
-            <TabPanel value="1">
-              <p v-if="!paymentHistory.length && !paymentState.isLoading" class="text-center text-color-secondary my-4">
-                {{ t('residentFinance.noPaymentsYet') }}
-              </p>
-              <DataTable v-else :value="paymentHistory" responsiveLayout="scroll" :loading="paymentState.isLoading" class="premium-table">
-                <Column field="concept" :header="t('residentFinance.colConcept', 'Concepto')" />
-                <Column field="feeMonth" :header="t('residentFinance.colMonth')" />
-                <Column :header="t('residentFinance.colAmount')">
-                  <template #body="{ data }">
-                    <span class="font-semibold text-900">S/ {{ data.amount.toFixed(2) }}</span>
-                  </template>
-                </Column>
-                <Column :header="t('residentFinance.colPaidAt')">
-                  <template #body="{ data }">
-                    <span class="text-500">{{ formatDateTime(data.paidAt) }}</span>
-                  </template>
-                </Column>
-                <Column field="method" :header="t('residentFinance.colMethod')">
-                  <template #body="{ data }">
-                    <span class="text-primary font-semibold"><i class="pi pi-wallet mr-1" aria-hidden="true"></i> {{ data.method }}</span>
-                  </template>
-                </Column>
-                <Column field="reference" :header="t('residentFinance.colReference')">
-                  <template #body="{ data }">
-                     <span class="text-500">{{ data.reference }}</span>
-                  </template>
-                </Column>
-              </DataTable>
-            </TabPanel>
-          </TabPanels>
-        </Tabs>
-      </template>
-    </Card>
   </div>
 </template>
 
 <style scoped>
-.view-container {
-  padding: 1.5rem;
-  max-width: 1200px;
-  margin: 0 auto;
+.app-view {
+  padding: 1.75rem 1.5rem 2.5rem;
+  max-width: 72rem;
 }
 
-/* Page Header */
-.page-header {
-  margin-bottom: 2rem;
+.app-view--ai {
+  max-width: 88rem;
+  padding-top: 1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-}
-.page-title {
-  font-size: 1.75rem;
-  font-weight: 700;
-  margin: 0;
-  color: var(--surface-900);
-  letter-spacing: -0.02em;
-}
-.page-subtitle {
-  margin: 0;
-  font-size: 1.125rem;
-  color: var(--surface-500);
-}
-.error-msg {
-  margin-bottom: 1.5rem;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  gap: 1rem;
 }
 
-/* KPI GRID CSS */
-.kpi-grid {
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.finance-page {
   display: flex;
-  flex-direction: row;
-  gap: 1.25rem;
-  margin-bottom: 2rem;
-  overflow-x: auto;
-  padding-bottom: 0.5rem;
+  flex-direction: column;
+  gap: 1rem;
 }
 
-.kpi-card {
-  flex: 1;
-  min-width: 250px;
-  background: var(--surface-0, #ffffff);
-  border: 1px solid var(--surface-200, #e2e8f0);
+.finance-panel {
+  padding: 1.2rem 1.25rem 1.35rem;
   border-radius: 16px;
-  padding: 1.5rem;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.03);
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.finance-panel__section-title {
+  margin: 0 0 0.85rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--apple-text, #1d1d1f);
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.85rem;
+}
+
+.panel-head .finance-panel__section-title {
+  margin-bottom: 0;
+}
+
+.panel-head__meta {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--apple-text, #1d1d1f);
+}
+
+.dash-error {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+  background: #fff7f7;
+  border: 1px solid rgba(180, 35, 24, 0.15);
+  color: #b42318;
+  font-size: 0.875rem;
+}
+
+.dash-empty {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: #6e6e73;
+}
+
+.dash-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
-}
-
-.kpi-header {
-  display: flex;
-  align-items: center;
-  margin-bottom: 1rem;
-}
-
-.kpi-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 1rem;
-  font-size: 1.2rem;
-}
-
-.icon-purple {
-  background: #f3e8ff;
-  color: #9333ea;
-}
-
-.icon-orange {
-  background: #ffedd5;
-  color: #ea580c;
-}
-
-.icon-red {
-  background: #fee2e2;
-  color: #dc2626;
-}
-
-.icon-blue {
-  background: #e0f2fe;
-  color: #0284c7;
-}
-
-.kpi-label {
-  color: var(--surface-500, #64748b);
-  font-weight: 500;
-  font-size: 0.9rem;
-}
-
-.kpi-value {
-  color: var(--surface-900, #0f172a);
-  font-weight: 700;
-  font-size: 1.8rem;
-  margin-bottom: 0.5rem;
-}
-
-.kpi-subtext {
-  color: var(--surface-500, #64748b);
-  font-size: 0.8rem;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
   gap: 0.35rem;
 }
 
-.subtext-green { color: #16a34a; }
-.subtext-red { color: #dc2626; }
-.text-red { color: #dc2626 !important; }
-.card-danger { background: #fff5f5; border-color: #fecaca; }
+.dash-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 12px;
+  background: #f5f5f7;
+}
 
-.kpi-action-card {
-  background: linear-gradient(135deg, rgba(10, 132, 255, 0.05) 0%, transparent 100%);
-  justify-content: center;
+.dash-row--danger {
+  background: #fff7f7;
+}
+
+.dash-row__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.dash-row__title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #1d1d1f;
+}
+
+.dash-row__meta {
+  font-size: 0.78rem;
+  color: #6e6e73;
+  line-height: 1.4;
+}
+
+.dash-row__side {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.28rem;
+}
+
+.dash-row__amount {
+  font-size: 0.95rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: #1d1d1f;
+}
+
+.inc-badge,
+.guest-badge--yes {
+  display: inline-flex;
   align-items: center;
+  padding: 0.12rem 0.5rem;
+  border-radius: 980px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.guest-badge--yes {
+  background: #e8eefc;
+  color: #1e3a8a;
+}
+
+.inc-badge--open {
+  background: #fdecee;
+  color: #b42318;
+}
+
+.inc-badge--in-progress {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.inc-badge--resolved {
+  background: #e8f5e9;
+  color: #1b7a3d;
+}
+
+.pay-bar {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.pay-bar__hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #6e6e73;
+  line-height: 1.4;
+  flex: 1;
+  min-width: 12rem;
 }
 
 .pay-btn {
-  width: 100%;
-  padding: 1rem;
-  border-radius: 12px;
+  border: none;
+  border-radius: 8px;
+  padding: 0.7rem 1.15rem;
+  background: #0071e3;
+  color: #fff;
+  font-size: 0.875rem;
   font-weight: 600;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-  transition: transform 0.2s ease;
+  letter-spacing: -0.01em;
+  cursor: pointer;
 }
 
-.pay-btn:not(:disabled):hover {
-  transform: translateY(-2px);
+.pay-btn:hover:not(:disabled) {
+  background: #0066cc;
 }
 
-.custom-scrollbar::-webkit-scrollbar {
-  height: 6px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: var(--surface-300);
-  border-radius: 10px;
+.pay-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
-/* Premium DataTable Styling matching reference image */
-.premium-table :deep(.p-datatable-header) {
-  background: transparent;
-  border: none;
+.pay-btn--danger {
+  background: #ff3b30;
 }
-.premium-table :deep(.p-datatable-thead > tr > th) {
-  background: transparent;
-  color: var(--surface-500);
-  font-weight: 500;
-  font-size: 0.85rem;
-  text-transform: capitalize;
-  border: none;
-  border-bottom: 1px solid var(--surface-200);
-  padding: 1rem;
+
+.pay-btn--danger:hover:not(:disabled) {
+  background: #e0352b;
 }
-.premium-table :deep(.p-datatable-tbody > tr) {
-  background: transparent;
-}
-.premium-table :deep(.p-datatable-tbody > tr:hover) {
-  background: var(--surface-50);
-}
-.premium-table :deep(.p-datatable-tbody > tr > td) {
-  border: none;
-  border-bottom: 1px solid var(--surface-100);
-  padding: 1rem;
-  vertical-align: middle;
-}
-.premium-table :deep(.p-datatable-wrapper) {
-  border-radius: 12px;
+
+@media (max-width: 720px) {
+  .dash-row {
+    flex-direction: column;
+  }
+  .dash-row__side {
+    align-items: flex-start;
+  }
+  .pay-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 </style>
-

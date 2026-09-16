@@ -707,6 +707,10 @@
   "residentFinance": {
     "totalDue": "Total a pagar",
     "payNow": "Pagar ahora",
+    "payAmount": "Pagar {amount}",
+    "pendingReceiptsTitle": "Por pagar",
+    "pendingReceiptsEmpty": "No tienes recibos pendientes.",
+    "paymentHistoryTitle": "Historial de pagos",
     "feeHistory": "Historial de cuotas",
     "paymentHistoryTab": "Pagos realizados",
     "colMonth": "Mes",

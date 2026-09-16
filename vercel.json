@@ -1,7 +1,13 @@
 {
   "rewrites": [
-    { "source": "/mp/checkout", "destination": "/api/mp" },
-    { "source": "/mp/payment", "destination": "/api/mp" },
+    {
+      "source": "/mp/checkout",
+      "destination": "/api/mp"
+    },
+    {
+      "source": "/mp/payment",
+      "destination": "/api/mp"
+    },
     {
       "source": "/api/v1/:path*",
       "destination": "https://backend-production-5e544.up.railway.app/api/v1/:path*"
@@ -158,6 +164,23 @@
       "source": "/supportChats",
       "destination": "https://backend-production-5e544.up.railway.app/supportChats"
     },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "type": "service",
+        "service": "fronted-spa"
+      }
+    }
+  ],
+  "services": {
+    "fronted-spa": {
+      "root": ".",
+      "framework": "vite",
+      "buildCommand": "npm install && npm run build"
+    }
+  }
 }

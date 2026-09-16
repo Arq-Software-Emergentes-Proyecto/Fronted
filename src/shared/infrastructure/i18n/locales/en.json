@@ -703,6 +703,10 @@
   "residentFinance": {
     "totalDue": "Total due",
     "payNow": "Pay now",
+    "payAmount": "Pay {amount}",
+    "pendingReceiptsTitle": "To pay",
+    "pendingReceiptsEmpty": "You have no pending receipts.",
+    "paymentHistoryTitle": "Payment history",
     "feeHistory": "Fee history",
     "paymentHistoryTab": "Completed payments",
     "colMonth": "Month",

@@ -266,52 +266,57 @@ async function onReserveSubmit() {
 </script>
 
 <template>
-  <div class="app-view">
-    <h1 class="app-view__title">{{ t('resident.servicesTitle') }}</h1>
-    <p class="app-view__subtitle">
-      {{ t('resident.servicesSubtitle', { name: profile.name || '' }) }}
-    </p>
+  <div class="app-view app-view--ai">
+    <h1 class="visually-hidden">{{ t('resident.servicesTitle') }}</h1>
 
-    <p v-if="isLoadingSpaces" class="resident-empty">
-      {{ t('app.spacesLoading') }}
-    </p>
-    <p v-else-if="spacesLoadError" class="resident-empty resident-empty--error">
-      {{ spacesLoadError }}
-    </p>
-    <p v-else-if="!spaces.length" class="resident-empty">
-      {{ t('app.emptySpacesResident') }}
-    </p>
-    <ul v-else class="resident-spaces" role="list">
-      <li
-        v-for="space in spaces"
-        :key="space.id"
-        class="resident-space"
-        tabindex="0"
-        role="button"
-        @click="openReserveModal(space)"
-        @keyup.enter="openReserveModal(space)"
-        @keyup.space.prevent="openReserveModal(space)"
-      >
-        <div v-if="space.imageUrl" class="resident-space__image-wrapper">
-          <img
-            :src="space.imageUrl"
-            :alt="t('app.spaceImageAlt', { name: space.name })"
-            class="resident-space__image"
-          />
-        </div>
-        <div v-else class="resident-space__image-placeholder" aria-hidden="true">
-          <i class="pi pi-image" />
-        </div>
-        <h2 class="resident-space__name">{{ space.name }}</h2>
-        <p v-if="space.description" class="resident-space__description">
-          {{ space.description }}
+    <div class="finance-page">
+      <section class="finance-panel" aria-labelledby="services-spaces-heading">
+        <h2 id="services-spaces-heading" class="visually-hidden">
+          {{ t('resident.servicesTitle') }}
+        </h2>
+
+        <p v-if="isLoadingSpaces" class="dash-empty">
+          {{ t('app.spacesLoading') }}
         </p>
-        <p v-if="space.capacity" class="resident-space__capacity">
-          {{ t('app.spaceCapacityLabel') }}: {{ space.capacity }}
+        <p v-else-if="spacesLoadError" class="dash-empty dash-empty--error">
+          {{ spacesLoadError }}
         </p>
-        <span class="resident-space__cta">{{ t('app.reserveAction') }}</span>
-      </li>
-    </ul>
+        <p v-else-if="!spaces.length" class="dash-empty">
+          {{ t('app.emptySpacesResident') }}
+        </p>
+        <ul v-else class="resident-spaces" role="list">
+          <li
+            v-for="space in spaces"
+            :key="space.id"
+            class="resident-space"
+            tabindex="0"
+            role="button"
+            @click="openReserveModal(space)"
+            @keyup.enter="openReserveModal(space)"
+            @keyup.space.prevent="openReserveModal(space)"
+          >
+            <div v-if="space.imageUrl" class="resident-space__image-wrapper">
+              <img
+                :src="space.imageUrl"
+                :alt="t('app.spaceImageAlt', { name: space.name })"
+                class="resident-space__image"
+              />
+            </div>
+            <div v-else class="resident-space__image-placeholder" aria-hidden="true">
+              <i class="pi pi-image" />
+            </div>
+            <h3 class="resident-space__name">{{ space.name }}</h3>
+            <p v-if="space.description" class="resident-space__description">
+              {{ space.description }}
+            </p>
+            <p v-if="space.capacity" class="resident-space__capacity">
+              {{ t('app.spaceCapacityLabel') }}: {{ space.capacity }}
+            </p>
+            <span class="resident-space__cta">{{ t('app.reserveAction') }}</span>
+          </li>
+        </ul>
+      </section>
+    </div>
 
     <div
       v-if="isReserveModalOpen"
@@ -527,29 +532,60 @@ async function onReserveSubmit() {
 
 <style scoped>
 .app-view {
-  padding: 1.75rem 1.5rem;
+  padding: 1.75rem 1.5rem 2.5rem;
   max-width: 72rem;
 }
 
-.app-view__title {
-  margin: 0;
-  font-size: 1.5rem;
+.app-view--ai {
+  max-width: 88rem;
+  padding-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.finance-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.finance-panel {
+  padding: 1.2rem 1.25rem 1.35rem;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.finance-panel__section-title {
+  margin: 0 0 0.85rem;
+  font-size: 1.0625rem;
   font-weight: 600;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.02em;
   color: var(--apple-text, #1d1d1f);
 }
 
-.app-view__subtitle {
-  margin: 0.35rem 0 1.25rem;
-  color: var(--apple-text-secondary, #6e6e73);
+.dash-empty {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: #6e6e73;
 }
 
-.resident-empty {
-  margin: 0.5rem 0 0;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.resident-empty--error {
+.dash-empty--error {
   color: #b42318;
 }
 
@@ -563,10 +599,10 @@ async function onReserveSubmit() {
 }
 
 .resident-space {
-  border: 1px solid #e8e8ed;
-  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 14px;
   padding: 0.95rem;
-  background: #ffffff;
+  background: #f5f5f7;
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
   display: flex;
@@ -576,17 +612,17 @@ async function onReserveSubmit() {
 
 .resident-space:hover,
 .resident-space:focus-visible {
-  border-color: #c7d2fe;
-  background: #f0f4ff;
+  border-color: rgba(0, 113, 227, 0.28);
+  background: #fff;
   outline: none;
 }
 
 .resident-space__image-wrapper {
   width: 100%;
   aspect-ratio: 16 / 9;
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
-  background: #f0f0f4;
+  background: #eeeef0;
   margin-bottom: 0.1rem;
 }
 
@@ -600,8 +636,8 @@ async function onReserveSubmit() {
 .resident-space__image-placeholder {
   width: 100%;
   aspect-ratio: 16 / 9;
-  border-radius: 8px;
-  background: #f0f0f4;
+  border-radius: 10px;
+  background: #eeeef0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -612,20 +648,23 @@ async function onReserveSubmit() {
 
 .resident-space__name {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #1d1d1f;
 }
 
 .resident-space__description {
   margin: 0;
   color: #6e6e73;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
+  line-height: 1.4;
 }
 
 .resident-space__capacity {
   margin: 0;
-  color: #6e6e73;
-  font-size: 0.825rem;
+  color: #86868b;
+  font-size: 0.78rem;
 }
 
 .resident-space__cta {
@@ -633,19 +672,22 @@ async function onReserveSubmit() {
   display: inline-flex;
   align-items: center;
   align-self: flex-start;
-  gap: 0.35rem;
-  padding: 0.25rem 0.6rem;
-  border-radius: 999px;
-  background: #eaf3ff;
-  color: #0a84ff;
+  padding: 0.35rem 0.75rem;
+  border-radius: 8px;
+  background: #0071e3;
+  color: #fff;
   font-weight: 600;
   font-size: 0.8125rem;
+}
+
+.resident-space:hover .resident-space__cta {
+  background: #0066cc;
 }
 
 .resident-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.42);
+  background: rgba(0, 0, 0, 0.35);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -654,16 +696,17 @@ async function onReserveSubmit() {
 }
 
 .resident-modal-backdrop--top {
-  background: rgba(0, 0, 0, 0.32);
+  background: rgba(0, 0, 0, 0.28);
   z-index: 1100;
 }
 
 .resident-modal {
   width: min(100%, 30rem);
   background: #ffffff;
-  border-radius: 14px;
-  border: 1px solid #ececf1;
-  padding: 1rem;
+  border-radius: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+  padding: 1.15rem 1.2rem 1.25rem;
   max-height: 90vh;
   overflow-y: auto;
 }
@@ -674,7 +717,10 @@ async function onReserveSubmit() {
 
 .resident-modal__title {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #1d1d1f;
 }
 
 .resident-modal__title-suffix {
@@ -709,21 +755,22 @@ async function onReserveSubmit() {
   gap: 0.4rem;
   color: #1d1d1f;
   font-weight: 500;
+  font-size: 0.8125rem;
 }
 
 .resident-modal__field-label .pi {
-  color: #0a84ff;
+  color: #0071e3;
   font-size: 0.85rem;
 }
 
 .resident-modal__field input {
-  border: 1px solid #d2d2d7;
-  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
   padding: 0.55rem 0.65rem;
   font: inherit;
   color: var(--apple-text, #1d1d1f);
   background: #ffffff;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .resident-modal__time-input {
@@ -752,46 +799,24 @@ async function onReserveSubmit() {
 .resident-modal__time-preview {
   font-size: 0.8125rem;
   font-weight: 600;
-  color: #0a84ff;
+  color: #0071e3;
   font-variant-numeric: tabular-nums;
 }
 
 .resident-modal__field input:hover {
-  border-color: #b9c4ff;
+  border-color: rgba(0, 113, 227, 0.35);
 }
 
 .resident-modal__field input:focus {
-  border-color: #0a84ff;
+  border-color: #0071e3;
   outline: none;
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.18);
-  background: #fbfcff;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.16);
 }
 
 .resident-modal__row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.6rem;
-}
-
-.resident-modal__day-block {
-  border: 1px solid #fde8c4;
-  border-radius: 10px;
-  padding: 0.65rem 0.8rem;
-  background: linear-gradient(180deg, #fff8ec 0%, #fffaf2 100%);
-}
-
-.resident-modal__day-title {
-  margin: 0 0 0.45rem;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: #8a5a00;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.resident-modal__day-title .pi {
-  color: #c98b1d;
 }
 
 .resident-modal__day-empty {
@@ -804,15 +829,15 @@ async function onReserveSubmit() {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  color: #166534;
-  background: #e6f4ea;
-  padding: 0.3rem 0.6rem;
-  border-radius: 999px;
+  color: #1b7a3d;
+  background: #e8f5e9;
+  padding: 0.35rem 0.65rem;
+  border-radius: 980px;
   font-weight: 500;
 }
 
 .resident-modal__day-empty--happy .pi {
-  color: #16a34a;
+  color: #34c759;
 }
 
 .resident-modal__day-chips {
@@ -825,26 +850,26 @@ async function onReserveSubmit() {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  border: 1px solid #f4d8a8;
-  background: #fff3dd;
-  color: #8a5a00;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: #f5f5f7;
+  color: #4b5563;
   padding: 0.28rem 0.6rem;
-  border-radius: 999px;
+  border-radius: 980px;
   font-size: 0.8125rem;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 
 .resident-modal__day-chip .pi {
-  color: #c98b1d;
+  color: #86868b;
   font-size: 0.78rem;
 }
 
 .resident-modal__error {
   margin: 0;
-  color: #9a2a1f;
-  background: #fdecee;
-  border: 1px solid #f5c2c7;
+  color: #b42318;
+  background: #fff7f7;
+  border: 1px solid rgba(180, 35, 24, 0.15);
   padding: 0.4rem 0.6rem;
   border-radius: 8px;
   font-size: 0.825rem;
@@ -855,10 +880,10 @@ async function onReserveSubmit() {
 }
 
 .calendar {
-  border: 1px solid #e6e6ec;
+  border: 1px solid rgba(0, 0, 0, 0.06);
   border-radius: 12px;
   padding: 0.75rem 0.85rem 0.85rem;
-  background: linear-gradient(180deg, #fafbff 0%, #ffffff 100%);
+  background: #f5f5f7;
 }
 
 .calendar__header {
@@ -870,8 +895,8 @@ async function onReserveSubmit() {
 }
 
 .calendar__nav-btn {
-  border: 1px solid #e6e6ec;
-  background: #ffffff;
+  border: none;
+  background: #fff;
   color: #1d1d1f;
   width: 1.85rem;
   height: 1.85rem;
@@ -880,13 +905,10 @@ async function onReserveSubmit() {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .calendar__nav-btn:hover {
-  background: #eaf3ff;
-  border-color: #c7d2fe;
-  color: #0a84ff;
+  color: #0071e3;
 }
 
 .calendar__month-label {
@@ -905,7 +927,7 @@ async function onReserveSubmit() {
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #8a8a8f;
+  color: #86868b;
   margin-bottom: 0.25rem;
 }
 
@@ -935,7 +957,6 @@ async function onReserveSubmit() {
   color: #1d1d1f;
   cursor: pointer;
   padding: 0;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.05s ease;
 }
 
 .calendar__day-number {
@@ -944,14 +965,13 @@ async function onReserveSubmit() {
 }
 
 .calendar__day:hover {
-  background: #eaf3ff;
-  border-color: #c7d2fe;
-  color: #0a84ff;
+  background: #fff;
+  color: #0071e3;
 }
 
 .calendar__day:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.2);
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2);
 }
 
 .calendar__day--out {
@@ -963,34 +983,32 @@ async function onReserveSubmit() {
 }
 
 .calendar__day--today:not(.calendar__day--selected) {
-  border-color: #0a84ff;
-  color: #0a84ff;
+  border-color: #0071e3;
+  color: #0071e3;
   font-weight: 600;
 }
 
 .calendar__day--busy:not(.calendar__day--selected) {
-  background: #fff7e2;
-  color: #8a5a00;
+  background: #fff3e0;
+  color: #e65100;
 }
 
 .calendar__day--busy:hover:not(.calendar__day--selected) {
-  background: #ffeec2;
-  border-color: #f4d8a8;
-  color: #8a5a00;
+  background: #ffe8cc;
+  color: #e65100;
 }
 
 .calendar__day--selected {
-  background: #0a84ff;
+  background: #0071e3;
   color: #ffffff;
-  border-color: #0a84ff;
+  border-color: #0071e3;
   font-weight: 600;
-  box-shadow: 0 2px 6px rgba(10, 132, 255, 0.28);
 }
 
 .calendar__day--selected:hover {
-  background: #0a84ff;
+  background: #0071e3;
   color: #ffffff;
-  border-color: #0a84ff;
+  border-color: #0071e3;
 }
 
 .calendar__day-dot {
@@ -999,7 +1017,7 @@ async function onReserveSubmit() {
   width: 5px;
   height: 5px;
   border-radius: 999px;
-  background: #c98b1d;
+  background: #e65100;
 }
 
 .calendar__day--selected .calendar__day-dot {
@@ -1029,12 +1047,12 @@ async function onReserveSubmit() {
 }
 
 .calendar__legend-dot--busy {
-  background: #c98b1d;
+  background: #e65100;
 }
 
 .calendar__legend-dot--today {
   background: transparent;
-  border: 1.5px solid #0a84ff;
+  border: 1.5px solid #0071e3;
 }
 
 .calendar__hint {
@@ -1049,14 +1067,14 @@ async function onReserveSubmit() {
   align-items: center;
   gap: 0.4rem;
   padding: 0.35rem 0.7rem;
-  border-radius: 999px;
-  background: #e6f4ea;
-  color: #166534;
+  border-radius: 980px;
+  background: #e8f5e9;
+  color: #1b7a3d;
   font-size: 0.825rem;
   text-transform: capitalize;
 }
 
 .calendar__selected .pi {
-  color: #16a34a;
+  color: #34c759;
 }
 </style>

@@ -26,6 +26,7 @@ const guestsError = ref(false)
 const nowMs = ref(Date.now())
 const qrByReservationId = ref({})
 const copiedReservationId = ref(null)
+const rangeFilter = ref('all')
 
 let inviteClock
 
@@ -40,6 +41,24 @@ const myReservations = computed(() => {
       return String(b.startTime).localeCompare(String(a.startTime))
     })
 })
+
+const todayYmd = computed(() => {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+})
+
+const visibleReservations = computed(() => {
+  if (rangeFilter.value !== 'today') return myReservations.value
+  return myReservations.value.filter((row) => row.date === todayYmd.value)
+})
+
+const filters = computed(() => [
+  { id: 'all', label: t('information.filterAll') },
+  { id: 'today', label: t('app.generationAdminToday') },
+])
 
 const selected = computed(
   () => myReservations.value.find((row) => String(row.id) === String(selectedId.value)) || null,
@@ -88,7 +107,7 @@ function slotLabel(r) {
 }
 
 function selectReservation(id) {
-  selectedId.value = id
+  selectedId.value = String(selectedId.value) === String(id) ? null : id
   draftGuest.value = ''
   guestsError.value = false
 }
@@ -224,141 +243,164 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="app-view app-view--ai">
-    <div class="finance-page">
-      <p v-if="loadError" class="app-view__subtitle support-session-hint" role="alert">
-        {{ t('resident.generationLoadError') }}
-      </p>
-      <p v-else-if="!profile.id" class="app-view__subtitle support-session-hint" role="alert">
-        {{ t('app.reservationProfileMissing') }}
-      </p>
-      <p v-if="guestsError" class="app-view__subtitle support-session-hint" role="alert">
-        {{ t('resident.generationGuestsSaveError') }}
-      </p>
+  <div class="app-view gen-page">
+    <h1 class="visually-hidden">{{ t('resident.generationTitle') }}</h1>
 
-      <div class="ai-shell">
-        <aside class="ai-sidebar" :aria-label="t('resident.generationTitle')">
-          <p class="ai-recents-label">{{ t('resident.generationTitle') }}</p>
-          <p v-if="loading" class="ai-empty">{{ t('resident.generationLoading') }}</p>
-          <p v-else-if="!myReservations.length" class="ai-empty">{{ t('resident.generationEmpty') }}</p>
-          <ul v-else class="ai-recent-list" role="list">
-            <li v-for="r in myReservations" :key="r.id">
-              <button
-                type="button"
-                class="ai-recent"
-                :class="{ 'is-active': String(r.id) === String(selectedId) }"
-                @click="selectReservation(r.id)"
-              >
-                <span class="ai-recent__title">{{ spaceName(r.spaceId) }}</span>
-                <span class="ai-recent__meta">{{ slotLabel(r) }}</span>
-              </button>
-            </li>
-          </ul>
-        </aside>
+    <p v-if="loadError" class="gen-alert" role="alert">{{ t('resident.generationLoadError') }}</p>
+    <p v-else-if="!profile.id" class="gen-alert" role="alert">
+      {{ t('app.reservationProfileMissing') }}
+    </p>
+    <p v-if="guestsError" class="gen-alert" role="alert">
+      {{ t('resident.generationGuestsSaveError') }}
+    </p>
 
-        <section class="ai-main" aria-labelledby="gen-prompt-heading">
-          <template v-if="selected">
-            <header class="ai-thread-head">
-              <h2 id="gen-prompt-heading" class="ai-thread-head__name">
-                {{ spaceName(selected.spaceId) }}
-              </h2>
-              <p class="ai-thread-head__meta">{{ slotLabel(selected) }}</p>
-            </header>
-            <div class="ai-thread">
-              <p v-if="!selected.guests?.length" class="ai-thread__empty">
-                {{ t('resident.generationGuestsEmpty') }}
-              </p>
-              <div
-                v-for="g in selected.guests || []"
-                :key="g.id"
-                class="ai-msg"
-                :class="g.checkedIn ? 'ai-msg--user' : 'ai-msg--ai'"
-              >
-                <div class="ai-msg__row">
-                  <span class="ai-msg__who">
-                    {{ g.checkedIn ? t('resident.generationGuestEntered') : t('resident.generationGuestNotEntered') }}
-                  </span>
-                  <button
-                    v-if="!g.checkedIn"
-                    type="button"
-                    class="ai-msg__remove"
-                    :aria-label="t('resident.generationGuestRemove')"
-                    :disabled="savingGuests"
-                    @click="removeGuest(g.id)"
-                  >
-                    <i class="pi pi-times" aria-hidden="true" />
-                  </button>
-                </div>
-                <p>{{ g.name }}</p>
+    <div
+      v-if="myReservations.length"
+      class="gen-filters"
+      role="group"
+      :aria-label="t('resident.generationTitle')"
+    >
+      <button
+        v-for="filter in filters"
+        :key="filter.id"
+        type="button"
+        class="gen-filter"
+        :class="{ 'is-active': rangeFilter === filter.id }"
+        :aria-pressed="rangeFilter === filter.id"
+        @click="rangeFilter = filter.id"
+      >
+        {{ filter.label }}
+      </button>
+    </div>
+
+    <p v-if="loading" class="gen-status">{{ t('resident.generationLoading') }}</p>
+    <p v-else-if="!visibleReservations.length" class="gen-status">
+      {{ t('resident.generationEmpty') }}
+    </p>
+
+    <ul v-else class="gen-board" role="list">
+      <li v-for="r in visibleReservations" :key="r.id">
+        <article
+          class="gen-card"
+          :class="{ 'is-open': String(r.id) === String(selectedId) }"
+        >
+          <button type="button" class="gen-card__toggle" @click="selectReservation(r.id)">
+            <div class="gen-card__head">
+              <div>
+                <h2 class="gen-card__title">{{ spaceName(r.spaceId) }}</h2>
+                <p class="gen-card__meta">{{ slotLabel(r) }}</p>
               </div>
-
-              <div v-if="selected.guestInviteToken && selected.guests?.length" class="gen-invite">
-                <p class="ai-msg__who">{{ t('resident.generationInviteTitle') }}</p>
-                <p class="gen-invite__hint">{{ t('resident.generationInviteQrHelp') }}</p>
-                <div class="gen-invite__row">
-                  <input
-                    readonly
-                    class="gen-invite__url"
-                    :value="buildGuestInviteUrl(selected.guestInviteToken)"
-                  />
-                  <button type="button" class="gen-invite__copy" @click="copyInviteLink(selected)">
-                    {{ t('resident.generationInviteCopy') }}
-                  </button>
-                </div>
-                <p v-if="copiedReservationId === selected.id" class="gen-invite__copied" role="status">
-                  {{ t('resident.generationInviteCopied') }}
-                </p>
-                <template v-if="!inviteLinkExpired(selected)">
-                  <div v-if="qrByReservationId[selected.id]" class="gen-invite__qr">
-                    <img
-                      :src="qrByReservationId[selected.id]"
-                      width="200"
-                      height="200"
-                      alt=""
-                      class="gen-invite__qr-img"
-                    />
-                  </div>
-                </template>
-                <p v-else class="gen-invite__expired" role="alert">
-                  {{ t('resident.generationInviteExpired', { time: formatExpiryClockFromReservation(selected) }) }}
-                </p>
-              </div>
+              <span class="gen-badge">
+                {{
+                  t('app.generationAdminEnteredSummary', {
+                    in: (r.guests || []).filter((g) => g.checkedIn).length,
+                    total: (r.guests || []).length,
+                  })
+                }}
+              </span>
             </div>
-            <div class="ai-dock">
-              <p v-if="selectedGuestCount >= MAX_GUESTS" class="ai-dock__hint">
+          </button>
+
+          <div v-if="String(r.id) === String(selectedId)" class="gen-card__body">
+            <p v-if="!r.guests?.length" class="gen-empty">
+              {{ t('resident.generationGuestsEmpty') }}
+            </p>
+            <ul v-else class="gen-guests" role="list">
+              <li v-for="g in r.guests" :key="g.id" class="gen-guest">
+                <div class="gen-guest__info">
+                  <span class="gen-guest__name">{{ g.name }}</span>
+                  <span
+                    class="inc-badge"
+                    :class="g.checkedIn ? 'inc-badge--resolved' : 'inc-badge--in-progress'"
+                  >
+                    {{
+                      g.checkedIn
+                        ? t('resident.generationGuestEntered')
+                        : t('resident.generationGuestNotEntered')
+                    }}
+                  </span>
+                </div>
+                <button
+                  v-if="!g.checkedIn"
+                  type="button"
+                  class="gen-guest__remove"
+                  :aria-label="t('resident.generationGuestRemove')"
+                  :disabled="savingGuests"
+                  @click="removeGuest(g.id)"
+                >
+                  <i class="pi pi-trash" aria-hidden="true" />
+                </button>
+              </li>
+            </ul>
+
+            <div class="gen-add">
+              <p v-if="selectedGuestCount >= MAX_GUESTS" class="gen-add__hint">
                 {{ t('resident.generationGuestsFull') }}
               </p>
-              <div class="ai-composer">
-                <span class="ai-composer__plus" aria-hidden="true">
-                  <i class="pi pi-plus" />
-                </span>
+              <div class="gen-add__row">
                 <input
                   v-model="draftGuest"
                   type="text"
+                  class="gen-add__input"
                   :placeholder="t('resident.generationGuestPlaceholder')"
                   :disabled="savingGuests || selectedGuestCount >= MAX_GUESTS"
                   @keydown.enter.prevent="addGuest"
                 />
                 <button
                   type="button"
-                  class="ai-composer__send"
+                  class="gen-add__btn"
                   :disabled="savingGuests || !draftGuest.trim() || selectedGuestCount >= MAX_GUESTS"
-                  :aria-label="t('resident.generationAddGuest')"
                   @click="addGuest"
                 >
-                  <i class="pi pi-arrow-up" aria-hidden="true" />
+                  {{
+                    savingGuests
+                      ? t('resident.generationSavingGuests')
+                      : t('resident.generationAddGuest')
+                  }}
                 </button>
               </div>
             </div>
-          </template>
 
-          <div v-else class="ai-stage">
-            <h2 id="gen-prompt-heading" class="ai-heading">{{ t('resident.generationEmptyHeading') }}</h2>
-            <p class="ai-stage__sub">{{ t('resident.generationSelectPrompt') }}</p>
+            <div v-if="r.guestInviteToken && r.guests?.length" class="gen-invite">
+              <h3 class="gen-invite__title">{{ t('resident.generationInviteTitle') }}</h3>
+              <p class="gen-invite__hint">{{ t('resident.generationInviteQrHelp') }}</p>
+              <div class="gen-invite__row">
+                <input
+                  readonly
+                  class="gen-invite__url"
+                  :value="buildGuestInviteUrl(r.guestInviteToken)"
+                />
+                <button type="button" class="gen-invite__copy" @click="copyInviteLink(r)">
+                  {{
+                    copiedReservationId === r.id
+                      ? t('resident.generationInviteCopied')
+                      : t('resident.generationInviteCopy')
+                  }}
+                </button>
+              </div>
+              <template v-if="!inviteLinkExpired(r)">
+                <div v-if="qrByReservationId[r.id]" class="gen-invite__qr">
+                  <img
+                    :src="qrByReservationId[r.id]"
+                    width="180"
+                    height="180"
+                    alt=""
+                    class="gen-invite__qr-img"
+                  />
+                </div>
+              </template>
+              <p v-else class="gen-invite__expired" role="alert">
+                {{
+                  t('resident.generationInviteExpired', {
+                    time: formatExpiryClockFromReservation(r),
+                  })
+                }}
+              </p>
+            </div>
           </div>
-        </section>
-      </div>
-    </div>
+        </article>
+      </li>
+    </ul>
   </div>
 </template>
 
@@ -368,391 +410,345 @@ onUnmounted(() => {
   max-width: 72rem;
 }
 
-.app-view--ai {
-  max-width: 88rem;
-  padding-top: 1rem;
+.gen-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
-.app-view__subtitle {
-  margin: 0.5rem 0 0;
-  max-width: 42rem;
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.gen-alert {
+  margin: 0;
   font-size: 0.875rem;
-  font-weight: 400;
-  line-height: 1.45;
-  letter-spacing: -0.015em;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.support-session-hint {
-  margin: 0 0 0.75rem;
   color: #b42318;
 }
 
-.finance-page {
-  margin-top: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-.ai-shell {
-  display: grid;
-  grid-template-columns: 16.75rem minmax(0, 1fr);
-  min-height: calc(100vh - 8.5rem);
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-}
-
-.ai-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 0.7rem;
-  padding: 0.9rem 0.75rem 1rem;
-  background: var(--apple-bg-secondary, #f5f5f7);
-  border-right: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.ai-recents-label {
-  margin: 0.35rem 0.35rem 0;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--apple-text-secondary, #86868b);
-}
-
-.ai-empty {
-  margin: 0.35rem 0.35rem 0;
-  font-size: 0.8125rem;
-  line-height: 1.4;
+.gen-status {
+  margin: 0;
+  padding: 1.5rem 0.25rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
   color: var(--apple-text-secondary, #6e6e73);
 }
 
-.ai-recent-list {
+.gen-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.3rem;
+  border-radius: 999px;
+  background: #eef0f3;
+}
+
+.gen-filter {
+  padding: 0.45rem 0.95rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #4b5563;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.gen-filter:hover:not(.is-active) {
+  color: #1d1d1f;
+}
+
+.gen-filter.is-active {
+  background: #fff;
+  color: #1d1d1f;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.gen-board {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
+  gap: 0.9rem;
 }
 
-.ai-recent {
-  width: 100%;
+.gen-card {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 0.12rem;
-  text-align: left;
-  padding: 0.52rem 0.7rem;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  overflow: hidden;
+}
+
+.gen-card.is-open {
+  border-color: rgba(0, 113, 227, 0.22);
+}
+
+.gen-card__toggle {
+  width: 100%;
   border: none;
-  border-radius: 10px;
   background: transparent;
-  color: var(--apple-text, #1d1d1f);
-  font-size: 0.8125rem;
-  font-weight: 500;
+  padding: 1.05rem 1.1rem;
+  text-align: left;
   cursor: pointer;
 }
 
-.ai-recent:hover {
-  background: rgba(255, 255, 255, 0.8);
+.gen-card__toggle:hover {
+  background: #fafafa;
 }
 
-.ai-recent.is-active {
-  background: #fff;
-  color: var(--apple-blue, #1e3a8a);
-  font-weight: 600;
-}
-
-.ai-recent__title,
-.ai-recent__meta {
-  display: block;
-  width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ai-recent__meta {
-  font-size: 0.7rem;
-  font-weight: 500;
-  color: var(--apple-text-secondary, #86868b);
-}
-
-.ai-recent.is-active .ai-recent__meta {
-  color: rgba(30, 58, 138, 0.72);
-}
-
-.ai-main {
-  min-width: 0;
+.gen-card__head {
   display: flex;
-  flex-direction: column;
-  background: #fff;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
-.ai-stage {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 2rem 1.5rem 2.25rem;
-}
-
-.ai-heading {
-  margin: 0 0 0.65rem;
-  font-size: 1.75rem;
-  font-weight: 600;
-  letter-spacing: -0.04em;
-  color: var(--apple-text, #1d1d1f);
-  text-align: center;
-}
-
-.ai-stage__sub {
+.gen-card__title {
   margin: 0;
-  max-width: 26rem;
-  text-align: center;
-  font-size: 0.9rem;
-  line-height: 1.45;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.ai-thread-head {
-  flex-shrink: 0;
-  padding: 0.95rem 1.5rem 0.8rem;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.ai-thread-head__name {
-  margin: 0;
-  font-size: 1rem;
+  font-size: 1.05rem;
   font-weight: 600;
   letter-spacing: -0.025em;
   color: var(--apple-text, #1d1d1f);
 }
 
-.ai-thread-head__meta {
-  margin: 0.2rem 0 0;
-  font-size: 0.78rem;
+.gen-card__meta {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.4;
   color: var(--apple-text-secondary, #6e6e73);
 }
 
-.ai-thread {
-  flex: 1;
-  overflow-y: auto;
+.gen-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.22rem 0.6rem;
+  border-radius: 980px;
+  background: #f2f2f7;
+  color: #4b5563;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.gen-card__body {
   display: flex;
   flex-direction: column;
-  gap: 0.85rem;
-  width: min(44rem, 100%);
-  margin: 0 auto;
-  padding: 1.5rem 1.5rem 0.75rem;
+  gap: 1rem;
+  padding: 0 1.1rem 1.15rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  padding-top: 1rem;
 }
 
-.ai-thread__empty {
-  margin: 0 auto;
-  max-width: 22rem;
-  text-align: center;
-  font-size: 0.9rem;
-  line-height: 1.45;
+.gen-empty {
+  margin: 0;
+  font-size: 0.875rem;
   color: var(--apple-text-secondary, #6e6e73);
 }
 
-.ai-msg {
-  max-width: 86%;
-  padding: 0.8rem 1rem;
-  border-radius: 16px;
-}
-
-.ai-msg p {
+.gen-guests {
+  list-style: none;
   margin: 0;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 12px;
+  overflow: hidden;
 }
 
-.ai-msg__row {
+.gen-guest {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 0.85rem;
+  background: #fff;
+}
+
+.gen-guest + .gen-guest {
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.gen-guest__info {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 0.5rem;
 }
 
-.ai-msg__who {
-  display: block;
-  margin-bottom: 0.3rem;
+.gen-guest__name {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--apple-text, #1d1d1f);
+}
+
+.inc-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.5rem;
+  border-radius: 980px;
   font-size: 0.65rem;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.03em;
   text-transform: uppercase;
-  color: var(--apple-text-secondary, #86868b);
 }
 
-.ai-msg__remove {
-  display: flex;
+.inc-badge--in-progress {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.inc-badge--resolved {
+  background: #e8f5e9;
+  color: #1b7a3d;
+}
+
+.gen-guest__remove {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #ff3b30;
+  cursor: pointer;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.35rem;
-  height: 1.35rem;
-  margin-top: -0.2rem;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--apple-text-secondary, #86868b);
-  cursor: pointer;
 }
 
-.ai-msg__remove:hover {
-  color: #b42318;
-  background: rgba(180, 35, 24, 0.08);
+.gen-guest__remove:hover:not(:disabled) {
+  background: rgba(255, 59, 48, 0.08);
 }
 
-.ai-msg--ai {
-  align-self: flex-start;
-  background: var(--apple-bg-secondary, #f5f5f7);
-  color: var(--apple-text, #1d1d1f);
+.gen-guest__remove:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
-.ai-msg--user {
-  align-self: flex-end;
-  background: rgba(30, 58, 138, 0.1);
-  color: var(--apple-blue, #1e3a8a);
-}
-
-.ai-dock {
-  padding: 0.75rem 1.25rem 1.35rem;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.ai-dock__hint {
-  margin: 0 0 0.55rem;
+.gen-add__hint {
+  margin: 0 0 0.5rem;
   font-size: 0.78rem;
-  color: var(--apple-text-secondary, #6e6e73);
+  color: #6e6e73;
 }
 
-.ai-composer {
-  width: min(40rem, 100%);
+.gen-add__row {
   display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.4rem 0.4rem 0.4rem 0.85rem;
-  border: 1px solid var(--apple-border-hairline, #d2d2d7);
-  border-radius: 980px;
-  background: #fff;
-  box-shadow: var(--apple-shadow-md, 0 4px 24px rgba(0, 0, 0, 0.06));
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
-.ai-composer:focus-within {
-  border-color: var(--apple-blue, #1e3a8a);
-  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.16);
-}
-
-.ai-composer__plus {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.6rem;
-  color: var(--apple-text-secondary, #86868b);
-  font-size: 0.85rem;
-}
-
-.ai-composer input {
+.gen-add__input {
   flex: 1;
-  min-width: 0;
-  border: none;
-  outline: none;
-  background: transparent;
+  min-width: 12rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  background: #fff;
   font: inherit;
-  font-size: 0.95rem;
-  color: var(--apple-text, #1d1d1f);
+  font-size: 0.875rem;
+  color: #1d1d1f;
 }
 
-.ai-composer__send {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.35rem;
-  height: 2.35rem;
+.gen-add__input:focus {
+  outline: none;
+  border-color: #0071e3;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.16);
+}
+
+.gen-add__btn {
   border: none;
-  border-radius: 50%;
-  background: var(--apple-blue, #1e3a8a);
+  border-radius: 8px;
+  padding: 0.65rem 1rem;
+  background: #0071e3;
   color: #fff;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
   cursor: pointer;
 }
 
-.ai-composer__send:hover:not(:disabled) {
-  background: var(--apple-blue-hover, #172554);
+.gen-add__btn:hover:not(:disabled) {
+  background: #0066cc;
 }
 
-.ai-composer__send:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
+.gen-add__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .gen-invite {
-  align-self: stretch;
-  max-width: 86%;
-  padding: 0.8rem 1rem 1rem;
-  border-radius: 16px;
-  background: var(--apple-bg-secondary, #f5f5f7);
+  padding: 0.95rem 1rem;
+  border-radius: 12px;
+  background: #f5f5f7;
+}
+
+.gen-invite__title {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #1d1d1f;
 }
 
 .gen-invite__hint {
-  margin: 0 0 0.65rem;
+  margin: 0 0 0.75rem;
   font-size: 0.8125rem;
   line-height: 1.45;
-  color: var(--apple-text-secondary, #6e6e73);
+  color: #6e6e73;
 }
 
 .gen-invite__row {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  align-items: stretch;
 }
 
 .gen-invite__url {
   flex: 1;
   min-width: 0;
-  padding: 0.45rem 0.7rem;
-  border: 1px solid var(--apple-border-hairline, #d2d2d7);
-  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
   background: #fff;
   font: inherit;
   font-size: 0.75rem;
-  color: var(--apple-text, #1d1d1f);
+  color: #1d1d1f;
 }
 
 .gen-invite__copy {
   border: none;
-  border-radius: 10px;
-  padding: 0.45rem 0.8rem;
+  border-radius: 8px;
+  padding: 0.55rem 0.9rem;
   background: #fff;
-  color: var(--apple-text, #1d1d1f);
+  color: #1d1d1f;
   font: inherit;
   font-size: 0.8125rem;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .gen-invite__copy:hover {
-  color: var(--apple-blue, #1e3a8a);
-}
-
-.gen-invite__copied {
-  margin: 0.45rem 0 0;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: #047857;
+  color: #0071e3;
 }
 
 .gen-invite__qr {
@@ -771,25 +767,5 @@ onUnmounted(() => {
   font-weight: 500;
   color: #9a3412;
   line-height: 1.4;
-}
-
-@media (max-width: 860px) {
-  .ai-shell {
-    grid-template-columns: 1fr;
-    min-height: auto;
-  }
-
-  .ai-sidebar {
-    border-right: none;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  }
-
-  .ai-recent-list {
-    max-height: 8rem;
-  }
-
-  .ai-stage {
-    min-height: 22rem;
-  }
 }
 </style>
