@@ -21,6 +21,16 @@ function mapFirebaseError(error) {
   return googleError('GOOGLE_UNAVAILABLE')
 }
 
+/** Fuerza refresh para incluir custom claims recién escritos por el Admin SDK. */
+export async function refreshFirebaseIdToken() {
+  const auth = getAuth(getFirebaseApp())
+  const user = auth.currentUser
+  if (!user) {
+    throw googleError('GOOGLE_UNAVAILABLE', 'No hay sesión Firebase activa.')
+  }
+  return user.getIdToken(true)
+}
+
 export async function signInWithGoogle() {
   try {
     const auth = getAuth(getFirebaseApp())
@@ -37,6 +47,7 @@ export async function signInWithGoogle() {
       email,
       name: String(result.user.displayName ?? '').trim(),
       googleSub: String(result.user.uid ?? '').trim(),
+      user: result.user,
     }
   } catch (error) {
     if (error?.code === 'GOOGLE_PROFILE' || error?.code === 'GOOGLE_CANCELLED') {

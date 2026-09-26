@@ -3,12 +3,22 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Button from 'primevue/button'
 import { importUploadsApi } from '@/import/infrastructure/importUploadsApi.js'
-import { importFoldersApi, isHomeFolder } from '@/import/infrastructure/importFoldersApi.js'
+import { importFoldersApi, isContextFolder, isHomeFolder, isSystemFolder } from '@/import/infrastructure/importFoldersApi.js'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 
 const { t, locale } = useI18n()
 
-const MAX_BYTES = 1024 * 1024
+const MAX_BYTES = 5 * 1024 * 1024
+const ALLOWED_MIME = new Set([
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'application/json',
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+])
 
 const items = ref([])
 const loading = ref(false)
@@ -21,6 +31,7 @@ const editNameInputRef = ref(null)
 const folderNameInputRef = ref(null)
 const deletingId = ref(null)
 const deletingFolderId = ref(null)
+const downloadingId = ref(null)
 
 const folders = ref([])
 const selectedFolderId = ref(null)
@@ -82,6 +93,7 @@ function dateGroupLabel(dateKey) {
 }
 
 const homeFolder = computed(() => folders.value.find((folder) => isHomeFolder(folder)) ?? null)
+const contextFolder = computed(() => folders.value.find((folder) => isContextFolder(folder)) ?? null)
 
 const selectedFolder = computed(
   () => folders.value.find((folder) => folder.id === selectedFolderId.value) ?? homeFolder.value,
@@ -108,8 +120,9 @@ function folderFileCount(folder) {
 
 function sortFolders(list) {
   return [...list].sort((a, b) => {
-    const homeDiff = Number(isHomeFolder(b)) - Number(isHomeFolder(a))
-    if (homeDiff) return homeDiff
+    const rank = (f) => (isHomeFolder(f) ? 2 : isContextFolder(f) ? 1 : 0)
+    const diff = rank(b) - rank(a)
+    if (diff) return diff
     return String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
   })
 }
@@ -121,7 +134,14 @@ function selectFolder(folder) {
 
 function folderDisplayName(folder) {
   if (!folder || isHomeFolder(folder)) return t('importView.homeFolderName')
+  if (isContextFolder(folder)) return t('importView.contextFolderName')
   return folder.name
+}
+
+function folderIcon(folder) {
+  if (isHomeFolder(folder)) return 'pi-home'
+  if (isContextFolder(folder)) return 'pi-sparkles'
+  return 'pi-folder'
 }
 
 const listColumnTitle = computed(() => folderDisplayName(selectedFolder.value))
@@ -141,13 +161,29 @@ const groupedByDate = computed(() => {
   }))
 })
 
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const fr = new FileReader()
-    fr.onload = () => resolve(String(fr.result ?? ''))
-    fr.onerror = () => reject(new Error('read'))
-    fr.readAsDataURL(file)
-  })
+function isAllowedMime(file) {
+  const mime = String(file?.type || '').toLowerCase()
+  if (ALLOWED_MIME.has(mime)) return true
+  const name = String(file?.name || '').toLowerCase()
+  return (
+    name.endsWith('.pdf') ||
+    name.endsWith('.txt') ||
+    name.endsWith('.md') ||
+    name.endsWith('.csv') ||
+    name.endsWith('.json') ||
+    name.endsWith('.png') ||
+    name.endsWith('.jpg') ||
+    name.endsWith('.jpeg') ||
+    name.endsWith('.webp')
+  )
+}
+
+function indexingLabel(status) {
+  const s = String(status ?? '').toLowerCase()
+  if (s === 'pending' || s === 'indexing') return t('importView.indexingPending')
+  if (s === 'failed') return t('importView.indexingFailed')
+  if (s === 'done') return t('importView.indexingDone')
+  return ''
 }
 
 async function loadList() {
@@ -159,9 +195,17 @@ async function loadList() {
       importFoldersApi.list(),
     ])
     const home = await importFoldersApi.ensureHome(folderRows)
-    const nextFolders = folderRows.some((folder) => folder.id === home.id)
+    const context = await importFoldersApi.ensureContext(
+      folderRows.some((folder) => folder.id === home.id)
+        ? folderRows.map((folder) => (folder.id === home.id ? home : folder))
+        : [home, ...folderRows],
+    )
+    let nextFolders = folderRows.some((folder) => folder.id === home.id)
       ? folderRows.map((folder) => (folder.id === home.id ? home : folder))
       : [home, ...folderRows]
+    nextFolders = nextFolders.some((folder) => folder.id === context.id)
+      ? nextFolders.map((folder) => (folder.id === context.id ? context : folder))
+      : [context, ...nextFolders]
 
     const orphans = files.filter((file) => !file.folderId)
     if (orphans.length) {
@@ -197,18 +241,22 @@ async function ingestFiles(fileList) {
         uploadError.value = t('importView.fileTooLarge', { max: maxSizeLabel.value })
         continue
       }
-      const dataUrl = await readFileAsDataUrl(file)
+      if (!isAllowedMime(file)) {
+        uploadError.value = t('importView.mimeNotAllowed')
+        continue
+      }
       await importUploadsApi.add({
-        fileName: file.name,
-        mimeType: file.type || 'application/octet-stream',
-        size: file.size,
-        dataUrl,
-        folderId: homeFolder.value?.id || selectedFolderId.value,
+        file,
+        folderId: selectedFolderId.value || homeFolder.value?.id,
       })
     }
     await loadList()
-  } catch {
-    uploadError.value = t('importView.uploadError')
+  } catch (err) {
+    const code = err?.response?.data?.code || err?.code
+    if (code === 'QUOTA_EXCEEDED') uploadError.value = t('importView.quotaExceeded')
+    else if (code === 'MIME_NOT_ALLOWED') uploadError.value = t('importView.mimeNotAllowed')
+    else if (code === 'FILE_TOO_LARGE') uploadError.value = t('importView.fileTooLarge', { max: maxSizeLabel.value })
+    else uploadError.value = t('importView.uploadError')
   } finally {
     uploading.value = false
     if (fileInputRef.value) fileInputRef.value.value = ''
@@ -355,7 +403,7 @@ async function onSaveFileName() {
 }
 
 async function openFolderModal(folder = null) {
-  if (isSavingFolder.value || isHomeFolder(folder)) return
+  if (isSavingFolder.value || isSystemFolder(folder)) return
   folderCandidate.value = folder
   folderName.value = folder?.name ?? ''
   folderModalError.value = ''
@@ -406,7 +454,7 @@ async function onSaveFolder() {
 }
 
 async function onDiscardFolder(folder) {
-  if (!folder?.id || deletingFolderId.value || isHomeFolder(folder)) return
+  if (!folder?.id || deletingFolderId.value || isSystemFolder(folder)) return
   deletingFolderId.value = folder.id
   uploadError.value = ''
   const homeId = homeFolder.value?.id
@@ -425,6 +473,28 @@ async function onDiscardFolder(folder) {
     uploadError.value = t('importView.folderDeleteError')
   } finally {
     deletingFolderId.value = null
+  }
+}
+
+async function onDownload(file) {
+  if (!file?.id || downloadingId.value) return
+  downloadingId.value = file.id
+  uploadError.value = ''
+  try {
+    const { downloadUrl } = await importUploadsApi.getDownloadUrl(file.id)
+    if (!downloadUrl) throw new Error('NO_URL')
+    const a = document.createElement('a')
+    a.href = downloadUrl
+    a.download = file.fileName || 'archivo'
+    a.target = '_blank'
+    a.rel = 'noopener noreferrer'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  } catch {
+    uploadError.value = t('importView.downloadError')
+  } finally {
+    downloadingId.value = null
   }
 }
 
@@ -488,15 +558,18 @@ onMounted(loadList)
                   @keydown.space.prevent="selectFolder(folder)"
                 >
                   <span class="r-card__avatar" aria-hidden="true">
-                    <i class="pi" :class="isHomeFolder(folder) ? 'pi-home' : 'pi-folder'" />
+                    <i class="pi" :class="folderIcon(folder)" />
                   </span>
                   <div class="r-card__body">
-                    <p class="r-card__name">{{ folderDisplayName(folder) }}</p>
+                    <p class="r-card__name">
+                      {{ folderDisplayName(folder) }}
+                      <span v-if="isContextFolder(folder)" class="import-ai-badge">{{ t('importView.contextFolderBadge') }}</span>
+                    </p>
                     <p class="r-card__meta">
                       {{ t('importView.folderFilesCount', { n: folderFileCount(folder) }) }}
                     </p>
                   </div>
-                  <div v-if="!isHomeFolder(folder)" class="r-card__actions" @click.stop @keydown.stop>
+                  <div v-if="!isSystemFolder(folder)" class="r-card__actions" @click.stop @keydown.stop>
                     <button
                       type="button"
                       class="r-card__icon-btn r-card__icon-btn--edit"
@@ -556,6 +629,7 @@ onMounted(loadList)
                 type="file"
                 class="import-dropzone__input"
                 multiple
+                accept=".pdf,.txt,.md,.csv,.json,.png,.jpg,.jpeg,.webp,application/pdf,text/plain,text/markdown,text/csv,application/json,image/png,image/jpeg,image/webp"
                 @change="onFileInputChange"
               />
             </div>
@@ -571,11 +645,14 @@ onMounted(loadList)
             <h2 id="import-list-heading" class="finance-panel__section-title finance-panel__section-title--folder">
               <i
                 class="pi"
-                :class="isHomeFolder(selectedFolder) ? 'pi-home' : 'pi-folder-open'"
+                :class="isHomeFolder(selectedFolder) ? 'pi-home' : isContextFolder(selectedFolder) ? 'pi-sparkles' : 'pi-folder-open'"
                 aria-hidden="true"
               />
               {{ listColumnTitle }}
             </h2>
+            <p v-if="isContextFolder(selectedFolder)" class="import-context-hint">
+              {{ t('importView.contextFolderHint') }}
+            </p>
           </div>
 
           <div v-if="loading" class="import-status import-panel-state">
@@ -617,18 +694,28 @@ onMounted(loadList)
                     </span>
                     <div class="r-card__body">
                       <p class="r-card__name">{{ file.fileName }}</p>
-                      <p class="r-card__meta">{{ formatBytes(file.size) }}</p>
+                      <p class="r-card__meta">
+                        {{ formatBytes(file.size) }}
+                        <span
+                          v-if="indexingLabel(file.indexingStatus)"
+                          class="r-card__index-status"
+                          :data-status="file.indexingStatus"
+                        >
+                          · {{ indexingLabel(file.indexingStatus) }}
+                        </span>
+                      </p>
                     </div>
                     <div class="r-card__actions">
-                      <a
-                        v-if="file.dataUrl"
+                      <button
+                        v-if="file.id"
+                        type="button"
                         class="r-card__icon-btn r-card__icon-btn--link"
-                        :href="file.dataUrl"
-                        :download="file.fileName"
                         :title="t('importView.download')"
+                        :disabled="downloadingId === file.id"
+                        @click="onDownload(file)"
                       >
                         <i class="pi pi-download" aria-hidden="true" />
-                      </a>
+                      </button>
                       <button
                         type="button"
                         class="r-card__icon-btn r-card__icon-btn--edit"
@@ -802,6 +889,26 @@ onMounted(loadList)
 
 .import-folders__empty {
   flex: 1;
+}
+
+.import-ai-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+  color: #0b3d5c;
+  background: rgba(61, 143, 209, 0.18);
+  border-radius: 0.25rem;
+}
+
+.import-context-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  color: rgba(11, 61, 92, 0.72);
 }
 
 .import-upload {

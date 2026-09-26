@@ -13,6 +13,10 @@
       "destination": "https://backend-production-5e544.up.railway.app/api/v1/:path*"
     },
     {
+      "source": "/hubs/:path*",
+      "destination": "https://backend-production-5e544.up.railway.app/hubs/:path*"
+    },
+    {
       "source": "/users/:path*",
       "destination": "https://backend-production-5e544.up.railway.app/users/:path*"
     },
@@ -155,14 +159,6 @@
     {
       "source": "/residentExtraCharges",
       "destination": "https://backend-production-5e544.up.railway.app/residentExtraCharges"
-    },
-    {
-      "source": "/supportChats/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/supportChats/:path*"
-    },
-    {
-      "source": "/supportChats",
-      "destination": "https://backend-production-5e544.up.railway.app/supportChats"
     },
     {
       "source": "/(.*)",

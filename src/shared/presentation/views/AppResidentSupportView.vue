@@ -3,23 +3,13 @@ import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useSession, getActiveDataOwnerId } from '@/iam/application/sessionStore.js'
-import { generateGeminiReply, summarizeChatTitle } from '@/support/infrastructure/geminiApi.js'
-import { buildResidentAssistantPrompt } from '@/support/domain/residentAssistantPrompt.js'
+import { supportApi } from '@/support/infrastructure/supportApi.js'
 import {
-  assistantWantsEscalate,
-  residentWantsAdmin,
-  stripEscalateMarker,
-} from '@/support/domain/supportEscalate.js'
-import {
-  appendAdminMessage,
-  appendAiMessage,
-  createAdminChat,
-  createAiChat,
-  patchAiChat,
-  watchAdminChat,
-  watchAiChats,
-  watchRealtimeConnected,
-} from '@/support/infrastructure/realtimeSupportDb.js'
+  isDocumentVisible,
+  joinSupportChat,
+  joinSupportOwner,
+  onSupportChatUpdated,
+} from '@/support/infrastructure/supportRealtime.js'
 
 const { t, locale } = useI18n()
 const { state: sessionState } = useSession()
@@ -28,13 +18,13 @@ const aiSending = ref(false)
 const aiChats = ref([])
 const activeAiChatId = ref('')
 const aiMessagesEl = ref(null)
-const extraAdminMessages = ref([])
+const adminThreadMessages = ref([])
 const syncError = ref('')
 const creatingBlank = ref(false)
 const chatsReady = ref(false)
+const lastListSync = ref('')
 
 const residentId = computed(() => sessionState.profile?.id ?? '')
-const residentName = computed(() => sessionState.profile?.name ?? '')
 const ownerId = computed(() => getActiveDataOwnerId() || sessionState.profile?.ownerAdminId || '')
 
 const activeAiChat = computed(
@@ -43,8 +33,8 @@ const activeAiChat = computed(
 
 const displayMessages = computed(() => {
   const base = activeAiChat.value?.messages || []
-  const extras = extraAdminMessages.value
-    .filter((row) => row.authorRole === 'admin')
+  const extras = adminThreadMessages.value
+    .filter((row) => row.authorRole === 'admin' || row.role === 'admin')
     .filter((row) => !base.some((item) => item.id === row.id))
     .map((row) => ({
       id: row.id,
@@ -59,24 +49,10 @@ const displayMessages = computed(() => {
 
 const hasAiMessages = computed(() => displayMessages.value.length > 0)
 
-function titleFromText(text) {
-  const clean = String(text ?? '').trim().replace(/\s+/g, ' ')
-  if (!clean) return t('supportResident.aiNewChat')
-  return clean.length > 38 ? `${clean.slice(0, 38)}…` : clean
-}
-
 function messageWho(role) {
   if (role === 'user') return t('supportResident.labelYou')
   if (role === 'admin') return t('supportResident.labelAdmin')
   return t('supportResident.aiLabel')
-}
-
-function geminiSystemInstruction() {
-  return buildResidentAssistantPrompt({
-    locale: locale.value,
-    t,
-    residentName: residentName.value,
-  })
 }
 
 async function scrollAiToBottom() {
@@ -85,61 +61,129 @@ async function scrollAiToBottom() {
   if (el) el.scrollTop = el.scrollHeight
 }
 
-let stopAiChats = null
-let stopAdminThread = null
-let stopConnected = null
+let pollTimer = 0
 let creatingBlankLock = false
-let connectWaitTimer = 0
+let stopHub = null
+let signalROk = false
 
-function bindAiChats() {
-  stopAiChats?.()
-  stopAiChats = null
-  stopConnected?.()
-  stopConnected = null
-  if (connectWaitTimer) window.clearTimeout(connectWaitTimer)
-  chatsReady.value = false
-  if (!ownerId.value || !residentId.value) {
+function upsertLocalChat(chat) {
+  if (!chat?.id) return
+  const idx = aiChats.value.findIndex((row) => row.id === chat.id)
+  if (idx >= 0) aiChats.value[idx] = chat
+  else aiChats.value = [chat, ...aiChats.value]
+  if (chat.updatedAt && (!lastListSync.value || chat.updatedAt > lastListSync.value)) {
+    lastListSync.value = chat.updatedAt
+  }
+}
+
+async function refreshAiChats({ silent = false, incremental = false } = {}) {
+  if (!residentId.value) {
     aiChats.value = []
+    chatsReady.value = true
     return
   }
-  stopConnected = watchRealtimeConnected((ok) => {
-    if (ok && syncError.value === t('supportResident.syncError')) {
-      syncError.value = ''
+  try {
+    const since = incremental && lastListSync.value ? lastListSync.value : undefined
+    const list = await supportApi.listChats('ai', { since })
+    if (incremental && since) {
+      for (const chat of list) upsertLocalChat(chat)
+    } else {
+      aiChats.value = list
+      const newest = list.map((c) => c.updatedAt).filter(Boolean).sort().at(-1)
+      if (newest) lastListSync.value = newest
     }
-  })
-  connectWaitTimer = window.setTimeout(() => {
-    if (!chatsReady.value) syncError.value = t('supportResident.syncError')
-  }, 6000)
-  stopAiChats = watchAiChats(ownerId.value, residentId.value, (list, error) => {
-    if (connectWaitTimer) window.clearTimeout(connectWaitTimer)
-    syncError.value = error ? t('supportResident.syncError') : ''
-    aiChats.value = list
     chatsReady.value = true
-    if (!list.some((chat) => chat.id === activeAiChatId.value)) {
-      activeAiChatId.value = list[0]?.id || ''
+    syncError.value = ''
+    if (!aiChats.value.some((chat) => chat.id === activeAiChatId.value)) {
+      activeAiChatId.value = aiChats.value[0]?.id || ''
     }
-    if (!error && !list.length) void startAiChat()
-  })
+    if (!aiChats.value.length) await startAiChat()
+  } catch (error) {
+    console.error(error)
+    chatsReady.value = true
+    if (!silent) syncError.value = t('supportResident.syncError')
+  }
 }
 
-function bindAdminThread(chatId) {
-  stopAdminThread?.()
-  stopAdminThread = null
-  extraAdminMessages.value = []
-  if (!ownerId.value || !chatId) return
-  stopAdminThread = watchAdminChat(ownerId.value, chatId, (chat) => {
-    extraAdminMessages.value = chat?.messages || []
-  })
+async function refreshAdminThread() {
+  const linkedId = activeAiChat.value?.escalatedChatId
+  if (!linkedId) {
+    adminThreadMessages.value = []
+    return
+  }
+  try {
+    const lastId = adminThreadMessages.value.at(-1)?.id
+    const chat = await supportApi.getChat(linkedId, { afterMessageId: lastId })
+    if (!chat) return
+    if (lastId && chat.messages?.length) {
+      const known = new Set(adminThreadMessages.value.map((m) => m.id))
+      adminThreadMessages.value = [
+        ...adminThreadMessages.value,
+        ...chat.messages.filter((m) => !known.has(m.id)),
+      ]
+    } else {
+      adminThreadMessages.value = chat.messages || []
+    }
+  } catch {
+    // ignore
+  }
 }
 
-watch([ownerId, residentId], () => {
-  bindAiChats()
+function startFallbackPolling() {
+  stopFallbackPolling()
+  pollTimer = window.setInterval(() => {
+    if (!isDocumentVisible()) return
+    if (signalROk) return
+    void refreshAiChats({ silent: true, incremental: true })
+    void refreshAdminThread()
+  }, 8000)
+}
+
+function stopFallbackPolling() {
+  if (pollTimer) window.clearInterval(pollTimer)
+  pollTimer = 0
+}
+
+async function bindRealtime() {
+  stopHub?.()
+  stopHub = null
+  signalROk = false
+  if (!ownerId.value) return
+  const hub = await joinSupportOwner(ownerId.value)
+  if (!hub) return
+  signalROk = true
+  stopHub = onSupportChatUpdated((payload) => {
+    if (!payload?.id) return
+    if (payload.kind === 'ai' && payload.residentId === residentId.value) {
+      upsertLocalChat({
+        ...payload,
+        title: payload.title || payload.topic,
+        messages: payload.messages || [],
+      })
+    }
+    if (payload.id === activeAiChat.value?.escalatedChatId) {
+      adminThreadMessages.value = payload.messages || []
+    }
+  })
+  if (activeAiChatId.value) await joinSupportChat(activeAiChatId.value)
+}
+
+watch([ownerId, residentId], async () => {
+  await refreshAiChats()
+  await bindRealtime()
+  startFallbackPolling()
 }, { immediate: true })
+
+watch(activeAiChatId, async (id) => {
+  if (id) await joinSupportChat(id)
+  void refreshAdminThread()
+})
 
 watch(
   () => activeAiChat.value?.escalatedChatId,
-  (chatId) => bindAdminThread(chatId),
-  { immediate: true },
+  () => {
+    void refreshAdminThread()
+  },
 )
 
 watch(
@@ -147,17 +191,20 @@ watch(
   () => scrollAiToBottom(),
 )
 
-watch([chatsReady, aiChats], async () => {
-  if (!chatsReady.value || !ownerId.value || !residentId.value) return
-  if (creatingBlank.value || aiChats.value.length) return
-  await startAiChat()
-})
+function onVisibility() {
+  if (isDocumentVisible()) void refreshAiChats({ silent: true, incremental: true })
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', onVisibility)
+}
 
 onUnmounted(() => {
-  stopAiChats?.()
-  stopAdminThread?.()
-  stopConnected?.()
-  if (connectWaitTimer) window.clearTimeout(connectWaitTimer)
+  stopFallbackPolling()
+  stopHub?.()
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', onVisibility)
+  }
 })
 
 async function startAiChat() {
@@ -166,16 +213,14 @@ async function startAiChat() {
     activeAiChatId.value = blank.id
     return
   }
-  if (!ownerId.value || !residentId.value || creatingBlankLock) return
+  if (!residentId.value || creatingBlankLock) return
   creatingBlankLock = true
   creatingBlank.value = true
   try {
-    const chat = await createAiChat({
-      ownerId: ownerId.value,
-      residentId: residentId.value,
-      title: t('supportResident.aiNewChat'),
-    })
+    const chat = await supportApi.createAiChat(t('supportResident.aiNewChat'))
+    upsertLocalChat(chat)
     activeAiChatId.value = chat.id
+    syncError.value = ''
   } catch (error) {
     console.error(error)
     syncError.value = t('supportResident.syncError')
@@ -189,71 +234,10 @@ function openAiChat(id) {
   activeAiChatId.value = id
 }
 
-function toAdminTranscript(messages) {
-  return (messages || []).map((row) => ({
-    id: row.id,
-    authorRole: row.role === 'user' ? 'resident' : row.role === 'admin' ? 'admin' : 'assistant',
-    body: row.body,
-    createdAt: row.createdAt,
-    authorName: row.role === 'user' ? residentName.value : undefined,
-  }))
-}
-
-async function maybeSummarizeTitle(chatId, messages) {
-  const chat = aiChats.value.find((row) => row.id === chatId)
-  if (!chat || chat.titleSummarized || (messages?.length ?? 0) < 2) return
-  try {
-    const title = await summarizeChatTitle({
-      messages,
-      locale: locale.value,
-    })
-    if (!title) return
-    await patchAiChat(ownerId.value, residentId.value, chatId, {
-      title,
-      titleSummarized: true,
-    })
-  } catch (error) {
-    console.error(error)
-  }
-}
-
-async function escalateChat(chatId, extraMessages = []) {
-  const chat = aiChats.value.find((row) => row.id === chatId)
-  if (!chat || chat.escalatedChatId) return chat?.escalatedChatId || ''
-  const merged = [...(chat.messages || [])]
-  for (const row of extraMessages) {
-    if (!row?.body) continue
-    if (!merged.some((item) => item.id === row.id || item.body === row.body)) {
-      merged.push(row)
-    }
-  }
-  const topic =
-    chat.title && chat.title !== t('supportResident.aiNewChat')
-      ? chat.title
-      : t('supportResident.defaultChatTopic')
-  const adminChat = await createAdminChat({
-    ownerId: ownerId.value,
-    residentId: residentId.value,
-    residentName: residentName.value,
-    topic,
-    source: 'ai-escalation',
-    aiChatId: chat.id,
-    messages: toAdminTranscript(merged),
-  })
-  await patchAiChat(ownerId.value, residentId.value, chat.id, {
-    escalatedChatId: adminChat.id,
-  })
-  await appendAiMessage(ownerId.value, residentId.value, chat.id, {
-    role: 'ai',
-    body: t('supportResident.escalatedToAdmin'),
-  })
-  return adminChat.id
-}
-
 async function sendAiMessage(preset) {
   const text = String(preset ?? aiInput.value).trim()
   if (!text || aiSending.value) return
-  if (!ownerId.value || !residentId.value) return
+  if (!residentId.value) return
   if (!activeAiChat.value) await startAiChat()
   const chatId = activeAiChatId.value
   if (!chatId) return
@@ -261,67 +245,19 @@ async function sendAiMessage(preset) {
   aiInput.value = ''
   aiSending.value = true
   try {
-    const current = aiChats.value.find((row) => row.id === chatId)
-    const userMsg = await appendAiMessage(ownerId.value, residentId.value, chatId, {
-      role: 'user',
-      body: text,
-    })
-    if (current && !current.titleSummarized) {
-      await patchAiChat(ownerId.value, residentId.value, chatId, {
-        title: titleFromText(text),
-      })
-    }
-
-    if (current?.escalatedChatId) {
-      await appendAdminMessage(ownerId.value, current.escalatedChatId, {
-        authorRole: 'resident',
-        body: text,
-        authorName: residentName.value,
-      })
-      return
-    }
-
-    const history = [...(current?.messages || []), userMsg].filter(
-      (row) => row.role === 'user' || row.role === 'ai',
-    )
-
-    if (residentWantsAdmin(text)) {
-      await escalateChat(chatId, [userMsg])
-      await maybeSummarizeTitle(chatId, [
-        ...history,
-        { role: 'ai', body: t('supportResident.escalatedToAdmin') },
-      ])
-      return
-    }
-
-    try {
-      const reply = await generateGeminiReply({
-        messages: history,
-        systemInstruction: geminiSystemInstruction(),
-      })
-      const shouldEscalate = assistantWantsEscalate(reply)
-      const body = stripEscalateMarker(reply) || t('supportResident.escalatedToAdmin')
-      const aiMsg = await appendAiMessage(ownerId.value, residentId.value, chatId, {
-        role: 'ai',
-        body,
-      })
-      await maybeSummarizeTitle(chatId, [...history, aiMsg])
-      if (shouldEscalate) await escalateChat(chatId, [userMsg, aiMsg])
-    } catch (error) {
-      console.error(error)
-      await appendAiMessage(ownerId.value, residentId.value, chatId, {
-        role: 'ai',
-        body:
-          error?.code === 'GEMINI_API_KEY_MISSING'
-            ? t('supportResident.aiMissingKey')
-            : error?.code === 'GEMINI_BUSY'
-              ? t('supportResident.aiBusy')
-              : t('supportResident.aiError'),
-      })
-    }
+    const updated = await supportApi.postMessage(chatId, text, locale.value)
+    upsertLocalChat(updated)
+    if (updated.escalatedChatId) await refreshAdminThread()
+    syncError.value = ''
   } catch (error) {
     console.error(error)
-    syncError.value = t('supportResident.syncError')
+    if (error?.code === 'GEMINI_RATE_LIMITED' || error?.status === 429) {
+      syncError.value = t('supportResident.aiBusy')
+    } else if (error?.code === 'GEMINI_API_KEY_MISSING') {
+      syncError.value = t('supportResident.aiMissingKey')
+    } else {
+      syncError.value = t('supportResident.syncError')
+    }
   } finally {
     aiSending.value = false
     scrollAiToBottom()

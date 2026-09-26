@@ -8,7 +8,7 @@ import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import { authApi } from '@/iam/infrastructure/authApi.js'
 import { residentsApi } from '@/residents/infrastructure/residentsApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
-import { signInWithGoogle } from '@/iam/infrastructure/googleIdentity.js'
+import { signInWithGoogle, refreshFirebaseIdToken } from '@/iam/infrastructure/googleIdentity.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -38,7 +38,9 @@ const authTab = computed(() => {
 const isResidentInvite = computed(
   () => route.name === AppRouteNames.LOGIN && route.query.invite === '1',
 )
-const inviteCode = computed(() => String(route.query.code ?? ''))
+const inviteToken = computed(() =>
+  String(route.query.token ?? route.query.code ?? '').trim(),
+)
 
 const inviteStep = ref('welcome') // 'welcome' | 'google'
 const inviteResident = ref(null)
@@ -49,7 +51,12 @@ const residentLoading = ref(false)
 
 const inviteName = computed(() => inviteResident.value?.name ?? '')
 const inviteFloor = computed(() => inviteResident.value?.floor ?? '')
-const inviteCodeDisplay = computed(() => inviteResident.value?.code ?? inviteCode.value)
+const inviteCodeDisplay = computed(() => inviteResident.value?.code ?? '')
+
+async function resolveResidentToken(authResult) {
+  if (authResult?.token) return authResult.token
+  return refreshFirebaseIdToken()
+}
 
 function applyResidentSession(user, token) {
   setResidentSession(
@@ -75,6 +82,9 @@ function googleAuthMessage(error) {
   if (error?.code === 'NETWORK_ERROR' || error?.code === 'TIMEOUT') return t('auth.apiUnavailable')
   if (error?.code === 'EMAIL_ALREADY_EXISTS') return t('auth.emailAlreadyExists')
   if (error?.code === 'RESIDENT_NOT_FOUND') return t('auth.inviteNotFound')
+  if (error?.code === 'INVITE_EXPIRED') return t('auth.inviteExpired')
+  if (error?.code === 'INVITE_ALREADY_USED') return t('auth.inviteAlreadyUsed')
+  if (error?.code === 'INVITE_EMAIL_MISMATCH') return t('auth.inviteEmailMismatch')
   if (error?.code === 'EMAIL_NOT_FOUND') return t('auth.residentGoogleNotFound')
   if (error?.code === 'RESIDENT_ONLY') return t('auth.residentGoogleAdminBlocked')
   if (error?.code === 'RESIDENT_GOOGLE_REQUIRED') return t('auth.residentGoogleRequired')
@@ -83,18 +93,22 @@ function googleAuthMessage(error) {
 }
 
 watchEffect(async () => {
-  if (!isResidentInvite.value || !inviteCode.value) {
+  if (!isResidentInvite.value || !inviteToken.value) {
     inviteResident.value = null
     return
   }
   inviteLoading.value = true
   inviteFetchError.value = ''
   try {
-    inviteResident.value = await residentsApi.findByCode(inviteCode.value)
+    inviteResident.value = await residentsApi.findByInviteToken(inviteToken.value)
   } catch (error) {
     inviteResident.value = null
     if (error?.code === 'RESIDENT_NOT_FOUND') {
       inviteFetchError.value = t('auth.inviteNotFound')
+    } else if (error?.code === 'INVITE_EXPIRED') {
+      inviteFetchError.value = t('auth.inviteExpired')
+    } else if (error?.code === 'INVITE_ALREADY_USED') {
+      inviteFetchError.value = t('auth.inviteAlreadyUsed')
     } else if (error?.code === 'NETWORK_ERROR' || error?.code === 'TIMEOUT') {
       inviteFetchError.value = t('auth.apiUnavailable')
     } else {
@@ -116,14 +130,15 @@ async function onResidentGoogleSignUp() {
   residentLoading.value = true
   try {
     const googleProfile = await signInWithGoogle()
-    const { user, token } = await residentsApi.completeInviteWithGoogle({
-      code: inviteCode.value,
+    const authResult = await residentsApi.completeInviteWithGoogle({
+      token: inviteToken.value,
       email: googleProfile.email,
       name: googleProfile.name,
       googleSub: googleProfile.googleSub,
       idToken: googleProfile.idToken,
     })
-    await applyResidentSession(user, token)
+    const sessionToken = await resolveResidentToken(authResult)
+    await applyResidentSession(authResult.user, sessionToken)
   } catch (error) {
     residentError.value = googleAuthMessage(error)
   } finally {
@@ -146,6 +161,42 @@ const regCompany = ref('')
 const regRuc = ref('')
 const registerError = ref('')
 const registerLoading = ref(false)
+
+/** Auth ok sin fila en profiles → completar perfil antes de entrar. */
+const completeProfileMode = ref(false)
+const pendingAuthToken = ref(null)
+const completeProfileError = ref('')
+const completeProfileLoading = ref(false)
+
+function enterCompleteProfile({ token, identity, draft }) {
+  completeProfileMode.value = true
+  pendingAuthToken.value = token
+  regName.value = draft?.name || identity?.name || ''
+  regEmail.value = draft?.email || identity?.email || loginEmail.value || ''
+  regDni.value = draft?.dni || ''
+  regAddress.value = draft?.address || ''
+  regCompany.value = draft?.company || ''
+  regRuc.value = draft?.ruc || ''
+  completeProfileError.value = ''
+}
+
+function finishAdminSession(user, token) {
+  setAdminSession(
+    {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      dni: user.dni,
+      address: user.address,
+      company: user.company,
+      ruc: user.ruc,
+    },
+    token,
+  )
+  completeProfileMode.value = false
+  pendingAuthToken.value = null
+  navigateAfterAuth({ name: AppRouteNames.APP_DASHBOARD })
+}
 
 async function onLoginContinue() {
   loginEmailError.value = ''
@@ -179,16 +230,17 @@ async function onLoginWithGoogle() {
   loginEmailError.value = ''
   try {
     const googleProfile = await signInWithGoogle()
-    const { user, token } = await authApi.loginWithGoogle({
+    const authResult = await authApi.loginWithGoogle({
       email: googleProfile.email,
       googleSub: googleProfile.googleSub,
       idToken: googleProfile.idToken,
     })
-    if (user.role !== 'resident') {
+    if (authResult.user.role !== 'resident') {
       loginEmailError.value = t('auth.residentGoogleAdminBlocked')
       return
     }
-    await applyResidentSession(user, token)
+    const sessionToken = await resolveResidentToken(authResult)
+    await applyResidentSession(authResult.user, sessionToken)
   } catch (error) {
     loginEmailError.value = googleAuthMessage(error)
   } finally {
@@ -213,7 +265,7 @@ async function onLoginSubmit() {
   loginLoading.value = true
   loginEmailError.value = ''
   try {
-    const { user, token } = await authApi.login({
+    const { user, token, profileIncomplete } = await authApi.login({
       email: loginEmail.value,
       password: loginPassword.value,
     })
@@ -221,21 +273,18 @@ async function onLoginSubmit() {
     if (user.role === 'resident') {
       loginEmailError.value = t('auth.residentUseGoogle')
       return
-    } else {
-      setAdminSession(
-        {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          dni: user.dni,
-          address: user.address,
-          company: user.company,
-          ruc: user.ruc,
-        },
-        token,
-      )
-      navigateAfterAuth({ name: AppRouteNames.APP_DASHBOARD })
     }
+
+    if (profileIncomplete) {
+      enterCompleteProfile({
+        token,
+        identity: user,
+        draft: { name: user.name, email: user.email },
+      })
+      return
+    }
+
+    finishAdminSession(user, token)
   } catch (error) {
     if (error?.code === 'NETWORK_ERROR' || error?.code === 'TIMEOUT') {
       loginEmailError.value = t('auth.apiUnavailable')
@@ -265,6 +314,35 @@ async function onLoginSubmit() {
   }
 }
 
+async function onCompleteProfileSubmit() {
+  if (completeProfileLoading.value || !pendingAuthToken.value) return
+  completeProfileLoading.value = true
+  completeProfileError.value = ''
+  try {
+    const { user, token } = await authApi.completeProfile(pendingAuthToken.value, {
+      name: regName.value,
+      email: regEmail.value,
+      dni: regDni.value,
+      address: regAddress.value,
+      company: regCompany.value,
+      ruc: regRuc.value,
+    })
+    finishAdminSession(user, token)
+  } catch (error) {
+    if (error?.code === 'ADMIN_BOOTSTRAP_CLOSED' || error?.status === 409 || error?.code === 'HTTP_409') {
+      completeProfileError.value = t('auth.adminBootstrapClosed')
+      return
+    }
+    if (error?.code === 'NETWORK_ERROR' || error?.code === 'TIMEOUT') {
+      completeProfileError.value = t('auth.apiUnavailable')
+      return
+    }
+    completeProfileError.value = t('auth.completeProfileError')
+  } finally {
+    completeProfileLoading.value = false
+  }
+}
+
 async function onRegisterSubmit() {
   if (registerLoading.value) return
   registerLoading.value = true
@@ -283,20 +361,20 @@ async function onRegisterSubmit() {
       company: regCompany.value,
       ruc: regRuc.value,
     })
-    setAdminSession(
-      {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        dni: user.dni,
-        address: user.address,
-        company: user.company,
-        ruc: user.ruc,
-      },
-      token,
-    )
-    navigateAfterAuth({ name: AppRouteNames.APP_DASHBOARD })
+    finishAdminSession(user, token)
   } catch (error) {
+    if (error?.code === 'PROFILE_INCOMPLETE_AFTER_AUTH') {
+      enterCompleteProfile({
+        token: error.token,
+        identity: error.identity,
+        draft: error.profileDraft,
+      })
+      return
+    }
+    if (error?.code === 'ADMIN_BOOTSTRAP_CLOSED') {
+      registerError.value = t('auth.adminBootstrapClosed')
+      return
+    }
     if (error?.code === 'EMAIL_ALREADY_EXISTS') {
       registerError.value = t('auth.emailAlreadyExists')
       return
@@ -305,13 +383,17 @@ async function onRegisterSubmit() {
       registerError.value = t('auth.apiUnavailable')
       return
     }
+    if (error?.code === 'PROFILE_SAVE_FAILED') {
+      registerError.value = t('auth.completeProfileError')
+      return
+    }
     registerError.value = t('auth.genericError')
   } finally {
     registerLoading.value = false
   }
 }
 
-watch(inviteCode, () => {
+watch(inviteToken, () => {
   inviteStep.value = 'welcome'
   residentError.value = ''
 })
@@ -460,7 +542,108 @@ watch(loginEmail, () => {
           </div>
         </nav>
 
-        <div v-if="isAdminLogin" class="auth-card auth-card--centered">
+        <div v-if="completeProfileMode" class="auth-card auth-card--centered">
+          <div class="auth-brand">
+            <img
+              src="/logo-buildingfex.png"
+              :alt="t('brand')"
+              class="auth-logo"
+              width="200"
+              height="48"
+              decoding="async"
+            />
+          </div>
+          <h1 class="auth-title auth-title--center">{{ t('auth.completeProfileTitle') }}</h1>
+          <p class="auth-subtitle">{{ t('auth.completeProfileHint') }}</p>
+
+          <form
+            class="auth-form auth-form--narrow"
+            :aria-label="t('auth.ariaCompleteProfile')"
+            @submit.prevent="onCompleteProfileSubmit"
+          >
+            <div class="auth-field">
+              <input
+                v-model="regName"
+                class="auth-input"
+                type="text"
+                name="name"
+                autocomplete="name"
+                :disabled="completeProfileLoading"
+                required
+                :aria-label="t('auth.fullNamePlaceholder')"
+                :placeholder="t('auth.fullNamePlaceholder')"
+              />
+            </div>
+            <div class="auth-field">
+              <input
+                v-model="regEmail"
+                class="auth-input"
+                type="email"
+                name="email"
+                autocomplete="email"
+                :disabled="completeProfileLoading"
+                required
+                :aria-label="t('auth.emailPlaceholder')"
+                :placeholder="t('auth.emailPlaceholder')"
+              />
+            </div>
+            <div class="auth-field">
+              <input
+                v-model="regDni"
+                class="auth-input"
+                type="text"
+                name="dni"
+                :disabled="completeProfileLoading"
+                :aria-label="t('auth.dniPlaceholder')"
+                :placeholder="t('auth.dniPlaceholder')"
+              />
+            </div>
+            <div class="auth-field">
+              <input
+                v-model="regCompany"
+                class="auth-input"
+                type="text"
+                name="company"
+                :disabled="completeProfileLoading"
+                :aria-label="t('auth.companyPlaceholder')"
+                :placeholder="t('auth.companyPlaceholder')"
+              />
+            </div>
+            <div class="auth-field">
+              <input
+                v-model="regRuc"
+                class="auth-input"
+                type="text"
+                name="ruc"
+                :disabled="completeProfileLoading"
+                :aria-label="t('auth.rucPlaceholder')"
+                :placeholder="t('auth.rucPlaceholder')"
+              />
+            </div>
+            <div class="auth-field">
+              <input
+                v-model="regAddress"
+                class="auth-input"
+                type="text"
+                name="address"
+                autocomplete="street-address"
+                :disabled="completeProfileLoading"
+                :aria-label="t('auth.addressPlaceholder')"
+                :placeholder="t('auth.addressPlaceholder')"
+              />
+            </div>
+            <p v-if="completeProfileError" class="auth-error" role="alert">{{ completeProfileError }}</p>
+            <Button
+              type="submit"
+              class="auth-submit"
+              :label="t('auth.completeProfileSubmit')"
+              :loading="completeProfileLoading"
+              :disabled="completeProfileLoading"
+            />
+          </form>
+        </div>
+
+        <div v-else-if="isAdminLogin" class="auth-card auth-card--centered">
           <div class="auth-brand">
             <img
               src="/logo-buildingfex.png"

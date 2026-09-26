@@ -2,8 +2,13 @@
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { appendAdminMessage, watchAdminChats } from '@/support/infrastructure/realtimeSupportDb.js'
+import { supportApi } from '@/support/infrastructure/supportApi.js'
 import { useSession, getActiveDataOwnerId } from '@/iam/application/sessionStore.js'
+import {
+  isDocumentVisible,
+  joinSupportOwner,
+  onSupportChatUpdated,
+} from '@/support/infrastructure/supportRealtime.js'
 
 const { t, locale } = useI18n()
 const { state: sessionState } = useSession()
@@ -15,8 +20,8 @@ const sending = ref(false)
 const loadingList = ref(true)
 const loadError = ref('')
 const messagesEl = ref(null)
+const lastListSync = ref('')
 
-const adminName = computed(() => sessionState.profile?.name ?? '')
 const ownerId = computed(() => getActiveDataOwnerId() || sessionState.profile?.id || '')
 const selected = computed(() => chats.value.find((row) => row.id === selectedId.value) || null)
 
@@ -51,32 +56,49 @@ function chatMeta(row) {
   return name
 }
 
-let stopChats = null
+let pollTimer = 0
+let stopHub = null
+let signalROk = false
 
-function bindChats() {
-  stopChats?.()
-  stopChats = null
-  chats.value = []
+function upsertChat(chat) {
+  if (!chat?.id) return
+  const idx = chats.value.findIndex((row) => row.id === chat.id)
+  if (idx >= 0) chats.value[idx] = chat
+  else chats.value = [chat, ...chats.value]
+  if (chat.updatedAt && (!lastListSync.value || chat.updatedAt > lastListSync.value)) {
+    lastListSync.value = chat.updatedAt
+  }
+}
+
+async function bindChats({ silent = false, incremental = false } = {}) {
   loadError.value = ''
   if (!ownerId.value) {
     loadingList.value = false
     loadError.value = t('supportAdmin.loadError')
+    chats.value = []
     return
   }
-  loadingList.value = true
-  stopChats = watchAdminChats(ownerId.value, (list, error) => {
-    loadingList.value = false
-    if (error) {
-      loadError.value = t('supportAdmin.loadError')
-      chats.value = []
-      return
+  if (!silent) loadingList.value = true
+  try {
+    const since = incremental && lastListSync.value ? lastListSync.value : undefined
+    const list = await supportApi.listChats('admin', { since })
+    if (incremental && since) {
+      for (const row of list) upsertChat(row)
+    } else {
+      chats.value = list
+      const newest = list.map((c) => c.updatedAt).filter(Boolean).sort().at(-1)
+      if (newest) lastListSync.value = newest
     }
-    loadError.value = ''
-    chats.value = list
-    if (selectedId.value && !list.some((row) => row.id === selectedId.value)) {
+    if (selectedId.value && !chats.value.some((row) => row.id === selectedId.value)) {
       selectedId.value = null
     }
-  })
+  } catch (e) {
+    console.error(e)
+    loadError.value = t('supportAdmin.loadError')
+    if (!incremental) chats.value = []
+  } finally {
+    loadingList.value = false
+  }
 }
 
 function selectChat(row) {
@@ -94,10 +116,51 @@ watch(
   () => scrollToBottom(),
 )
 
-watch(ownerId, () => bindChats(), { immediate: true })
+async function bindRealtime() {
+  stopHub?.()
+  stopHub = null
+  signalROk = false
+  if (!ownerId.value) return
+  const hub = await joinSupportOwner(ownerId.value)
+  if (!hub) return
+  signalROk = true
+  stopHub = onSupportChatUpdated((payload) => {
+    if (payload?.kind === 'admin') upsertChat({
+      ...payload,
+      topic: payload.topic || payload.title,
+      messages: payload.messages || [],
+    })
+  })
+}
+
+function startFallbackPolling() {
+  if (pollTimer) window.clearInterval(pollTimer)
+  pollTimer = window.setInterval(() => {
+    if (!isDocumentVisible() || signalROk) return
+    void bindChats({ silent: true, incremental: true })
+  }, 8000)
+}
+
+watch(ownerId, async () => {
+  await bindChats()
+  await bindRealtime()
+  startFallbackPolling()
+}, { immediate: true })
+
+function onVisibility() {
+  if (isDocumentVisible()) void bindChats({ silent: true, incremental: true })
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', onVisibility)
+}
 
 onUnmounted(() => {
-  stopChats?.()
+  if (pollTimer) window.clearInterval(pollTimer)
+  stopHub?.()
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', onVisibility)
+  }
 })
 
 async function sendReply() {
@@ -106,12 +169,10 @@ async function sendReply() {
   if (!id || !text || sending.value || !ownerId.value) return
   sending.value = true
   try {
-    await appendAdminMessage(ownerId.value, id, {
-      authorRole: 'admin',
-      body: text,
-      authorName: adminName.value,
-    })
+    const updated = await supportApi.postMessage(id, text, locale.value)
+    upsertChat(updated)
     replyText.value = ''
+    loadError.value = ''
   } catch (e) {
     console.error(e)
     loadError.value = t('supportAdmin.loadError')

@@ -2,7 +2,7 @@ import { apiClient } from '@/shared/infrastructure/api/apiClient.js'
 import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.js'
 import { withOwnerParams } from '@/shared/infrastructure/api/ownerQuery.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
-import { authApi, parseAuthResponse } from '@/iam/infrastructure/authApi.js'
+import { parseAuthResponse } from '@/iam/infrastructure/authApi.js'
 import {
   apiError,
   findResidentByCode,
@@ -14,6 +14,8 @@ import { getResidentLimitForActiveOwner, refreshSubscriptionFromApi } from '@/sh
 import { parseDepartmentNumber } from '@/shared/domain/departmentNumber.js'
 import { todayYmd } from '@/finances/domain/billingCycle.js'
 
+const USERS_BASE = '/api/v1/users'
+
 /**
  * Residents bounded-context API.
  *
@@ -24,7 +26,7 @@ import { todayYmd } from '@/finances/domain/billingCycle.js'
  */
 export const residentsApi = {
   async list() {
-    const { data } = await apiClient.get('/users', {
+    const { data } = await apiClient.get(USERS_BASE, {
       params: withOwnerParams({ role: 'resident' }),
     })
     return Array.isArray(data) ? data.map(publicResident) : []
@@ -81,7 +83,7 @@ export const residentsApi = {
       ownerAdminId,
     }
 
-    const { data: created } = await apiClient.post('/users', newResident)
+    const { data: created } = await apiClient.post(USERS_BASE, newResident)
     await refreshSubscriptionFromApi().catch(() => {})
     return publicResident(created)
   },
@@ -89,28 +91,37 @@ export const residentsApi = {
   async setBillFromNextMonth(id, billFromNextMonth) {
     const cleanId = String(id ?? '').trim()
     if (!cleanId) throw apiError('RESIDENT_NOT_FOUND')
-    const { data } = await apiClient.patch(`/users/${encodeURIComponent(cleanId)}`, {
+    const { data } = await apiClient.patch(`${USERS_BASE}/${encodeURIComponent(cleanId)}`, {
       billFromNextMonth: Boolean(billFromNextMonth),
     })
     return publicResident(data)
   },
 
-  async findByCode(code) {
-    const normalized = normalizeCode(code)
-    if (!normalized) {
+  /** Lookup público por invite token (128-bit). */
+  async findByInviteToken(token) {
+    const inviteToken = String(token ?? '').trim()
+    if (!inviteToken) {
       throw apiError('RESIDENT_NOT_FOUND')
     }
     try {
       const { data } = await apiClient.get('/api/v1/authentication/residents/invite', {
-        params: { code: normalized },
+        params: { token: inviteToken },
       })
       return publicResident(data)
     } catch (error) {
       if (error?.status === 404 || error?.code === 'RESIDENT_NOT_FOUND') {
         throw apiError('RESIDENT_NOT_FOUND')
       }
+      if (error?.code === 'INVITE_EXPIRED' || error?.code === 'INVITE_ALREADY_USED') {
+        throw apiError(error.code, error.payload?.message)
+      }
       throw error
     }
+  },
+
+  /** @deprecated Prefer findByInviteToken. */
+  async findByCode(code) {
+    return residentsApi.findByInviteToken(code)
   },
 
   async remove(id) {
@@ -118,15 +129,10 @@ export const residentsApi = {
     if (!cleanId) {
       throw apiError('RESIDENT_NOT_FOUND')
     }
-    await apiClient.delete(`/users/${encodeURIComponent(cleanId)}`)
+    await apiClient.delete(`${USERS_BASE}/${encodeURIComponent(cleanId)}`)
     return { id: cleanId }
   },
 
-  /**
-   * Returns counters of linked data that would be deleted in cascade.
-   * Useful to show a preview to the admin before confirming the delete.
-   * Errors per entity are silenced (count is 0) but reported via `errors`.
-   */
   async previewLinkedData(id) {
     const cleanId = String(id ?? '').trim()
     if (!cleanId) throw apiError('RESIDENT_NOT_FOUND')
@@ -144,16 +150,6 @@ export const residentsApi = {
     return { summary, errors }
   },
 
-  /**
-   * Cascade-delete a resident and every piece of data linked to them.
-   *
-   * The function tries to remove every related entity even if a previous
-   * step fails (so a transient error on one collection does not orphan the
-   * rest), and finally removes the user record itself. The returned
-   * `summary` reports how many items were deleted per entity, and the
-   * optional `errors` array surfaces any partial failures so the UI can
-   * decide what to do next.
-   */
   async removeCascade(id) {
     const cleanId = String(id ?? '').trim()
     if (!cleanId) throw apiError('RESIDENT_NOT_FOUND')
@@ -169,7 +165,7 @@ export const residentsApi = {
     }
 
     try {
-      await apiClient.delete(`/users/${encodeURIComponent(cleanId)}`)
+      await apiClient.delete(`${USERS_BASE}/${encodeURIComponent(cleanId)}`)
     } catch (error) {
       errors.push({ entity: 'user', error })
       throw apiError('RESIDENT_DELETE_FAILED')
@@ -178,48 +174,19 @@ export const residentsApi = {
     return { id: cleanId, summary, errors }
   },
 
-  async setCredentials({ code, email, password }) {
-    const cleanCode = normalizeCode(code)
-    const cleanEmail = normalizeEmail(email)
-    const cleanPassword = String(password ?? '')
-
-    if (!cleanCode || !cleanEmail || !cleanPassword) {
-      throw apiError('RESIDENT_FIELDS_REQUIRED')
-    }
-
-    try {
-      const { data } = await apiClient.post('/api/v1/authentication/residents/set-credentials', {
-        code: cleanCode,
-        email: cleanEmail,
-        password: cleanPassword,
-      })
-      return parseAuthResponse(data)
-    } catch (error) {
-      if (error?.code === 'RESIDENT_NOT_FOUND') {
-        throw apiError('RESIDENT_NOT_FOUND')
-      }
-      if (error?.code === 'EMAIL_ALREADY_EXISTS') {
-        throw apiError('EMAIL_ALREADY_EXISTS')
-      }
-      if (error?.code === 'INVALID_PASSWORD' || error?.code === 'EMAIL_NOT_FOUND') {
-        throw apiError(error.code, error.payload?.message)
-      }
-      throw error
-    }
-  },
-
-  async completeInviteWithGoogle({ code, email, name, googleSub, idToken }) {
-    const cleanCode = normalizeCode(code)
+  async completeInviteWithGoogle({ token, code, email, name, googleSub, idToken }) {
+    const inviteToken = String(token ?? code ?? '').trim()
     const cleanEmail = normalizeEmail(email)
     const cleanName = String(name ?? '').trim()
     const cleanSub = String(googleSub ?? '').trim()
 
-    if (!cleanCode || !cleanEmail) {
+    if (!inviteToken || !cleanEmail) {
       throw apiError('RESIDENT_FIELDS_REQUIRED')
     }
 
     const payload = {
-      code: cleanCode,
+      token: inviteToken,
+      code: inviteToken,
       email: cleanEmail,
       name: cleanName,
       googleSub: cleanSub,
@@ -234,18 +201,21 @@ export const residentsApi = {
       )
       return parseAuthResponse(data)
     } catch (error) {
-      if (error?.status === 404 || error?.code === 'HTTP_404') {
-        return residentsApi.setCredentials({
-          code: cleanCode,
-          email: cleanEmail,
-          password: cleanSub ? `google:${cleanSub}` : `google:${Date.now()}`,
-        })
-      }
       if (error?.code === 'RESIDENT_NOT_FOUND') {
         throw apiError('RESIDENT_NOT_FOUND')
       }
       if (error?.code === 'EMAIL_ALREADY_EXISTS') {
         throw apiError('EMAIL_ALREADY_EXISTS')
+      }
+      if (error?.code === 'INVALID_ID_TOKEN') {
+        throw apiError('INVALID_ID_TOKEN', error.payload?.message)
+      }
+      if (
+        error?.code === 'INVITE_EXPIRED' ||
+        error?.code === 'INVITE_ALREADY_USED' ||
+        error?.code === 'INVITE_EMAIL_MISMATCH'
+      ) {
+        throw apiError(error.code, error.payload?.message)
       }
       throw error
     }

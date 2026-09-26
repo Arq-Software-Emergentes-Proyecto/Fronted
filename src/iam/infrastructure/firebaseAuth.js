@@ -4,9 +4,8 @@ import {
   signInWithEmailAndPassword,
   updateProfile,
 } from 'firebase/auth'
-import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { apiError, normalizeEmail } from '@/shared/infrastructure/api/utils.js'
-import { getFirebaseAuth, getFirebaseDb } from './firebaseApp.js'
+import { getFirebaseAuth } from './firebaseApp.js'
 
 function mapAuthError(error) {
   if (
@@ -53,40 +52,14 @@ function mapAuthError(error) {
   return apiError('AUTH_ERROR', error?.message)
 }
 
-function adminUserFrom(uid, email, profile = {}) {
+/** Identidad minima desde Firebase Auth (sin perfil de negocio). */
+export function adminIdentityFrom(uid, email, name = '') {
   return {
     id: uid,
-    name: String(profile.name ?? '').trim(),
+    name: String(name ?? '').trim(),
     email,
     role: 'admin',
-    dni: String(profile.dni ?? '').trim(),
-    address: String(profile.address ?? '').trim(),
-    company: String(profile.company ?? '').trim(),
-    ruc: String(profile.ruc ?? '').trim(),
   }
-}
-
-async function saveAdminProfile(uid, profile) {
-  await setDoc(
-    doc(getFirebaseDb(), 'users', uid),
-    {
-      role: 'admin',
-      name: profile.name,
-      email: profile.email,
-      dni: profile.dni,
-      address: profile.address,
-      company: profile.company,
-      ruc: profile.ruc,
-      updatedAt: new Date().toISOString(),
-    },
-    { merge: true },
-  )
-}
-
-async function readAdminProfile(uid) {
-  const snap = await getDoc(doc(getFirebaseDb(), 'users', uid))
-  if (!snap.exists()) return null
-  return snap.data()
 }
 
 export async function isFirebaseEmailRegistered(email) {
@@ -100,6 +73,9 @@ export async function isFirebaseEmailRegistered(email) {
   }
 }
 
+/**
+ * Solo autenticacion. El perfil de negocio se guarda en BuildingFex.Api POST /profiles.
+ */
 export async function registerAdminWithFirebase(payload) {
   const email = normalizeEmail(payload.email)
   const password = String(payload.password ?? '')
@@ -113,25 +89,27 @@ export async function registerAdminWithFirebase(payload) {
     if (name) {
       await updateProfile(credential.user, { displayName: name })
     }
-    const user = adminUserFrom(credential.user.uid, email, {
-      name,
-      dni: payload.dni,
-      address: payload.address,
-      company: payload.company,
-      ruc: payload.ruc,
-    })
-    try {
-      await saveAdminProfile(credential.user.uid, user)
-    } catch {
-      // Auth succeeded even if Firestore rules/index are not ready yet.
-    }
     const token = await credential.user.getIdToken()
-    return { user, token }
+    return {
+      identity: adminIdentityFrom(credential.user.uid, email, name),
+      token,
+      profileDraft: {
+        name,
+        email,
+        dni: String(payload.dni ?? '').trim(),
+        address: String(payload.address ?? '').trim(),
+        company: String(payload.company ?? '').trim(),
+        ruc: String(payload.ruc ?? '').trim(),
+      },
+    }
   } catch (error) {
     throw mapAuthError(error)
   }
 }
 
+/**
+ * Solo autenticacion. El perfil se hidrata luego desde GET /profiles/me.
+ */
 export async function loginAdminWithFirebase({ email, password }) {
   const normalized = normalizeEmail(email)
   try {
@@ -141,42 +119,15 @@ export async function loginAdminWithFirebase({ email, password }) {
       String(password ?? ''),
     )
     const token = await credential.user.getIdToken()
-    let stored = null
-    try {
-      stored = await readAdminProfile(credential.user.uid)
-    } catch {
-      stored = null
+    return {
+      identity: adminIdentityFrom(
+        credential.user.uid,
+        credential.user.email || normalized,
+        credential.user.displayName || '',
+      ),
+      token,
     }
-    if (stored?.role === 'resident') {
-      throw apiError('RESIDENT_USE_GOOGLE')
-    }
-    const user = adminUserFrom(credential.user.uid, credential.user.email || normalized, {
-      name: stored?.name || credential.user.displayName || '',
-      dni: stored?.dni,
-      address: stored?.address,
-      company: stored?.company,
-      ruc: stored?.ruc,
-    })
-    if (!stored) {
-      try {
-        await saveAdminProfile(credential.user.uid, user)
-      } catch {
-        // ignore
-      }
-    }
-    return { user, token }
   } catch (error) {
     throw mapAuthError(error)
-  }
-}
-
-export async function getFirebaseAdminProfile(userId) {
-  if (!userId) return null
-  try {
-    const stored = await readAdminProfile(userId)
-    if (!stored) return null
-    return adminUserFrom(userId, stored.email, stored)
-  } catch {
-    return null
   }
 }

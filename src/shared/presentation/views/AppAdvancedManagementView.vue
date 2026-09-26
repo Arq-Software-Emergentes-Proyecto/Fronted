@@ -144,8 +144,13 @@ function generateResidentAccessLink(resident) {
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : ''
   const params = new URLSearchParams({
     invite: '1',
-    code: resident.code,
+    token: resident.inviteToken || '',
   })
+  if (!resident.inviteToken) {
+    // Fallback legacy: unit code (no sirve si el backend ya exige InviteToken)
+    params.set('code', resident.code || '')
+    params.delete('token')
+  }
   accessLinks[resident.id] = `${baseUrl}/login?${params.toString()}`
 }
 

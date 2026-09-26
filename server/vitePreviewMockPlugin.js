@@ -5,6 +5,7 @@ const DB_PATH = path.join(process.cwd(), 'server', '.local-mock-db.json')
 
 const API_PREFIXES = [
   '/api',
+  '/hubs',
   '/users',
   '/incidents',
   '/announcements',
@@ -20,10 +21,7 @@ const API_PREFIXES = [
   '/fixedPayoutRecipients',
   '/teamWorkers',
   '/serviceProviders',
-  '/importUploads',
-  '/importFolders',
   '/residentExtraCharges',
-  '/supportChats',
 ]
 
 function pathnameOf(req) {

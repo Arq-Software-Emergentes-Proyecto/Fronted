@@ -3,6 +3,7 @@ import { getAnalytics, isSupported } from 'firebase/analytics'
 import { getAuth } from 'firebase/auth'
 import { getDatabase } from 'firebase/database'
 import { getFirestore } from 'firebase/firestore'
+import { getStorage } from 'firebase/storage'
 
 const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'emergentes-36306'
 const databaseURL = normalizeDatabaseUrl(
@@ -56,6 +57,10 @@ export function getFirebaseAuth() {
 
 export function getFirebaseDb() {
   return getFirestore(getFirebaseApp())
+}
+
+export function getFirebaseStorage() {
+  return getStorage(getFirebaseApp())
 }
 
 let rtdb

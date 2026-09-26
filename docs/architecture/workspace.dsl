@@ -1,4 +1,4 @@
-workspace "BuildingFex" "Plataforma multi-tenant de gestión de condominios: cobros, áreas comunes, incidencias, comunicados, importaciones, suscripciones y soporte (IA + tiempo real) entre administración y residentes." {
+workspace "BuildingFex" "Plataforma multi-tenant de gestión de condominios: cobros, áreas comunes, incidencias, comunicados, importaciones, suscripciones y soporte (IA + SignalR) entre administración y residentes." {
 
     !identifiers hierarchical
 
@@ -8,182 +8,171 @@ workspace "BuildingFex" "Plataforma multi-tenant de gestión de condominios: cob
         }
 
         # ═══════════════════════════════════════════
-        # Personas
+        # Personas (solo estas tres)
         # ═══════════════════════════════════════════
-        visitor = person "Visitante" "Persona sin sesión que llega a login/registro o a la URL de acceso."
-        admin = person "Administrador" "Junta o administrador del edificio. Gestiona residentes, finanzas, espacios, incidencias, comunicados, importaciones, proveedores, equipo y ayuda a residentes."
-        resident = person "Residente" "Habitante de una unidad (departamento). Consulta cuotas, paga, reserva áreas comunes, reporta incidencias y usa el asistente de soporte."
-        guest = person "Invitado de reserva" "Persona externa que abre /invite/:token (QR) para ver una reserva y hacer check-in de invitados, sin cuenta."
+        admin = person "Administrador" "Junta/admin del edificio. Login/registro Firebase; gestiona residentes, finanzas, espacios, incidencias, comunicados, importaciones, equipo y ayuda a residentes."
+        resident = person "Residente" "Habitante de una unidad. Invite Google → idToken; cuotas, pagos, reservas, incidencias y soporte IA."
+        guest = person "Invitado de residente" "Externo invitado a una reserva. Abre /invite/:token (QR) sin cuenta ni Bearer."
 
         # ═══════════════════════════════════════════
         # Sistemas externos
         # ═══════════════════════════════════════════
         group "Google / Firebase" {
-            firebaseAuth = softwareSystem "Firebase Authentication" "Identidad: admin con email/contraseña; residente con Google Sign-In (popup). Emite ID tokens (JWT RS256) usados por la SPA como Bearer hacia BuildingFex.Api (admins)." "External"
-            firestore = softwareSystem "Cloud Firestore" "Perfil documental del administrador (users/{uid}: name, dni, company, ruc, address) tras registro/login Firebase." "External"
-            firebaseRtdb = softwareSystem "Firebase Realtime Database" "Chats en tiempo real: AI chats del residente y chats admin↔residente (escalamiento). Paths owners/{ownerId}/aiChats|adminChats." "External"
-            gemini = softwareSystem "Google Gemini API" "Modelo generativo (generateContent) para el asistente de soporte técnico del residente y títulos de chat. Invocado desde el browser con API key." "External"
+            firebaseAuth = softwareSystem "Firebase Authentication" "Identidad única: admin email/password; residente Google. idToken + custom claims (role, ownerAdminId). RevokeRefreshTokens al dar de baja." "External"
+            firebaseStorage = softwareSystem "Firebase Storage" "Objetos de importación. SPA PUT con URL firmada V4; API firma y confirma con getMetadata." "External"
+            gemini = softwareSystem "Google Gemini API" "Embeddings (RAG import) y generateContent (soporte). Solo desde BuildingFex.Api." "External"
         }
 
-        mercadoPago = softwareSystem "Mercado Pago" "Checkout Pro: (1) suscripción de planes BuildingFex del admin, (2) pago de cuotas/mantenimiento del residente. Preferencias, init_point y webhooks." "External"
+        mercadoPago = softwareSystem "Mercado Pago" "Checkout Pro: suscripción admin y cuotas residente. Preferencias, init_point, webhooks." "External"
 
         # ═══════════════════════════════════════════
         # Sistema BuildingFex
         # ═══════════════════════════════════════════
-        buildingFex = softwareSystem "BuildingFex" "Solución web multi-tenant para la operación de condominios. Núcleo de negocio en BuildingFex.Api (MySQL); identidad y chats en Firebase; pagos en Mercado Pago; IA de soporte en Gemini." {
+        buildingFex = softwareSystem "BuildingFex" "Web multi-tenant. Dominio en BuildingFex.Api + MySQL; identidad Firebase; archivos Storage; pagos MP; IA Gemini en servidor." {
 
-            # —— Contenedores ——
-            spa = container "BuildingFex Web SPA" "SPA Vue 3: paneles admin/residente, auth, invitación de huésped. En prod se sirve desde Vercel (same-origin) y reescribe rutas API hacia Railway. En dev: Vite + mock in-process o proxy." "Vue 3.5, Vite 6, Vue Router 4, PrimeVue 4, vue-i18n, Axios, Chart.js, Firebase JS SDK" {
+            spa = container "BuildingFex Web SPA" "Paneles admin/residente, auth, vista pública de invitado. Prod: Vercel + rewrites Railway. Dev: Vite mock-first o proxy." "Vue 3.5, Vite 6, Vue Router 4, PrimeVue 4, Axios, Firebase JS SDK" {
 
-                shellUi = component "App Shell & Router" "App.vue + AppShellView: navegación por rol (admin vs resident), guards de sesión (JWT/Firebase token en localStorage buildingfex.session), i18n es/en." "vue-router, AppShellView"
-                iamUi = component "IAM / Auth UI" "Login admin (Firebase email/password), registro admin (Firebase + seed financeSettings/kpi + POST /users), login residente Google, invite code → complete-google." "AuthView, sessionStore, firebaseAuth, googleIdentity, authApi, residentsApi"
-                dashboardUi = component "Dashboard UI" "Admin: KPI, deuda, incidencias, espacios. Residente: resumen financiero, comunicados, reservas." "AppDashboardView, AppResidentDashboardView"
-                residentsUi = component "Residentes & Gestión avanzada UI" "Alta de residentes (código/departamento, billFromNextMonth, límite de plan), espacios sociales CRUD." "AppAdvancedManagementView, residentsApi, spacesApi"
-                financesUi = component "Finanzas & Cobros UI" "Admin: recibos, settings, late fees, cargos extra, gastos de gestión, servicios compartidos (agua/luz), montos fijos. Residente: por pagar + historial + checkout MP." "AppFinanceView, AppResidentFinanceView, AppCollectionsManagementExpensesView, financesStore"
-                spacesUi = component "Espacios, Generación & Invitados UI" "Reservas admin/residente, solapes, lista de invitados (máx 5), QR/token guestInviteToken, GuestInviteView pública." "AppGenerationView, AppResidentGenerationView, AppResidentServicesView, GuestInviteView, reservationsApi"
-                incidentsUi = component "Incidencias & Proveedores UI" "Tablero open/in-progress/resolved; catálogo serviceProviders (plomería, etc.)." "AppIncidentsView, AppResidentIncidentsView, incidentsApi, serviceProvidersApi"
-                informationUi = component "Información / Comunicados UI" "Publicación y lectura de announcements (prioridad, vigencia)." "AppInformationView, announcementsApi"
-                importUi = component "Importaciones UI" "Carpetas (importFolders, home folder) y uploads con dataUrl / folderId." "AppImportView, importFoldersApi, importUploadsApi"
-                supportUi = component "Soporte UI (IA + tiempo real)" "Residente: chat Gemini + persistencia RTDB. Escalamiento a adminChat. Admin: bandeja AppAdminResidentHelpView. FAQs locales. HTTP /supportChats legacy (casi no usado)." "AppResidentSupportView, AppAdminResidentHelpView, realtimeSupportDb, geminiApi"
-                settingsUi = component "Ajustes & Suscripción UI" "Perfil, planes free/essential/standard/scale, checkout/confirm de suscripción vía API + fallback /mp." "AppSettingsView, subscriptionApi"
-                teamUi = component "Equipo UI" "CRUD teamWorkers (ruta /app/team; no siempre en sidebar)." "AppTeamView, teamWorkersApi"
-                apiClientComp = component "API Client & Multi-tenancy" "Axios apiClient: Bearer token, timeout, error.code; withOwnerParams(ownerAdminId) desde sesión admin.id o resident.ownerAdminId." "apiClient.js, ownerQuery, envConfig"
-                mpClientComp = component "Mercado Pago Client" "Intenta /api/v1/payments|subscription en API; fallback fetch /mp/checkout y /mp/payment (edge Vercel)." "mercadoPagoCheckoutClient, mercadoPago*"
-                geminiClientComp = component "Gemini Client" "Lista modelos + generateContent hacia generativelanguage.googleapis.com." "geminiApi.js"
-                mockDevComp = component "Vite Preview Mock (solo DEV)" "Middleware in-process que emula Compat + /api/v1 auth/subscription/payments sobre .local-mock-db.json; intercepta antes del proxy Railway." "previewMockApiPlugin, mockAdapter"
+                shellUi = component "App Shell & Router" "Nav por rol, guards de sesión (Firebase idToken en localStorage), i18n es/en. App.vue, AppShellView." "Vue 3 SFC"
+                iamUi = component "IAM / Auth UI" "Admin: Firebase → profiles. Residente: invite 128-bit → Google → complete-google → getIdToken(true). AuthView, sessionStore, authApi." "Vue 3 SFC"
+                dashboardUi = component "Dashboard UI" "Admin: KPI, deuda, incidencias, espacios. Residente: resumen financiero, comunicados, reservas. AppDashboardView, AppResidentDashboardView." "Vue 3 SFC"
+                residentsUi = component "Residentes & Gestión avanzada UI" "Alta residentes, InviteToken, espacios CRUD autenticado. AppAdvancedManagementView, residentsApi, spacesApi." "Vue 3 SFC"
+                financesUi = component "Finanzas & Cobros UI" "Admin: recibos, settings, late fees. Residente: por pagar + historial. AppFinanceView, AppResidentFinanceView." "Vue 3 SFC"
+                spacesUi = component "Espacios & Generación UI" "Reservas autenticadas admin/residente, solapes, lista invitados (máx 5), genera QR. AppGenerationView, reservationsApi." "Vue 3 SFC"
+                guestInviteUi = component "Invitación pública de reserva" "Ruta AllowAnonymous /invite/:token. Sin shell ni Bearer. GuestInviteView." "Vue 3 SFC"
+                incidentsUi = component "Incidencias & Proveedores UI" "Tablero open/in-progress/resolved; catálogo serviceProviders. AppIncidentsView, incidentsApi." "Vue 3 SFC"
+                informationUi = component "Información / Comunicados UI" "Announcements (prioridad, vigencia). AppInformationView, announcementsApi." "Vue 3 SFC"
+                importUi = component "Importaciones UI" "Carpetas + signed-url → PUT Storage → confirm. AppImportView, importUploadsApi." "Vue 3 SFC"
+                supportUi = component "Soporte UI (IA + SignalR)" "Chat IA REST + hub /hubs/support. Sin Gemini en browser. AppResidentSupportView, AppAdminResidentHelpView, supportApi." "Vue 3 SFC"
+                settingsUi = component "Ajustes & Suscripción UI" "Perfil /api/v1/profiles; planes free/essential/standard/scale. AppSettingsView, subscriptionApi." "Vue 3 SFC"
+                teamUi = component "Equipo UI" "CRUD teamWorkers. AppTeamView, teamWorkersApi." "Vue 3 SFC"
+                apiClientComp = component "API Client & Multi-tenancy" "Axios Bearer Firebase idToken; withOwnerParams(ownerAdminId). apiClient.js, ownerQuery." "Axios"
+                mpClientComp = component "Mercado Pago Client" "Intenta /api/v1/payments|subscription; si falla → fetch /mp/* (Edge). Dual path real en mercadoPagoService / subscriptionApi." "Fetch / Axios"
+                mockDevComp = component "Vite Preview Mock (solo DEV)" "Emula Compat + /api/v1 sobre .local-mock-db.json (mock-first). previewMockApiPlugin." "Vite plugin"
             }
 
-            mpEdge = container "Mercado Pago Edge" "Serverless que crea preferencias Checkout Pro y consulta estado de pago sin exponer MP_ACCESS_TOKEN al browser. Prod: Vercel /api/mp (rewrite /mp/*). Dev: Vite plugin." "Node.js — Vercel Serverless / Vite plugin"
+            # Dual path real: API (.NET SDK) y Edge (Vercel/Vite) ambos tienen MP_ACCESS_TOKEN.
+            mpEdge = container "Mercado Pago Edge" "Serverless checkout/consulta. Prod: Vercel /api/mp. Dev: Vite plugin. Camino 2 si falla el checkout de la API." "Node.js — Vercel Serverless / Vite plugin"
 
-            api = container "BuildingFex.Api" "API REST modular monolith (.NET 10). Dual surface: /api/v1 (auth, subscription, payments, KPI) + Compat flat estilo json-server (/users, /incidents, …). Auth: App JWT HS256 y/o Firebase ID token. Tenancy por ownerAdminId. SchemaUpgrade + EnsureCreated + seed db.json." "ASP.NET Core 10, EF Core, MySQL, JWT, BCrypt, MercadoPago SDK, Swagger" {
+            api = container "BuildingFex.Api" "Modular monolith. Auth Firebase Bearer + claims. /api/v1 + Compat. Workers RAG + orphan. SignalR SupportHub. Camino 1 de checkout MP." "ASP.NET Core 10, EF Core, MySQL, Firebase Admin, MercadoPago SDK" {
 
-                sharedKernel = component "Shared Kernel" "AppDbContext, UnitOfWork, BaseRepository, Result pattern, RailwayHosting, SchemaUpgrade (ALTER/CREATE IF NOT EXISTS), snake_case naming, /health." "Shared/"
-                authMod = component "IAM — Authentication" "sign-in, register-admin, sign-in-google, residents/invite, complete-google, set-credentials. Emite JWT (sub=ExternalId, role, ownerAdminId). Valida Firebase Bearer para admins." "AuthenticationController, UserCommandService, TokenService, DualJwt"
-                usersMod = component "IAM — Users & Residents" "Compat /users: list/filter, create resident (plan limit), upsert Firebase admin, PATCH billFromNextMonth, delete. Campos googleSub, authProvider, hasCredentials." "UsersCompatController, User aggregate"
-                subscriptionMod = component "Subscriptions & Plans" "GET/PATCH plan; checkout/confirm Mercado Pago. Planes free(9)/essential(15)/standard(40)/scale(80). Enforce límites al crear residente." "SubscriptionController, SubscriptionPlans"
-                paymentsMod = component "Payments (Mercado Pago)" "preference, checkout, confirm, process, webhook de cuotas de mantenimiento. Reconcilia receipts/fees." "MercadoPagoController, MercadoPagoService"
-                financesMod = component "Finances Compat" "receipts, fees, payments history, financeSettings, kpi (computed), adminManagementExpenses, sharedUtilityServices, fixedPayoutRecipients, residentExtraCharges + DELETEs." "Finances/* Compat controllers"
-                spacesMod = component "Social Spaces & Reservations" "CRUD socialSpaces; reservations con overlap; GET público por guestInviteToken (AllowAnonymous)." "SocialSpacesCompat, ReservationsCompat"
-                incidentsMod = component "Incidents & Service Providers" "CRUD incidents (PUT update); CRUD serviceProviders." "IncidentsCompat, ServiceProvidersCompat"
-                announcementsMod = component "Information / Announcements" "CRUD announcements por ownerAdminId." "AnnouncementsCompatController"
-                importMod = component "Import Documents" "importFolders + importUploads (PATCH fileName/folderId, dataUrl LONGTEXT)." "ImportFoldersCompat, ImportUploadsCompat"
-                teamMod = component "Team Workers" "CRUD ligero teamWorkers (name, phone, dni, salary, photoUrl)." "TeamWorkersCompatController"
-                supportLegacyMod = component "Support Chats (legacy)" "CRUD /supportChats en MySQL (messages JSON). La UI productiva usa Firebase RTDB + Gemini; este módulo queda por compatibilidad." "SupportChatsCompatController"
+                sharedKernel = component "Shared Kernel" "AppDbContext, UnitOfWork, Result, RailwayHosting, SchemaUpgrade, snake_case, /health." "ASP.NET Core / EF Core"
+                authMod = component "IAM — Authentication" "Invite 128-bit, complete-google, sign-in-google. SetCustomUserClaims. Sin App JWT." "ASP.NET Core"
+                usersMod = component "IAM — Users & Residents" "/api/v1/users: CRUD residentes, tenancy por claims, delete+revoke. InviteToken. Plan solo en admin." "ASP.NET Core"
+                profilesMod = component "Profiles" "/api/v1/profiles: name, dni, company, ruc, address. First-user-wins admin." "ASP.NET Core"
+                subscriptionMod = component "Subscriptions & Plans" "GET/PATCH plan; checkout/confirm MP. Límites 9/15/40/80." "ASP.NET Core"
+                paymentsMod = component "Payments (Mercado Pago)" "preference, checkout, confirm, webhook cuotas. Reconcilia receipts/fees." "ASP.NET Core"
+                financesMod = component "Finances Compat" "receipts, fees, financeSettings, kpi, expenses, utilities, extras, payouts." "ASP.NET Core"
+                spacesMod = component "Social Spaces & Reservations" "socialSpaces; reservations + overlap; GET público guestInviteToken AllowAnonymous." "ASP.NET Core"
+                incidentsMod = component "Incidents & Service Providers" "CRUD incidents; CRUD serviceProviders." "ASP.NET Core"
+                announcementsMod = component "Information / Announcements" "CRUD announcements por ownerAdminId." "ASP.NET Core"
+                importMod = component "Import Documents" "signed-url V4 + confirm getMetadata; pending_upload; orphan cleanup; RAG index worker." "ASP.NET Core"
+                teamMod = component "Team Workers" "CRUD teamWorkers." "ASP.NET Core"
+                supportMod = component "Support (IA + SignalR)" "/api/v1/support + SupportHub. Gemini en servidor. RAG. Escalado = 2da fila admin ligada." "ASP.NET Core"
             }
 
-            database = container "MySQL Database" "Persistencia transaccional: users (admin/resident + subscription), finances, social_spaces/reservations, incidents, announcements, import_*, team_workers, service_providers, resident_extra_charges, support_chats (legacy)." "MySQL 8.x (Railway managed / Docker local)" {
+            database = container "MySQL Database" "users, profiles, finances, social_spaces/reservations, incidents, announcements, import_*, ai_context_chunks, support_chats/messages, team_workers." "MySQL 8.x" {
                 tags "Database"
             }
         }
 
-        # ═══════════════════════════════════════════
-        # Relaciones: Personas → Sistema / SPA
-        # ═══════════════════════════════════════════
-        visitor -> buildingFex "Accede a login/registro" "HTTPS"
-        visitor -> buildingFex.spa "Abre /login o /register" "HTTPS"
-
-        admin -> buildingFex "Opera el condominio" "HTTPS"
-        admin -> buildingFex.spa "Usa /app/* (panel admin)" "HTTPS"
-
-        resident -> buildingFex "Usa portal de unidad" "HTTPS"
-        resident -> buildingFex.spa "Usa /app/resident/*" "HTTPS"
-
-        guest -> buildingFex "Consulta invitación de reserva" "HTTPS"
+        # Personas → contenedor SPA (Structurizr infiere → software system)
+        admin -> buildingFex.spa "Login/registro y /app/*" "HTTPS"
+        resident -> buildingFex.spa "Invite/Google y /app/resident/*" "HTTPS"
         guest -> buildingFex.spa "Abre /invite/:token (sin login)" "HTTPS"
 
-        # ═══════════════════════════════════════════
-        # Relaciones: Contenedores
-        # ═══════════════════════════════════════════
-        buildingFex.spa -> buildingFex.api "REST JSON multi-tenant (Bearer App JWT o Firebase ID token)" "HTTPS"
-        buildingFex.spa -> firebaseAuth "Login admin email/password; Google Sign-In residente" "HTTPS"
-        buildingFex.spa -> firestore "Lee/escribe perfil admin users/{uid}" "HTTPS"
-        buildingFex.spa -> firebaseRtdb "Chats soporte en tiempo real (aiChats, adminChats)" "WSS/HTTPS"
-        buildingFex.spa -> gemini "generateContent del asistente de soporte" "HTTPS"
-        buildingFex.spa -> buildingFex.mpEdge "Fallback checkout/consulta pago /mp/*" "HTTPS"
+        # Contenedores
+        buildingFex.spa -> buildingFex.api "REST + SignalR (Bearer Firebase idToken)" "HTTPS / WSS"
+        buildingFex.spa -> firebaseAuth "signIn / createUser / Google popup / getIdToken" "HTTPS"
+        buildingFex.spa -> firebaseStorage "PUT objeto con URL firmada" "HTTPS"
+        buildingFex.spa -> buildingFex.mpEdge "2º camino: /mp/checkout si falla API" "HTTPS"
 
-        buildingFex.mpEdge -> mercadoPago "Crea preferencias y consulta payments" "HTTPS"
+        buildingFex.mpEdge -> mercadoPago "Preferencias y payments (token en Edge)" "HTTPS"
 
-        buildingFex.api -> buildingFex.database "EF Core (EnsureCreated + SchemaUpgrade + seed)" "SQL/TCP"
-        buildingFex.api -> mercadoPago "Checkout/confirm suscripción y cuotas + webhook" "HTTPS"
-        buildingFex.api -> firebaseAuth "Valida ID tokens Firebase (Authority securetoken.google.com/{projectId})" "HTTPS JWKS"
+        buildingFex.api -> buildingFex.database "EF Core + SchemaUpgrade" "SQL/TCP"
+        buildingFex.api -> mercadoPago "1º camino: checkout/confirm + webhook (token en API)" "HTTPS"
+        buildingFex.api -> firebaseAuth "JWKS + Admin SDK (claims, revoke)" "HTTPS"
+        buildingFex.api -> firebaseStorage "Firma V4 + getObject/getMetadata/delete" "HTTPS"
+        buildingFex.api -> gemini "generateContent + embeddings" "HTTPS"
 
-        # ═══════════════════════════════════════════
-        # Componentes SPA — navegación y datos
-        # ═══════════════════════════════════════════
-        admin -> buildingFex.spa.shellUi "Navega módulos admin"
-        resident -> buildingFex.spa.shellUi "Navega módulos residente"
-        guest -> buildingFex.spa.spacesUi "GuestInviteView"
-        visitor -> buildingFex.spa.iamUi "Login / registro"
+        # Componentes SPA — personas
+        admin -> buildingFex.spa.shellUi "Navega admin"
+        admin -> buildingFex.spa.iamUi "Login / registro"
+        resident -> buildingFex.spa.shellUi "Navega residente"
+        resident -> buildingFex.spa.iamUi "Invite / Google login"
+        guest -> buildingFex.spa.guestInviteUi "GuestInviteView (sin shell)"
 
-        buildingFex.spa.shellUi -> buildingFex.spa.dashboardUi "Enruta dashboard"
-        buildingFex.spa.shellUi -> buildingFex.spa.residentsUi "Enruta gestión avanzada"
-        buildingFex.spa.shellUi -> buildingFex.spa.financesUi "Enruta finanzas / cobros"
-        buildingFex.spa.shellUi -> buildingFex.spa.spacesUi "Enruta generación / servicios"
-        buildingFex.spa.shellUi -> buildingFex.spa.incidentsUi "Enruta incidencias"
-        buildingFex.spa.shellUi -> buildingFex.spa.informationUi "Enruta información"
-        buildingFex.spa.shellUi -> buildingFex.spa.importUi "Enruta import"
-        buildingFex.spa.shellUi -> buildingFex.spa.supportUi "Enruta soporte / ayuda residente"
-        buildingFex.spa.shellUi -> buildingFex.spa.settingsUi "Enruta ajustes"
-        buildingFex.spa.shellUi -> buildingFex.spa.teamUi "Enruta equipo (opcional)"
-        buildingFex.spa.shellUi -> buildingFex.spa.iamUi "Redirect si sesión inválida"
+        buildingFex.spa.shellUi -> buildingFex.spa.dashboardUi "Dashboard"
+        buildingFex.spa.shellUi -> buildingFex.spa.residentsUi "Gestión avanzada"
+        buildingFex.spa.shellUi -> buildingFex.spa.financesUi "Finanzas"
+        buildingFex.spa.shellUi -> buildingFex.spa.spacesUi "Espacios autenticados"
+        buildingFex.spa.shellUi -> buildingFex.spa.incidentsUi "Incidencias"
+        buildingFex.spa.shellUi -> buildingFex.spa.informationUi "Información"
+        buildingFex.spa.shellUi -> buildingFex.spa.importUi "Import"
+        buildingFex.spa.shellUi -> buildingFex.spa.supportUi "Soporte"
+        buildingFex.spa.shellUi -> buildingFex.spa.settingsUi "Ajustes"
+        buildingFex.spa.shellUi -> buildingFex.spa.teamUi "Equipo"
+        buildingFex.spa.shellUi -> buildingFex.spa.iamUi "Sesión inválida → login"
+        # guestInviteUi NO cuelga del shell (ruta pública)
 
-        buildingFex.spa.iamUi -> firebaseAuth "createUser / signIn / Google popup" "HTTPS"
-        buildingFex.spa.iamUi -> firestore "Perfil admin" "HTTPS"
-        buildingFex.spa.iamUi -> buildingFex.spa.apiClientComp "sign-in-google, complete-google, POST /users, seed settings"
+        buildingFex.spa.spacesUi -> buildingFex.spa.guestInviteUi "Genera URL/QR /invite/:token"
 
-        buildingFex.spa.dashboardUi -> buildingFex.spa.apiClientComp "KPI, incidents, spaces, announcements"
-        buildingFex.spa.residentsUi -> buildingFex.spa.apiClientComp "/users, /socialSpaces"
-        buildingFex.spa.financesUi -> buildingFex.spa.apiClientComp "receipts, fees, settings, extras, expenses, utilities, payouts"
-        buildingFex.spa.financesUi -> buildingFex.spa.mpClientComp "Pago de cuotas"
-        buildingFex.spa.spacesUi -> buildingFex.spa.apiClientComp "/socialSpaces, /reservations (+ guest token)"
-        buildingFex.spa.incidentsUi -> buildingFex.spa.apiClientComp "/incidents, /serviceProviders"
-        buildingFex.spa.informationUi -> buildingFex.spa.apiClientComp "/announcements"
-        buildingFex.spa.importUi -> buildingFex.spa.apiClientComp "/importFolders, /importUploads"
-        buildingFex.spa.teamUi -> buildingFex.spa.apiClientComp "/teamWorkers"
-        buildingFex.spa.settingsUi -> buildingFex.spa.apiClientComp "/api/v1/subscription*"
-        buildingFex.spa.settingsUi -> buildingFex.spa.mpClientComp "Checkout de plan"
+        buildingFex.spa.iamUi -> firebaseAuth "Auth SDK" "HTTPS"
+        buildingFex.spa.iamUi -> buildingFex.spa.apiClientComp "invite, complete-google, profiles, users"
 
-        buildingFex.spa.supportUi -> firebaseRtdb "watch/append aiChats y adminChats" "WSS"
-        buildingFex.spa.supportUi -> buildingFex.spa.geminiClientComp "Respuestas IA"
-        buildingFex.spa.geminiClientComp -> gemini "Generative Language API" "HTTPS"
+        buildingFex.spa.dashboardUi -> buildingFex.spa.apiClientComp "KPI, incidents, spaces"
+        buildingFex.spa.residentsUi -> buildingFex.spa.apiClientComp "/api/v1/users, socialSpaces"
+        buildingFex.spa.financesUi -> buildingFex.spa.apiClientComp "receipts, fees, settings"
+        buildingFex.spa.financesUi -> buildingFex.spa.mpClientComp "Pago cuotas (API→Edge)"
+        buildingFex.spa.spacesUi -> buildingFex.spa.apiClientComp "socialSpaces, reservations (auth)"
+        buildingFex.spa.guestInviteUi -> buildingFex.spa.apiClientComp "GET reservations?guestInviteToken= (anon)"
+        buildingFex.spa.incidentsUi -> buildingFex.spa.apiClientComp "incidents, serviceProviders"
+        buildingFex.spa.informationUi -> buildingFex.spa.apiClientComp "announcements"
+        buildingFex.spa.importUi -> buildingFex.spa.apiClientComp "signed-url + confirm"
+        buildingFex.spa.importUi -> firebaseStorage "PUT firmado" "HTTPS"
+        buildingFex.spa.teamUi -> buildingFex.spa.apiClientComp "teamWorkers"
+        buildingFex.spa.settingsUi -> buildingFex.spa.apiClientComp "profiles + subscription"
+        buildingFex.spa.settingsUi -> buildingFex.spa.mpClientComp "Checkout plan (API→Edge)"
+        buildingFex.spa.supportUi -> buildingFex.spa.apiClientComp "REST support + SignalR"
 
-        buildingFex.spa.apiClientComp -> buildingFex.api "Compat + /api/v1" "HTTPS/JSON"
-        buildingFex.spa.mpClientComp -> buildingFex.mpEdge "/mp/checkout, /mp/payment" "HTTPS"
-        buildingFex.spa.mpClientComp -> buildingFex.api "/api/v1/payments|subscription" "HTTPS/JSON"
+        buildingFex.spa.apiClientComp -> buildingFex.api "Compat + /api/v1 + /hubs/support" "HTTPS/WSS"
+        buildingFex.spa.mpClientComp -> buildingFex.api "1º /api/v1/payments|subscription" "HTTPS"
+        buildingFex.spa.mpClientComp -> buildingFex.mpEdge "2º /mp/* si API falla" "HTTPS"
+        buildingFex.spa.mockDevComp -> buildingFex.spa.apiClientComp "DEV mock-first"
 
-        buildingFex.spa.mockDevComp -> buildingFex.spa.apiClientComp "En DEV intercepta mismas rutas (mock-first)"
+        # Componentes API
+        buildingFex.spa.apiClientComp -> buildingFex.api.authMod "Auth + invites"
+        buildingFex.spa.apiClientComp -> buildingFex.api.usersMod "/api/v1/users"
+        buildingFex.spa.apiClientComp -> buildingFex.api.profilesMod "/api/v1/profiles"
+        buildingFex.spa.apiClientComp -> buildingFex.api.subscriptionMod "subscription"
+        buildingFex.spa.apiClientComp -> buildingFex.api.paymentsMod "payments"
+        buildingFex.spa.apiClientComp -> buildingFex.api.financesMod "finanzas"
+        buildingFex.spa.apiClientComp -> buildingFex.api.spacesMod "espacios + guest token"
+        buildingFex.spa.apiClientComp -> buildingFex.api.incidentsMod "incidencias"
+        buildingFex.spa.apiClientComp -> buildingFex.api.announcementsMod "comunicados"
+        buildingFex.spa.apiClientComp -> buildingFex.api.importMod "import"
+        buildingFex.spa.apiClientComp -> buildingFex.api.teamMod "equipo"
+        buildingFex.spa.apiClientComp -> buildingFex.api.supportMod "support + hub"
 
-        # ═══════════════════════════════════════════
-        # Componentes API — consumo y persistencia
-        # ═══════════════════════════════════════════
-        buildingFex.spa.apiClientComp -> buildingFex.api.authMod "Auth Google residente + invites"
-        buildingFex.spa.apiClientComp -> buildingFex.api.usersMod "/users"
-        buildingFex.spa.apiClientComp -> buildingFex.api.subscriptionMod "/api/v1/subscription"
-        buildingFex.spa.apiClientComp -> buildingFex.api.paymentsMod "/api/v1/payments"
-        buildingFex.spa.apiClientComp -> buildingFex.api.financesMod "Colecciones financieras"
-        buildingFex.spa.apiClientComp -> buildingFex.api.spacesMod "Espacios y reservas"
-        buildingFex.spa.apiClientComp -> buildingFex.api.incidentsMod "Incidencias y proveedores"
-        buildingFex.spa.apiClientComp -> buildingFex.api.announcementsMod "Comunicados"
-        buildingFex.spa.apiClientComp -> buildingFex.api.importMod "Import folders/uploads"
-        buildingFex.spa.apiClientComp -> buildingFex.api.teamMod "Team workers"
-        buildingFex.spa.apiClientComp -> buildingFex.api.supportLegacyMod "Legacy /supportChats (opcional)"
-
-        buildingFex.api.authMod -> buildingFex.api.sharedKernel "DbContext / Result / JWT infra"
+        buildingFex.api.authMod -> buildingFex.api.sharedKernel "Db / Result"
         buildingFex.api.usersMod -> buildingFex.api.sharedKernel "Persistencia"
+        buildingFex.api.profilesMod -> buildingFex.api.sharedKernel "Persistencia"
         buildingFex.api.financesMod -> buildingFex.api.sharedKernel "Persistencia"
         buildingFex.api.spacesMod -> buildingFex.api.sharedKernel "Persistencia"
         buildingFex.api.incidentsMod -> buildingFex.api.sharedKernel "Persistencia"
         buildingFex.api.announcementsMod -> buildingFex.api.sharedKernel "Persistencia"
         buildingFex.api.importMod -> buildingFex.api.sharedKernel "Persistencia"
         buildingFex.api.teamMod -> buildingFex.api.sharedKernel "Persistencia"
-        buildingFex.api.supportLegacyMod -> buildingFex.api.sharedKernel "Persistencia"
+        buildingFex.api.supportMod -> buildingFex.api.sharedKernel "Persistencia"
         buildingFex.api.subscriptionMod -> buildingFex.api.sharedKernel "Users + planes"
-        buildingFex.api.paymentsMod -> buildingFex.api.sharedKernel "Receipts/fees"
+        buildingFex.api.paymentsMod -> buildingFex.api.sharedKernel "Receipts"
 
         buildingFex.api.sharedKernel -> buildingFex.database "ORM / SQL"
-        buildingFex.api.authMod -> firebaseAuth "Validación JWKS Firebase"
-        buildingFex.api.subscriptionMod -> mercadoPago "Checkout plan"
-        buildingFex.api.paymentsMod -> mercadoPago "Checkout cuotas + webhook"
+        buildingFex.api.authMod -> firebaseAuth "JWKS + claims"
+        buildingFex.api.importMod -> firebaseStorage "Firma + metadata + delete"
+        buildingFex.api.importMod -> gemini "Embeddings RAG"
+        buildingFex.api.supportMod -> gemini "generateContent + retrieve RAG"
+        buildingFex.api.subscriptionMod -> mercadoPago "Checkout plan (token API)"
+        buildingFex.api.paymentsMod -> mercadoPago "Checkout cuotas + webhook (token API)"
 
         # ═══════════════════════════════════════════
         # Deployment: Production
@@ -193,16 +182,16 @@ workspace "BuildingFex" "Plataforma multi-tenant de gestión de condominios: cob
                 browserInstance = containerInstance buildingFex.spa
             }
 
-            deploymentNode "Vercel" "CDN + Static + Serverless. vercel.json reescribe /api/v1/* y rutas Compat flat hacia Railway; /mp/* → /api/mp; SPA fallback index.html." {
+            deploymentNode "Vercel" "CDN + Static + Serverless. Rewrites /api/v1/* y Compat → Railway; /mp/* → /api/mp." {
                 deploymentNode "Edge / Static Hosting" {
                     spaProd = containerInstance buildingFex.spa
                 }
-                deploymentNode "Serverless Functions" "Node.js" {
+                deploymentNode "Serverless Functions" "Node.js — 2º camino MP" {
                     mpProd = containerInstance buildingFex.mpEdge
                 }
             }
 
-            deploymentNode "Railway" "PaaS. Docker ASP.NET (PORT), healthcheck /health. Env: TokenSettings__Secret, Firebase__ProjectId, MYSQL_*, MercadoPago__*." {
+            deploymentNode "Railway" "PaaS. Docker ASP.NET. Env: Firebase, MYSQL_*, MercadoPago__* (1º camino), Gemini." {
                 deploymentNode "Web Service — BuildingFex.Api" "net10.0 / Docker" {
                     apiProd = containerInstance buildingFex.api
                 }
@@ -213,8 +202,7 @@ workspace "BuildingFex" "Plataforma multi-tenant de gestión de condominios: cob
 
             deploymentNode "Google Cloud / Firebase" {
                 firebaseAuthProd = softwareSystemInstance firebaseAuth
-                firestoreProd = softwareSystemInstance firestore
-                rtdbProd = softwareSystemInstance firebaseRtdb
+                storageProd = softwareSystemInstance firebaseStorage
                 geminiProd = softwareSystemInstance gemini
             }
 
@@ -224,70 +212,114 @@ workspace "BuildingFex" "Plataforma multi-tenant de gestión de condominios: cob
         }
 
         # ═══════════════════════════════════════════
-        # Deployment: Development
+        # Development (local) — excluyente de proxy
         # ═══════════════════════════════════════════
-        deploymentEnvironment "Development" {
+        deploymentEnvironment "Development (local)" {
             deploymentNode "Developer Machine" {
-                deploymentNode "Vite Dev Server" "localhost:5173 — previewMockApiPlugin (mock-first) + viteMercadoPagoPlugin; proxy opcional VITE_API_PROXY_TARGET" {
-                    spaDev = containerInstance buildingFex.spa
-                    mpDev = containerInstance buildingFex.mpEdge
+                deploymentNode "Vite Dev Server" "localhost:5173 — mock-first + viteMercadoPagoPlugin" {
+                    spaDevLocal = containerInstance buildingFex.spa
+                    mpDevLocal = containerInstance buildingFex.mpEdge
                 }
-                deploymentNode "Optional local API" "dotnet run :5001 + Docker MySQL 8.4 (docker-compose)" {
+                deploymentNode "Local API + MySQL" "dotnet run + Docker MySQL 8.4" {
                     apiDevLocal = containerInstance buildingFex.api
                     dbDevLocal = containerInstance buildingFex.database
                 }
             }
 
-            deploymentNode "Railway (API staging / shared)" "A menudo el proxy apunta aquí aunque el mock lo opaque" {
+            deploymentNode "External SaaS (dev keys)" {
+                firebaseAuthDevLocal = softwareSystemInstance firebaseAuth
+                storageDevLocal = softwareSystemInstance firebaseStorage
+                geminiDevLocal = softwareSystemInstance gemini
+                mpDevCloudLocal = softwareSystemInstance mercadoPago
+            }
+        }
+
+        # ═══════════════════════════════════════════
+        # Development (proxy) — excluyente de local API
+        # ═══════════════════════════════════════════
+        deploymentEnvironment "Development (proxy)" {
+            deploymentNode "Developer Machine" {
+                deploymentNode "Vite Dev Server" "localhost:5173 — proxy VITE_API_PROXY_TARGET (mock puede opacarlo)" {
+                    spaDevProxy = containerInstance buildingFex.spa
+                    mpDevProxy = containerInstance buildingFex.mpEdge
+                }
+            }
+
+            deploymentNode "Railway (API staging)" {
                 apiDevRemote = containerInstance buildingFex.api
                 dbDevRemote = containerInstance buildingFex.database
             }
 
             deploymentNode "External SaaS (dev keys)" {
-                firebaseAuthDev = softwareSystemInstance firebaseAuth
-                firestoreDev = softwareSystemInstance firestore
-                rtdbDev = softwareSystemInstance firebaseRtdb
-                geminiDev = softwareSystemInstance gemini
-                mpDevCloud = softwareSystemInstance mercadoPago
+                firebaseAuthDevProxy = softwareSystemInstance firebaseAuth
+                storageDevProxy = softwareSystemInstance firebaseStorage
+                geminiDevProxy = softwareSystemInstance gemini
+                mpDevCloudProxy = softwareSystemInstance mercadoPago
             }
         }
     }
 
     views {
+        # C0 / 4.3.1 — Landscape: todas las personas y sistemas (BuildingFex + externos)
+        systemLandscape "SystemLandscape" {
+            include *
+            autoLayout lr 500 380
+            description "4.3.1 System Landscape — Personas (Admin, Residente, Invitado) y sistemas: BuildingFex + Firebase Auth, Storage, Gemini, Mercado Pago."
+        }
+
         systemContext buildingFex "SystemContext" {
             include *
-            autoLayout lr
-            description "C1 — Contexto: Visitante, Administrador, Residente e Invitado interactúan con BuildingFex. Externos: Firebase Auth, Firestore, RTDB, Gemini y Mercado Pago. El núcleo de dominio es BuildingFex.Api + MySQL."
+            autoLayout lr 450 350
+            description "C1 — Administrador, Residente, Invitado de residente ↔ BuildingFex. Externos: Firebase Auth, Storage, Gemini, Mercado Pago."
         }
 
         container buildingFex "Containers" {
             include *
-            autoLayout lr
-            description "C2 — Contenedores: SPA Vue 3, Edge Mercado Pago, BuildingFex.Api (.NET), MySQL; más Firebase Auth/Firestore/RTDB, Gemini y Mercado Pago."
+            autoLayout lr 500 380
+            description "C2 — SPA, Edge MP (2º camino), API (1º camino MP), MySQL + Auth/Storage/Gemini/MP. Dual checkout documentado, no colapsado."
         }
 
-        component buildingFex.spa "SpaComponents" {
-            include *
-            autoLayout tb
-            description "C3 — SPA: shell por rol, bounded contexts de UI, apiClient multi-tenant, clientes MP/Gemini, mock DEV. Soporte = RTDB + Gemini (no MySQL)."
+        # C3 SPA partido (legibilidad) — ids jerárquicos: buildingFex.spa.*
+        component buildingFex.spa "SpaShellIam" {
+            include buildingFex.spa.shellUi buildingFex.spa.iamUi buildingFex.spa.apiClientComp buildingFex.spa.mockDevComp firebaseAuth admin resident
+            autoLayout lr 480 360
+            description "C3 SPA — Shell + IAM. Admin/residente autenticados; mock DEV."
+        }
+
+        component buildingFex.spa "SpaDomain" {
+            include buildingFex.spa.shellUi buildingFex.spa.dashboardUi buildingFex.spa.residentsUi buildingFex.spa.financesUi buildingFex.spa.spacesUi buildingFex.spa.guestInviteUi buildingFex.spa.incidentsUi buildingFex.spa.informationUi buildingFex.spa.settingsUi buildingFex.spa.teamUi buildingFex.spa.apiClientComp buildingFex.spa.mpClientComp guest
+            autoLayout lr 500 380
+            description "C3 SPA — Dominio autenticado + GuestInviteView pública (sin shell)."
+        }
+
+        component buildingFex.spa "SpaImportSupport" {
+            include buildingFex.spa.shellUi buildingFex.spa.importUi buildingFex.spa.supportUi buildingFex.spa.apiClientComp firebaseStorage
+            autoLayout lr 480 360
+            description "C3 SPA — Import (signed PUT Storage) + Soporte (REST/SignalR, sin Gemini en browser)."
         }
 
         component buildingFex.api "ApiComponents" {
             include *
-            autoLayout tb
-            description "C3 — API: Shared Kernel + IAM (JWT/Firebase) + Compat por dominio. SupportChats marcado legacy. Superficie /api/v1 + rutas flat."
+            autoLayout lr 500 400
+            description "C3 API — Shared Kernel + IAM Firebase-only + Profiles + dominio + Import firmado + Support SignalR/RAG."
         }
 
         deployment buildingFex "Production" "DeploymentProduction" {
             include *
-            autoLayout tb
-            description "C4 — Producción: Browser → Vercel (SPA + /api/mp, rewrites a Railway) → BuildingFex.Api + MySQL; Firebase suite; Mercado Pago; Gemini."
+            autoLayout tb 450 350
+            description "C4 Prod — Browser → Vercel (SPA + Edge MP) → Railway (API + MySQL) + Firebase + Gemini + MP."
         }
 
-        deployment buildingFex "Development" "DeploymentDevelopment" {
+        deployment buildingFex "Development (local)" "DeploymentDevLocal" {
             include *
-            autoLayout tb
-            description "C4 — Desarrollo: Vite mock-first (+ edge MP local), API local opcional o Railway, mismos SaaS con claves de desarrollo."
+            autoLayout tb 450 350
+            description "C4 Dev local — Vite + API/MySQL en máquina. Excluyente del modo proxy."
+        }
+
+        deployment buildingFex "Development (proxy)" "DeploymentDevProxy" {
+            include *
+            autoLayout tb 450 350
+            description "C4 Dev proxy — Vite → Railway staging. Excluyente del modo local."
         }
 
         styles {

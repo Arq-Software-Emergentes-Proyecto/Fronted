@@ -47,6 +47,8 @@ export function publicResident(user) {
     ownerAdminId: user.ownerAdminId ?? null,
     admissionDate: admissionMatch ? admissionMatch[1] : '',
     billFromNextMonth: Boolean(user.billFromNextMonth),
+    inviteToken: user.inviteToken ?? user.InviteToken ?? null,
+    inviteExpiresAt: user.inviteExpiresAt ?? user.InviteExpiresAt ?? null,
     hasCredentials:
       user.hasCredentials === true ||
       user.authProvider === 'google' ||
@@ -145,7 +147,7 @@ export function reservationsOverlap(a, b) {
 export async function findUserByEmail(email) {
   const normalized = normalizeEmail(email)
   if (!normalized) return null
-  const { data } = await apiClient.get('/users', { params: { email: normalized } })
+  const { data } = await apiClient.get('/api/v1/users', { params: { email: normalized } })
   return Array.isArray(data) && data.length ? data[0] : null
 }
 
@@ -161,6 +163,6 @@ export async function findResidentByCode(code, options = {}) {
     const ownerId = getActiveDataOwnerId()
     if (ownerId) params.ownerAdminId = ownerId
   }
-  const { data } = await apiClient.get('/users', { params })
+  const { data } = await apiClient.get('/api/v1/users', { params })
   return Array.isArray(data) && data.length ? data[0] : null
 }

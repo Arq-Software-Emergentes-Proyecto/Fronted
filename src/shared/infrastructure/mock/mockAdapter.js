@@ -94,6 +94,7 @@ function publicUser(user) {
 
 function authPayload(user) {
   const role = user.role === SessionRoles.RESIDENT ? SessionRoles.RESIDENT : SessionRoles.ADMIN
+  // Preview local: token mock. En API real useFirebaseIdToken=true y token=null.
   return {
     user: publicUser(user),
     token: createPreviewAccessToken({
@@ -101,6 +102,7 @@ function authPayload(user) {
       email: user.email,
       sub: user.id,
     }),
+    useFirebaseIdToken: false,
   }
 }
 
@@ -235,24 +237,39 @@ function handleV1(config, method, parts) {
   }
 
   if (route === 'authentication/residents/invite' && method === 'GET') {
-    const code = String(params.code ?? '').trim()
+    const inviteToken = String(params.token ?? params.code ?? '').trim()
     const user = listCollection('users').find(
-      (row) => row.role === 'resident' && String(row.code ?? '').trim() === code,
+      (row) =>
+        row.role === 'resident' &&
+        (String(row.inviteToken ?? '').trim() === inviteToken ||
+          String(row.code ?? '').trim() === inviteToken),
     )
     if (!user) fail(config, 404, 'RESIDENT_NOT_FOUND', 'Resident not found')
-    return ok(config, user)
+    if (user.inviteUsedAt) fail(config, 400, 'INVITE_ALREADY_USED', 'Invite already used')
+    return ok(config, {
+      name: user.name,
+      floor: user.floor,
+      code: user.code,
+      inviteExpiresAt: user.inviteExpiresAt ?? null,
+    })
   }
 
   if (route === 'authentication/residents/complete-google' && method === 'POST') {
-    const code = String(body.code ?? '').trim()
+    const inviteToken = String(body.token ?? body.code ?? '').trim()
     const email = String(body.email ?? '').trim().toLowerCase()
     const googleSub = String(body.googleSub ?? '').trim()
     const name = String(body.name ?? '').trim()
     const user = listCollection('users').find(
-      (row) => row.role === 'resident' && String(row.code ?? '').trim() === code,
+      (row) =>
+        row.role === 'resident' &&
+        (String(row.inviteToken ?? '').trim() === inviteToken ||
+          String(row.code ?? '').trim() === inviteToken),
     )
     if (!user) fail(config, 404, 'RESIDENT_NOT_FOUND', 'Resident not found')
     if (!email) fail(config, 400, 'RESIDENT_FIELDS_REQUIRED', 'Google email is required')
+    if (user.inviteEmail && String(user.inviteEmail).toLowerCase() !== email) {
+      fail(config, 400, 'INVITE_EMAIL_MISMATCH', 'Google email does not match invitation')
+    }
     const taken = listCollection('users').some(
       (row) => row.id !== user.id && String(row.email ?? '').trim().toLowerCase() === email,
     )
@@ -263,6 +280,7 @@ function handleV1(config, method, parts) {
       authProvider: 'google',
       googleSub,
       hasCredentials: true,
+      inviteUsedAt: new Date().toISOString(),
     })
     return ok(config, authPayload(updated))
   }
@@ -385,6 +403,177 @@ function handleV1(config, method, parts) {
     }
 
     return ok(config, { reconciled: itemsPaid > 0, itemsPaid, paidAt })
+  }
+
+  if (route === 'profiles' && method === 'POST') {
+    const ownerId =
+      String(body.id ?? '').trim() ||
+      getActiveDataOwnerId() ||
+      MOCK_OWNER_ID
+    const profile = {
+      id: ownerId,
+      name: String(body.name ?? '').trim() || 'Admin',
+      email: String(body.email ?? '').trim().toLowerCase(),
+      role: 'admin',
+      dni: String(body.dni ?? '').trim(),
+      address: String(body.address ?? '').trim(),
+      company: String(body.company ?? '').trim(),
+      ruc: String(body.ruc ?? '').trim(),
+    }
+    const existing = listCollection('profiles').find((row) => String(row.id) === ownerId)
+    if (existing) {
+      return ok(config, patchRow('profiles', ownerId, profile))
+    }
+    return ok(config, insertRow('profiles', { ...profile, id: ownerId }), 201)
+  }
+
+  if (route === 'profiles/me' && method === 'GET') {
+    const ownerId = getActiveDataOwnerId() || MOCK_OWNER_ID
+    const profile =
+      listCollection('profiles').find((row) => String(row.id) === ownerId) ||
+      listCollection('users').find(
+        (row) => row.role === 'admin' && String(row.id) === ownerId,
+      )
+    if (!profile) fail(config, 404, 'PROFILE_NOT_FOUND', 'Profile not found')
+    return ok(config, {
+      id: profile.id,
+      name: profile.name ?? '',
+      email: profile.email ?? '',
+      role: 'admin',
+      dni: profile.dni ?? '',
+      address: profile.address ?? '',
+      company: profile.company ?? '',
+      ruc: profile.ruc ?? '',
+    })
+  }
+
+  if (route.startsWith('profiles/') && method === 'GET') {
+    const userId = route.slice('profiles/'.length)
+    const profile =
+      listCollection('profiles').find((row) => String(row.id) === userId) ||
+      listCollection('users').find(
+        (row) => row.role === 'admin' && String(row.id) === userId,
+      )
+    if (!profile) fail(config, 404, 'PROFILE_NOT_FOUND', 'Profile not found')
+    return ok(config, {
+      id: profile.id,
+      name: profile.name ?? '',
+      email: profile.email ?? '',
+      role: 'admin',
+      dni: profile.dni ?? '',
+      address: profile.address ?? '',
+      company: profile.company ?? '',
+      ruc: profile.ruc ?? '',
+    })
+  }
+
+  // Import v1 — mirror /api/v1/import/folders|uploads
+  if (route === 'import/folders' || route.startsWith('import/folders/')) {
+    const id = route === 'import/folders' ? undefined : route.slice('import/folders/'.length)
+    const ownerId = getActiveDataOwnerId() || MOCK_OWNER_ID
+    if (method === 'GET' && !id) {
+      return ok(
+        config,
+        queryCollection('importFolders', { ownerAdminId: ownerId }),
+      )
+    }
+    if (method === 'POST' && !id) {
+      return ok(
+        config,
+        insertRow('importFolders', {
+          ...body,
+          ownerAdminId: ownerId,
+          createdAt: body.createdAt || new Date().toISOString(),
+        }),
+        201,
+      )
+    }
+    if (id && method === 'PATCH') {
+      const row = patchRow('importFolders', id, body)
+      if (!row) fail(config, 404, 'HTTP_404', 'Not found')
+      return ok(config, row)
+    }
+    if (id && method === 'DELETE') {
+      const current = findById('importFolders', id)
+      if (!current) fail(config, 404, 'HTTP_404', 'Not found')
+      if (current.isHome || current.isContext) {
+        fail(config, 400, 'SYSTEM_FOLDER_PROTECTED', 'Protected folder')
+      }
+      removeRow('importFolders', id)
+      return ok(config, {})
+    }
+  }
+
+  if (route === 'import/uploads' || route.startsWith('import/uploads/')) {
+    const rest = route === 'import/uploads' ? '' : route.slice('import/uploads/'.length)
+    const ownerId = getActiveDataOwnerId() || MOCK_OWNER_ID
+
+    if (rest === 'signed-url' && method === 'POST') {
+      const id = `import-${Date.now()}`
+      const safe = String(body.fileName || 'archivo').replace(/[^\w.\-()+ ]+/g, '_').slice(0, 180)
+      const storagePath = `owners/${ownerId}/import/${id}/${safe}`
+      insertRow('importUploads', {
+        id,
+        ownerAdminId: ownerId,
+        fileName: body.fileName || 'archivo',
+        mimeType: body.mimeType || 'application/octet-stream',
+        size: Number(body.size) || 0,
+        storagePath,
+        folderId: body.folderId || null,
+        uploadStatus: 'pending_upload',
+        indexingStatus: 'none',
+        uploadedAt: new Date().toISOString(),
+      })
+      return ok(config, {
+        id,
+        storagePath,
+        uploadUrl: 'mock://local-put',
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+        contentType: body.mimeType || 'application/octet-stream',
+        method: 'PUT',
+      })
+    }
+
+    const confirmMatch = rest.match(/^([^/]+)\/confirm$/)
+    if (confirmMatch && method === 'POST') {
+      const row = patchRow('importUploads', confirmMatch[1], {
+        uploadStatus: 'confirmed',
+        indexingStatus: 'none',
+      })
+      if (!row) fail(config, 404, 'HTTP_404', 'Not found')
+      return ok(config, row)
+    }
+
+    const downloadMatch = rest.match(/^([^/]+)\/download-url$/)
+    if (downloadMatch && method === 'GET') {
+      const row = findById('importUploads', downloadMatch[1])
+      if (!row || row.uploadStatus === 'pending_upload') fail(config, 404, 'HTTP_404', 'Not found')
+      return ok(config, {
+        id: row.id,
+        fileName: row.fileName,
+        downloadUrl: `mock://download/${row.id}`,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      })
+    }
+
+    const id = rest || undefined
+    if (method === 'GET' && !id) {
+      return ok(
+        config,
+        queryCollection('importUploads', { ownerAdminId: ownerId }).filter(
+          (u) => u.uploadStatus !== 'pending_upload',
+        ),
+      )
+    }
+    if (id && method === 'PATCH') {
+      const row = patchRow('importUploads', id, body)
+      if (!row) fail(config, 404, 'HTTP_404', 'Not found')
+      return ok(config, row)
+    }
+    if (id && method === 'DELETE') {
+      if (!removeRow('importUploads', id)) fail(config, 404, 'HTTP_404', 'Not found')
+      return ok(config, {})
+    }
   }
 
   fail(config, 404, 'HTTP_404', `No mock for /api/v1/${route}`)

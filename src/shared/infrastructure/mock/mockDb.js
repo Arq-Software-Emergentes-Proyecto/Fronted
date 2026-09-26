@@ -24,6 +24,7 @@ const COLLECTIONS = [
   'residentExtraCharges',
   'supportChats',
   'subscriptions',
+  'profiles',
 ]
 
 function ensureCollections(db) {

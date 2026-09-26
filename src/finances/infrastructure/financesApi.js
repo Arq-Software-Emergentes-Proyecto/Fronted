@@ -13,7 +13,7 @@ export const financesApi = {
   },
 
   async getResidents() {
-    const { data } = await apiClient.get('/users', {
+    const { data } = await apiClient.get('/api/v1/users', {
       params: withOwnerParams({ role: 'resident' }),
     })
     return (Array.isArray(data) ? data : []).map((row) => {

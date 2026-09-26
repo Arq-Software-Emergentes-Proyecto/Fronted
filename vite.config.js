@@ -10,6 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 /** Compat + versioned routes exposed by BuildingFex.Api */
 const API_ROUTE_PREFIXES = [
   '/api',
+  '/hubs',
   '/users',
   '/incidents',
   '/announcements',
@@ -25,10 +26,7 @@ const API_ROUTE_PREFIXES = [
   '/fixedPayoutRecipients',
   '/teamWorkers',
   '/serviceProviders',
-  '/importUploads',
-  '/importFolders',
   '/residentExtraCharges',
-  '/supportChats',
 ]
 
 export default defineConfig(({ mode }) => {

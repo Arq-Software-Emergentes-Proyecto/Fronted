@@ -43,7 +43,7 @@ async function distributeAcrossDepartments(amount) {
   const ownerId = getActiveDataOwnerId()
 
   const [{ data: residentsData }, { data: receiptsData }] = await Promise.all([
-    apiClient.get('/users', { params: withOwnerParams({ role: 'resident' }) }),
+    apiClient.get('/api/v1/users', { params: withOwnerParams({ role: 'resident' }) }),
     apiClient.get('/receipts', { params: withOwnerParams() }),
   ])
 
@@ -94,7 +94,7 @@ async function withdrawFromDepartments(perResidentShare, monthPrefix) {
   if (!(share > 0)) return
 
   const [{ data: residentsData }, { data: receiptsData }] = await Promise.all([
-    apiClient.get('/users', { params: withOwnerParams({ role: 'resident' }) }),
+    apiClient.get('/api/v1/users', { params: withOwnerParams({ role: 'resident' }) }),
     apiClient.get('/receipts', { params: withOwnerParams() }),
   ])
 

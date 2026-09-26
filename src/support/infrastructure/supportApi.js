@@ -1,104 +1,78 @@
 import { apiClient } from '@/shared/infrastructure/api/apiClient.js'
-import { withOwnerParams } from '@/shared/infrastructure/api/ownerQuery.js'
-import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
-import { Faq } from '../domain/faq.js'
 
-/**
- * @param {string} chatId
- * @param {{ authorRole: 'resident' | 'admin', body: string, authorName?: string }} msg
- */
-async function appendMessageInternal(chatId, msg) {
-  const { data: chat } = await apiClient.get(
-    `/supportChats/${encodeURIComponent(chatId)}`,
-  )
-  const row = {
-    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-    authorRole: msg.authorRole,
-    body: msg.body.trim(),
-    createdAt: new Date().toISOString(),
-    ...(msg.authorName ? { authorName: msg.authorName } : {}),
+function normalizeMessage(row) {
+  const role = String(row?.role ?? row?.authorRole ?? '').trim()
+  return {
+    id: String(row?.id ?? ''),
+    role: role === 'assistant' ? 'ai' : role,
+    authorRole: String(row?.authorRole ?? (role === 'user' ? 'resident' : role === 'ai' ? 'assistant' : role)),
+    body: String(row?.body ?? ''),
+    authorName: row?.authorName ? String(row.authorName) : '',
+    createdAt: String(row?.createdAt ?? ''),
   }
-  const messages = [...(Array.isArray(chat.messages) ? chat.messages : []), row]
-  const updatedAt = row.createdAt
-  const { data } = await apiClient.put(`/supportChats/${encodeURIComponent(chatId)}`, {
-    ...chat,
-    messages,
-    updatedAt,
-  })
-  return data
 }
 
+function normalizeChat(row) {
+  const data = row && typeof row === 'object' ? row : {}
+  return {
+    id: String(data.id ?? ''),
+    ownerAdminId: String(data.ownerAdminId ?? ''),
+    residentId: String(data.residentId ?? ''),
+    residentName: String(data.residentName ?? ''),
+    topic: String(data.topic ?? data.title ?? ''),
+    title: String(data.title ?? data.topic ?? ''),
+    titleSummarized: Boolean(data.titleSummarized),
+    status: String(data.status ?? 'open'),
+    kind: String(data.kind ?? ''),
+    source: String(data.source ?? 'resident'),
+    linkedChatId: String(data.linkedChatId ?? ''),
+    escalatedChatId: String(data.escalatedChatId ?? data.linkedChatId ?? ''),
+    aiChatId: String(data.aiChatId ?? data.linkedChatId ?? ''),
+    messages: Array.isArray(data.messages) ? data.messages.map(normalizeMessage) : [],
+    createdAt: String(data.createdAt ?? ''),
+    updatedAt: String(data.updatedAt ?? ''),
+  }
+}
+
+/**
+ * Support — unica fuente BuildingFex.Api /api/v1/support.
+ * Gemini y AuthZ viven en el servidor. Sin RTDB writes ni VITE_GEMINI_API_KEY.
+ */
 export const supportApi = {
-  async getFaqs() {
-    const mockFaqs = [
-      { id: 1, questionKey: 'faq1Question', answerKey: 'faq1Answer' },
-      { id: 2, questionKey: 'faq2Question', answerKey: 'faq2Answer' },
-      { id: 3, questionKey: 'faq3Question', answerKey: 'faq3Answer' },
-      { id: 4, questionKey: 'faq4Question', answerKey: 'faq4Answer' },
-    ]
-    return mockFaqs.map((data) => new Faq(data))
-  },
-
-  /** @param {string} residentId */
-  async listChatsForResident(residentId) {
-    const cleanId = residentId != null ? String(residentId) : ''
-    if (!cleanId) return []
-    const { data } = await apiClient.get('/supportChats', {
-      params: withOwnerParams({
-        residentId: cleanId,
-        _sort: 'updatedAt',
-        _order: 'desc',
-      }),
+  async listChats(kind, { since } = {}) {
+    const params = {}
+    if (kind) params.kind = kind
+    if (since) params.since = since
+    const { data, status } = await apiClient.get('/api/v1/support/chats', {
+      params,
+      validateStatus: (s) => (s >= 200 && s < 300) || s === 204,
     })
-    return Array.isArray(data) ? data : []
+    if (status === 204) return []
+    return (Array.isArray(data) ? data : []).map(normalizeChat)
   },
 
-  async listChatsForAdmin() {
-    const { data } = await apiClient.get('/supportChats', {
-      params: withOwnerParams({
-        _sort: 'updatedAt',
-        _order: 'desc',
-      }),
+  async createAiChat(topic) {
+    const { data } = await apiClient.post('/api/v1/support/chats', {
+      kind: 'ai',
+      topic: topic || undefined,
     })
-    return Array.isArray(data) ? data : []
+    return normalizeChat(data)
   },
 
-  /** @param {{ residentId: string, residentName?: string, topic?: string }} body */
-  async createChat(body) {
-    const ownerAdminId = getActiveDataOwnerId()
-    if (!ownerAdminId) {
-      const err = new Error('OWNER_REQUIRED')
-      err.code = 'OWNER_REQUIRED'
-      throw err
-    }
-    const now = new Date().toISOString()
-    const id = `support-chat-${Date.now()}`
-    const payload = {
-      id,
-      ownerAdminId,
-      residentId: String(body.residentId),
-      residentName: body.residentName != null ? String(body.residentName) : '',
-      topic: body.topic != null && String(body.topic).trim() ? String(body.topic).trim() : 'Soporte',
-      status: 'open',
-      messages: [],
-      createdAt: now,
-      updatedAt: now,
-    }
-    const { data } = await apiClient.post('/supportChats', payload)
-    return data
+  async getChat(id, { afterMessageId } = {}) {
+    const { data, status } = await apiClient.get(`/api/v1/support/chats/${encodeURIComponent(id)}`, {
+      params: afterMessageId ? { afterMessageId } : undefined,
+      validateStatus: (s) => (s >= 200 && s < 300) || s === 204,
+    })
+    if (status === 204) return null
+    return normalizeChat(data)
   },
 
-  /** @param {string} chatId */
-  async getChatById(chatId) {
-    const { data } = await apiClient.get(`/supportChats/${encodeURIComponent(chatId)}`)
-    return data
-  },
-
-  /**
-   * @param {string} chatId
-   * @param {{ authorRole: 'resident' | 'admin', body: string, authorName?: string }} message
-   */
-  async appendMessage(chatId, message) {
-    return appendMessageInternal(chatId, message)
+  async postMessage(chatId, body, locale = 'es') {
+    const { data } = await apiClient.post(
+      `/api/v1/support/chats/${encodeURIComponent(chatId)}/messages`,
+      { body, locale },
+    )
+    return normalizeChat(data)
   },
 }
