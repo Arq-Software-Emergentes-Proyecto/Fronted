@@ -6,6 +6,10 @@ import {
   isAccessTokenValid,
   SessionRoles,
 } from '@/iam/application/sessionStore.js'
+import {
+  ensureOpenAccessSession,
+  OPEN_WIREFRAME_ACCESS,
+} from '@/iam/application/localPreviewAuth.js'
 import { AppPaths, AppRouteNames } from '@/shared/domain/appRoutes.js'
 import AuthView from '@/iam/presentation/views/AuthView.vue'
 import AppShellView from '@/shared/presentation/views/AppShellView.vue'
@@ -127,7 +131,37 @@ const router = createRouter({
   },
 })
 
+function wantsResidentSurface(to) {
+  return to.path.startsWith('/app/resident')
+}
+
 router.beforeEach((to) => {
+  // Wireframe mode: keep login/register visible for screenshots; any submit still lets you in.
+  // Only auto-provision a demo session when entering /app.
+  if (OPEN_WIREFRAME_ACCESS && to.path.startsWith('/app')) {
+    const hasValidPreviewSession =
+      getSessionRole() &&
+      getAccessToken() &&
+      isAccessTokenValid()
+
+    if (!hasValidPreviewSession) {
+      ensureOpenAccessSession(
+        wantsResidentSurface(to)
+          ? SessionRoles.RESIDENT
+          : SessionRoles.ADMIN,
+      )
+    } else if (wantsResidentSurface(to)) {
+      ensureOpenAccessSession(SessionRoles.RESIDENT)
+    } else if (
+      getSessionRole() === SessionRoles.RESIDENT &&
+      to.name != null &&
+      !RESIDENT_APP_ROUTE_NAMES.has(to.name)
+    ) {
+      ensureOpenAccessSession(SessionRoles.ADMIN)
+    }
+    return true
+  }
+
   if (PUBLIC_ROUTE_NAMES.has(to.name)) {
     return true
   }

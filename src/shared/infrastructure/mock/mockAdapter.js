@@ -18,6 +18,111 @@ import {
 } from './mockDb.js'
 import { MOCK_OWNER_ID } from './seed.js'
 
+function headerValue(headers, name) {
+  if (!headers || typeof headers !== 'object') return ''
+  const want = String(name).toLowerCase()
+  for (const [key, value] of Object.entries(headers)) {
+    if (String(key).toLowerCase() === want) {
+      return Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '')
+    }
+  }
+  return ''
+}
+
+/** Decode preview JWT (or any JWT payload) from Authorization for Node mock context. */
+function authClaimsFromConfig(config) {
+  const raw = headerValue(config.headers, 'authorization')
+  const match = raw.match(/^Bearer\s+(.+)$/i)
+  if (!match) return null
+  try {
+    const segment = String(match[1]).split('.')[1]
+    if (!segment) return null
+    const base64 = segment.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
+    const json =
+      typeof Buffer !== 'undefined'
+        ? Buffer.from(padded, 'base64').toString('utf8')
+        : atob(padded)
+    const payload = JSON.parse(json)
+    return payload && typeof payload === 'object' ? payload : null
+  } catch {
+    return null
+  }
+}
+
+function resolveActor(config) {
+  const claims = authClaimsFromConfig(config)
+  const sub = claims?.sub != null ? String(claims.sub) : ''
+  const role =
+    claims?.role === SessionRoles.RESIDENT ? SessionRoles.RESIDENT : SessionRoles.ADMIN
+  if (sub) {
+    return {
+      id: sub,
+      role,
+      email: claims?.email != null ? String(claims.email) : '',
+      ownerAdminId:
+        role === SessionRoles.RESIDENT
+          ? MOCK_OWNER_ID
+          : sub,
+    }
+  }
+  const ownerId = getActiveDataOwnerId() || MOCK_OWNER_ID
+  return { id: ownerId, role: SessionRoles.ADMIN, email: '', ownerAdminId: ownerId }
+}
+
+function hardcodedAiReply(userText, locale = 'es') {
+  const text = String(userText ?? '').toLowerCase()
+  const es = !String(locale).toLowerCase().startsWith('en')
+  if (/admin|administraci|human|persona|hablar/.test(text)) {
+    return es
+      ? 'Puedo ayudarte con eso. Si prefieres hablar con administración, escribe “quiero hablar con un administrador” y te conectamos.'
+      : 'I can help with that. If you prefer a human from management, say “I want to talk to an admin” and we will connect you.'
+  }
+  if (/pago|recibo|cuota|deuda|bill|payment|fee/.test(text)) {
+    return es
+      ? 'Tus recibos y pagos están en Finanzas. Los pendientes aparecen con estado “Por pagar”. Si un cargo no cuadra, avísame el mes y el monto.'
+      : 'Your bills and payments are under Finance. Pending ones show as unpaid. If a charge looks wrong, tell me the month and amount.'
+  }
+  if (/reserva|espacio|piscina|guest|invitad|qr/.test(text)) {
+    return es
+      ? 'Para reservar un espacio común ve a Generación / Espacios, elige fecha y horario, y agrega invitados (máx. 5) para el QR.'
+      : 'To book a common space go to Generation / Spaces, pick a date and time, and add guests (max 5) for the QR.'
+  }
+  if (/incidencia|incidente|fuga|ascensor|incident/.test(text)) {
+    return es
+      ? 'Puedes reportar una incidencia en la sección Incidencias. Describe el problema y, si sabes, el área del edificio.'
+      : 'You can report an issue under Incidents. Describe the problem and the area of the building if you know it.'
+  }
+  return es
+    ? 'Soy el asistente demo de BuildingFlex. Puedo orientarte sobre pagos, reservas, incidencias y contacto con administración. ¿En qué te ayudo?'
+    : 'I am the BuildingFlex demo assistant. I can help with payments, reservations, incidents, and reaching management. How can I help?'
+}
+
+function shouldEscalateToAdmin(userText) {
+  return /admin|administraci|humano|persona real|hablar con/.test(String(userText ?? '').toLowerCase())
+}
+
+function publicSupportChat(row) {
+  return {
+    id: row.id,
+    ownerAdminId: row.ownerAdminId ?? MOCK_OWNER_ID,
+    residentId: row.residentId ?? '',
+    residentName: row.residentName ?? '',
+    topic: row.topic ?? row.title ?? '',
+    title: row.title ?? row.topic ?? '',
+    titleSummarized: Boolean(row.titleSummarized),
+    status: row.status ?? 'open',
+    kind: row.kind ?? '',
+    source: row.source ?? 'resident',
+    linkedChatId: row.linkedChatId ?? row.escalatedChatId ?? '',
+    escalatedChatId: row.escalatedChatId ?? row.linkedChatId ?? '',
+    aiChatId: row.aiChatId ?? row.linkedChatId ?? '',
+    messages: Array.isArray(row.messages) ? row.messages : [],
+    createdAt: row.createdAt ?? '',
+    updatedAt: row.updatedAt ?? '',
+  }
+}
+
 function pathParts(config) {
   const raw = String(config.url ?? '')
   const withoutQuery = raw.split('?')[0]
@@ -403,6 +508,242 @@ function handleV1(config, method, parts) {
     }
 
     return ok(config, { reconciled: itemsPaid > 0, itemsPaid, paidAt })
+  }
+
+  // Users (residents + lookup) — mirror BuildingFex.Api /api/v1/users
+  if (route === 'users' || route.startsWith('users/')) {
+    const id = route === 'users' ? undefined : route.slice('users/'.length)
+    if (!id && method === 'GET') {
+      let rows = listCollection('users')
+      if (params.role) {
+        rows = rows.filter((row) => String(row.role ?? '') === String(params.role))
+      }
+      if (params.ownerAdminId) {
+        rows = rows.filter(
+          (row) =>
+            String(row.ownerAdminId ?? '') === String(params.ownerAdminId) ||
+            String(row.id) === String(params.ownerAdminId),
+        )
+      }
+      if (params.email) {
+        const email = String(params.email).trim().toLowerCase()
+        rows = rows.filter(
+          (row) => String(row.email ?? '').trim().toLowerCase() === email,
+        )
+      }
+      if (params.code) {
+        const code = String(params.code).trim()
+        rows = rows.filter((row) => String(row.code ?? '').trim() === code)
+      }
+      return ok(config, rows.map(publicUser))
+    }
+    if (!id && method === 'POST') {
+      const ownerId =
+        String(body.ownerAdminId ?? '').trim() ||
+        ownerFromParams(params) ||
+        MOCK_OWNER_ID
+      const created = insertRow('users', {
+        ...body,
+        id: body.id || `resident-${Date.now()}`,
+        role: body.role || 'resident',
+        ownerAdminId: ownerId,
+        email: body.email ?? '',
+        password: body.password ?? '',
+      })
+      return ok(config, publicUser(created), 201)
+    }
+    if (id && method === 'GET') {
+      const row = findById('users', id)
+      if (!row) fail(config, 404, 'HTTP_404', 'Not found')
+      return ok(config, publicUser(row))
+    }
+    if (id && method === 'PATCH') {
+      const row = patchRow('users', id, body)
+      if (!row) fail(config, 404, 'HTTP_404', 'Not found')
+      return ok(config, publicUser(row))
+    }
+    if (id && method === 'DELETE') {
+      if (!removeRow('users', id)) fail(config, 404, 'HTTP_404', 'Not found')
+      return ok(config, {})
+    }
+  }
+
+  // Support chats — hardcoded AI replies for wireframe / local demo
+  if (route === 'support/chats' || route.startsWith('support/chats/')) {
+    const actor = resolveActor(config)
+    const rest = route === 'support/chats' ? '' : route.slice('support/chats/'.length)
+    const now = () => new Date().toISOString()
+
+    if (!rest && method === 'GET') {
+      const kind = String(params.kind ?? '').trim()
+      const since = String(params.since ?? '').trim()
+      let rows = listCollection('supportChats')
+
+      if (kind === 'ai') {
+        rows = rows.filter(
+          (row) =>
+            String(row.kind ?? '') === 'ai' &&
+            String(row.residentId ?? '') === String(actor.id),
+        )
+      } else if (kind === 'admin') {
+        const ownerId = actor.ownerAdminId || MOCK_OWNER_ID
+        rows = rows.filter(
+          (row) =>
+            (String(row.kind ?? '') === 'admin' ||
+              String(row.source ?? '') === 'ai-escalation' ||
+              (!row.kind && String(row.residentId ?? ''))) &&
+            String(row.kind ?? '') !== 'ai' &&
+            String(row.ownerAdminId ?? ownerId) === String(ownerId),
+        )
+      }
+
+      if (since) {
+        rows = rows.filter((row) => String(row.updatedAt ?? '') > since)
+      }
+
+      rows = [...rows].sort((a, b) =>
+        String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')),
+      )
+      return ok(config, rows.map(publicSupportChat))
+    }
+
+    if (!rest && method === 'POST') {
+      const kind = String(body.kind ?? 'ai').trim() || 'ai'
+      const residentId =
+        kind === 'ai'
+          ? actor.id
+          : String(body.residentId ?? actor.id)
+      const resident =
+        listCollection('users').find((row) => String(row.id) === String(residentId)) || null
+      const created = insertRow('supportChats', {
+        id: `chat-${Date.now()}`,
+        ownerAdminId: resident?.ownerAdminId || actor.ownerAdminId || MOCK_OWNER_ID,
+        residentId,
+        residentName: resident?.name || actor.email || 'Residente demo',
+        topic: String(body.topic ?? body.title ?? 'Nueva consulta').trim() || 'Nueva consulta',
+        title: String(body.title ?? body.topic ?? 'Nueva consulta').trim() || 'Nueva consulta',
+        titleSummarized: false,
+        status: 'open',
+        kind,
+        source: kind === 'ai' ? 'resident' : 'resident',
+        linkedChatId: '',
+        escalatedChatId: '',
+        messages: [],
+        createdAt: now(),
+        updatedAt: now(),
+      })
+      return ok(config, publicSupportChat(created), 201)
+    }
+
+    const messageMatch = rest.match(/^([^/]+)\/messages$/)
+    if (messageMatch && method === 'POST') {
+      const chatId = messageMatch[1]
+      const chat = findById('supportChats', chatId)
+      if (!chat) fail(config, 404, 'HTTP_404', 'Chat not found')
+
+      const text = String(body.body ?? '').trim()
+      if (!text) fail(config, 400, 'MESSAGE_REQUIRED', 'Message is required')
+
+      const messages = Array.isArray(chat.messages) ? [...chat.messages] : []
+      const isAdminActor = actor.role === SessionRoles.ADMIN && chat.kind !== 'ai'
+      const userMsg = {
+        id: `msg-${Date.now()}`,
+        role: isAdminActor ? 'admin' : 'user',
+        authorRole: isAdminActor ? 'admin' : 'resident',
+        authorName: isAdminActor ? 'Admin demo' : chat.residentName || 'Residente',
+        body: text,
+        createdAt: now(),
+      }
+      messages.push(userMsg)
+
+      let escalatedChatId = chat.escalatedChatId || ''
+      let linkedChatId = chat.linkedChatId || ''
+      let topic = chat.topic
+      let title = chat.title || chat.topic
+
+      if (chat.kind === 'ai') {
+        const reply = {
+          id: `msg-${Date.now() + 1}`,
+          role: 'ai',
+          authorRole: 'assistant',
+          authorName: 'Asistente BuildingFlex',
+          body: hardcodedAiReply(text, body.locale),
+          createdAt: now(),
+        }
+        messages.push(reply)
+
+        if (!escalatedChatId && shouldEscalateToAdmin(text)) {
+          const adminChat = insertRow('supportChats', {
+            id: `chat-esc-${Date.now()}`,
+            ownerAdminId: chat.ownerAdminId || MOCK_OWNER_ID,
+            residentId: chat.residentId,
+            residentName: chat.residentName,
+            topic: topic || 'Consulta escalada',
+            title: title || 'Consulta escalada',
+            titleSummarized: true,
+            status: 'open',
+            kind: 'admin',
+            source: 'ai-escalation',
+            linkedChatId: chat.id,
+            aiChatId: chat.id,
+            escalatedChatId: '',
+            messages: [
+              {
+                id: `msg-esc-${Date.now()}`,
+                role: 'resident',
+                authorRole: 'resident',
+                authorName: chat.residentName || 'Residente',
+                body: text,
+                createdAt: now(),
+              },
+              {
+                id: `msg-esc-${Date.now() + 1}`,
+                role: 'ai',
+                authorRole: 'assistant',
+                authorName: 'Asistente BuildingFlex',
+                body: 'El residente pidió hablar con administración.',
+                createdAt: now(),
+              },
+            ],
+            createdAt: now(),
+            updatedAt: now(),
+          })
+          escalatedChatId = adminChat.id
+          linkedChatId = adminChat.id
+        }
+
+        if (!chat.titleSummarized && messages.filter((m) => m.authorRole === 'resident' || m.role === 'user').length === 1) {
+          topic = text.slice(0, 48)
+          title = topic
+        }
+      }
+
+      const updated = patchRow('supportChats', chatId, {
+        messages,
+        topic,
+        title,
+        titleSummarized: true,
+        escalatedChatId,
+        linkedChatId,
+        updatedAt: now(),
+      })
+      return ok(config, publicSupportChat(updated))
+    }
+
+    if (rest && method === 'GET') {
+      const chatId = rest.split('/')[0]
+      const afterMessageId = String(params.afterMessageId ?? '').trim()
+      const chat = findById('supportChats', chatId)
+      if (!chat) {
+        return ok(config, null, 204)
+      }
+      let messages = Array.isArray(chat.messages) ? chat.messages : []
+      if (afterMessageId) {
+        const idx = messages.findIndex((m) => String(m.id) === afterMessageId)
+        messages = idx >= 0 ? messages.slice(idx + 1) : messages
+      }
+      return ok(config, publicSupportChat({ ...chat, messages }))
+    }
   }
 
   if (route === 'profiles' && method === 'POST') {

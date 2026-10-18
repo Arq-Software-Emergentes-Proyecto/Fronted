@@ -1,7 +1,26 @@
 import { SessionRoles } from '@/iam/domain/sessionRoles.js'
+import {
+  getAccessToken,
+  getSessionRole,
+  isAccessTokenValid,
+  setAdminSession,
+  setResidentSession,
+} from '@/iam/application/sessionStore.js'
 
-/** Offline login is only for `npm run dev`, so production keeps the real API. */
-export const LOCAL_PREVIEW_ENABLED = import.meta.env.DEV
+/**
+ * Demo / wireframe mode (local + Vercel): any login/register lets you in,
+ * and the browser mock API serves hardcoded data (no Firebase/Railway required).
+ *
+ * On by default in `npm run dev`. Set VITE_OPEN_WIREFRAMES=true in production
+ * builds when the team needs open capture access. Set false to require real auth.
+ */
+export const OPEN_WIREFRAME_ACCESS =
+  String(
+    import.meta.env.VITE_OPEN_WIREFRAMES ?? (import.meta.env.DEV ? 'true' : 'false'),
+  ) === 'true'
+
+/** Preview auth + mock API (same flag as open wireframes). */
+export const LOCAL_PREVIEW_ENABLED = OPEN_WIREFRAME_ACCESS
 
 function encodeJwtSegment(value) {
   const json = JSON.stringify(value)
@@ -41,8 +60,8 @@ export function resolvePreviewRole(email) {
 
 export function previewAdminAuthResult({ email, name } = {}) {
   const profile = buildPreviewProfile({
-    email,
-    name,
+    email: email || 'admin@demo.test',
+    name: name || 'Admin demo',
     role: SessionRoles.ADMIN,
   })
   return {
@@ -62,6 +81,25 @@ export function previewAdminAuthResult({ email, name } = {}) {
   }
 }
 
+export function previewResidentAuthResult({ email, name } = {}) {
+  const profile = buildPreviewProfile({
+    email: email || 'resident@demo.test',
+    name: name || 'Residente demo',
+    role: SessionRoles.RESIDENT,
+  })
+  return {
+    user: {
+      ...profile,
+      role: SessionRoles.RESIDENT,
+    },
+    token: createPreviewAccessToken({
+      role: SessionRoles.RESIDENT,
+      email: profile.email,
+      sub: profile.id,
+    }),
+  }
+}
+
 export function buildPreviewProfile({ email, name, role }) {
   const trimmedEmail = String(email ?? '').trim()
   const displayName =
@@ -72,7 +110,7 @@ export function buildPreviewProfile({ email, name, role }) {
     return {
       id: 'preview-resident-1',
       name: displayName,
-      email: trimmedEmail,
+      email: trimmedEmail || 'resident@demo.test',
       floor: '3',
       code: '302',
       ownerAdminId: 'preview-admin-1',
@@ -82,6 +120,61 @@ export function buildPreviewProfile({ email, name, role }) {
   return {
     id: 'preview-admin-1',
     name: displayName,
-    email: trimmedEmail,
+    email: trimmedEmail || 'admin@demo.test',
   }
+}
+
+/**
+ * Ensures a demo session for wireframe capture.
+ * @param {'admin' | 'resident'} [role]
+ * @returns {boolean} true when a preview session is active after the call
+ */
+export function ensureOpenAccessSession(role = SessionRoles.ADMIN) {
+  if (!OPEN_WIREFRAME_ACCESS) return false
+
+  const wanted =
+    role === SessionRoles.RESIDENT ? SessionRoles.RESIDENT : SessionRoles.ADMIN
+  const currentRole = getSessionRole()
+  const token = getAccessToken()
+
+  if (
+    currentRole === wanted &&
+    token &&
+    isAccessTokenValid() &&
+    isPreviewAccessToken(token)
+  ) {
+    return true
+  }
+
+  if (wanted === SessionRoles.RESIDENT) {
+    const { user, token: previewToken } = previewResidentAuthResult()
+    setResidentSession(
+      {
+        id: user.id,
+        name: user.name,
+        floor: user.floor,
+        code: user.code,
+        email: user.email,
+        ownerAdminId: user.ownerAdminId ?? null,
+      },
+      previewToken,
+    )
+  } else {
+    const { user, token: previewToken } = previewAdminAuthResult()
+    setAdminSession(
+      {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: SessionRoles.ADMIN,
+        dni: '',
+        address: '',
+        company: '',
+        ruc: '',
+      },
+      previewToken,
+    )
+  }
+
+  return true
 }

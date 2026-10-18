@@ -41,6 +41,21 @@ export function clearSession() {
   persist()
 }
 
+/** Module-level setters for router bootstrap (outside component setup). */
+export function setAdminSession(profile = {}, token = null) {
+  state.role = SessionRoles.ADMIN
+  state.profile = profile
+  state.token = token
+  persist()
+}
+
+export function setResidentSession(profile = {}, token = null) {
+  state.role = SessionRoles.RESIDENT
+  state.profile = profile
+  state.token = token
+  persist()
+}
+
 /**
  * Active data owner for multi-tenant API queries (admin account id).
  * Always derived from session state so it cannot drift from persisted profile.
@@ -96,20 +111,6 @@ function persist() {
 export function useSession() {
   const isAdmin = computed(() => state.role === SessionRoles.ADMIN)
   const isResident = computed(() => state.role === SessionRoles.RESIDENT)
-
-  function setAdminSession(profile = {}, token = null) {
-    state.role = SessionRoles.ADMIN
-    state.profile = profile
-    state.token = token
-    persist()
-  }
-
-  function setResidentSession(profile = {}, token = null) {
-    state.role = SessionRoles.RESIDENT
-    state.profile = profile
-    state.token = token
-    persist()
-  }
 
   function clearSessionFromHook() {
     clearSession()

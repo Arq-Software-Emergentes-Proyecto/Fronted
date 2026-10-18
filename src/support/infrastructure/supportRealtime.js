@@ -1,6 +1,10 @@
 import * as signalR from '@microsoft/signalr'
 import { API_BASE_URL } from '@/shared/infrastructure/envConfig.js'
 import { getAccessToken } from '@/iam/application/sessionStore.js'
+import {
+  isPreviewAccessToken,
+  OPEN_WIREFRAME_ACCESS,
+} from '@/iam/application/localPreviewAuth.js'
 
 function hubUrl() {
   const base = String(API_BASE_URL || '').replace(/\/$/, '')
@@ -18,6 +22,8 @@ let starting = null
 export async function ensureSupportHub() {
   const token = getAccessToken()
   if (!token) return null
+  // Local wireframe / preview mock: no real hubs — views poll the mock API.
+  if (OPEN_WIREFRAME_ACCESS || isPreviewAccessToken(token)) return null
 
   if (connection?.state === signalR.HubConnectionState.Connected) {
     return connection

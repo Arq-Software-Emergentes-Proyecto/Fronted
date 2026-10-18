@@ -1,0 +1,363 @@
+@startuml Figura97-BuildingFlex-DiagramaClases
+!theme plain
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam linetype ortho
+skinparam shadowing false
+skinparam class {
+  BackgroundColor #FEFECE
+  BorderColor #333333
+  FontSize 11
+}
+skinparam package {
+  BackgroundColor #FFFFFF
+  BorderColor #666666
+  FontSize 12
+}
+skinparam enum {
+  BackgroundColor #E8F4E8
+  BorderColor #333333
+}
+skinparam classFontName Arial
+title BuildingFlex — Figura 97. Diagrama de clases
+
+' ─── Enums / VO compartidos ───
+enum Role <<enumeration>> {
+  ADMIN_PASS
+  ADMIN_BUILD
+  BOARD_MEMBER
+  RESIDENT
+}
+
+enum Plan <<enumeration>> {
+  ESSENTIAL
+  STANDARD
+  PREMIUM
+}
+
+enum SubscriptionStatus <<enumeration>> {
+  PENDING
+  ACTIVE
+  CANCELLED
+  TRIAL
+}
+
+enum FeeStatus <<enumeration>> {
+  PENDING
+  PAID
+  OVERDUE
+}
+
+enum PaymentMethod <<enumeration>> {
+  MERCADO_PAGO
+  CASH
+  BANK_TRANSFER
+}
+
+enum PaymentStatus <<enumeration>> {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum PayoutStatus <<enumeration>> {
+  PENDING
+  PROCESSED
+}
+
+enum EmployeeStatus <<enumeration>> {
+  ACTIVE
+  INACTIVE
+}
+
+enum ConversationStatus <<enumeration>> {
+  OPEN
+  IN_PROGRESS
+  CLOSED
+}
+
+enum AnnouncementStatus <<enumeration>> {
+  PUBLISHED
+  DRAFT
+}
+
+enum SpaceStatus <<enumeration>> {
+  AVAILABLE
+  MAINTENANCE
+  INACTIVE
+}
+
+enum ReservationStatus <<enumeration>> {
+  PENDING
+  CONFIRMED
+  CANCELLED
+}
+
+enum ProviderStatus <<enumeration>> {
+  ACTIVE
+  INACTIVE
+}
+
+enum Priority <<enumeration>> {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus <<enumeration>> {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+class Money <<value object>> {
+  amount: decimal
+  currency: string
+}
+
+' ─── IAM ───
+package "IAM" {
+  class User {
+    id: UUID
+    email: string
+    passwordHash: string
+    role: Role
+    isActive: boolean
+    createdAt: DateTime
+  }
+
+  class Subscription {
+    id: UUID
+    plan: Plan
+    status: SubscriptionStatus
+    startDate: DateTime
+    endDate: DateTime
+  }
+}
+
+' ─── Profiles ───
+package "Profiles" {
+  class AdminProfile {
+    id: UUID
+    userId: UUID
+    fullName: string
+    phone: string
+    address: string
+  }
+}
+
+' ─── Team (+ Support chat en la figura original) ───
+package "Team" {
+  class Employee {
+    id: UUID
+    ownerAdminId: UUID
+    fullName: string
+    position: string
+    phone: string
+    email: string
+    status: EmployeeStatus
+  }
+
+  class Conversation {
+    id: UUID
+    residentId: UUID
+    status: ConversationStatus
+  }
+
+  class Message {
+    id: UUID
+    conversationId: UUID
+    content: string
+    createdAt: DateTime
+    sender: string
+  }
+}
+
+' ─── Finances ───
+package "Finances" {
+  class Fee {
+    id: UUID
+    residentId: UUID
+    amount: Money
+    dueDate: Date
+    status: FeeStatus
+    concept: string
+  }
+
+  class Expense {
+    id: UUID
+    ownerAdminId: UUID
+    description: string
+    category: string
+    amount: Money
+    createdAt: DateTime
+  }
+
+  class Utility {
+    id: UUID
+    residentId: UUID
+    type: string
+    amount: Money
+    period: string
+  }
+
+  class ExtraCharge {
+    id: UUID
+    residentId: UUID
+    description: string
+    amount: Money
+    status: string
+  }
+
+  class Payment {
+    id: UUID
+    feeId: UUID
+    residentId: UUID
+    amount: Money
+    method: PaymentMethod
+    status: PaymentStatus
+    paidAt: DateTime
+  }
+
+  class Payout {
+    id: UUID
+    ownerAdminId: UUID
+    amount: Money
+    status: PayoutStatus
+    processedAt: DateTime
+  }
+}
+
+' ─── Information ───
+package "Information" {
+  class Announcement {
+    id: UUID
+    ownerAdminId: UUID
+    title: string
+    content: string
+    publishDate: DateTime
+    status: AnnouncementStatus
+  }
+}
+
+' ─── Import (documentos; en informe = Communications) ───
+package "Import" {
+  class Folder {
+    id: UUID
+    ownerAdminId: UUID
+    name: string
+    createdAt: DateTime
+  }
+
+  class Document {
+    id: UUID
+    folderId: UUID
+    fileName: string
+    fileUrl: string
+    fileType: string
+    uploadedAt: DateTime
+  }
+}
+
+' ─── SocialSpaces ───
+package "SocialSpaces" {
+  class CommonSpace {
+    id: UUID
+    ownerAdminId: UUID
+    name: string
+    description: string
+    capacity: number
+    status: SpaceStatus
+  }
+
+  class Reservation {
+    id: UUID
+    spaceId: UUID
+    residentId: UUID
+    reservationDate: Date
+    startTime: Time
+    endTime: Time
+    status: ReservationStatus
+  }
+
+  class Guest {
+    id: UUID
+    reservationId: UUID
+    fullName: string
+    documentNumber: string
+    qrCode: string
+    status: string
+  }
+}
+
+' ─── Incidents ───
+package "Incidents" {
+  class ServiceProvider {
+    id: UUID
+    ownerAdminId: UUID
+    name: string
+    serviceType: string
+    phone: string
+    email: string
+    status: ProviderStatus
+  }
+
+  class Incident {
+    id: UUID
+    residentId: UUID
+    providerId: UUID
+    title: string
+    description: string
+    priority: Priority
+    status: IncidentStatus
+    createdAt: DateTime
+  }
+}
+
+' ─── Relaciones ───
+User "1" --> "0..1" Subscription : tiene
+User "1" --> "0..1" AdminProfile : perfil
+User "1" --> "*" Employee : gestiona
+User "1" --> "*" Conversation : abre / atiende
+Conversation "1" --> "*" Message : contiene
+User "1" --> "*" Fee : cuotas
+User "1" --> "*" Expense : gastos
+User "1" --> "*" Utility : servicios
+User "1" --> "*" ExtraCharge : cargos
+User "1" --> "*" Payment : pagos
+User "1" --> "*" Payout : payouts
+User "1" --> "*" Announcement : publica
+User "1" --> "*" Folder : carpetas
+Folder "1" --> "*" Document : documentos
+User "1" --> "*" CommonSpace : espacios
+CommonSpace "1" --> "*" Reservation : reservas
+Reservation "1" --> "*" Guest : invitados
+User "1" --> "*" ServiceProvider : proveedores
+User "1" --> "*" Incident : reporta
+ServiceProvider "0..1" --> "*" Incident : atiende
+Fee "1" --> "*" Payment : se paga con
+Fee --> Money
+Expense --> Money
+Utility --> Money
+ExtraCharge --> Money
+Payment --> Money
+Payout --> Money
+User --> Role
+Subscription --> Plan
+Subscription --> SubscriptionStatus
+Fee --> FeeStatus
+Payment --> PaymentMethod
+Payment --> PaymentStatus
+Payout --> PayoutStatus
+Employee --> EmployeeStatus
+Conversation --> ConversationStatus
+Announcement --> AnnouncementStatus
+CommonSpace --> SpaceStatus
+Reservation --> ReservationStatus
+ServiceProvider --> ProviderStatus
+Incident --> Priority
+Incident --> IncidentStatus
+
+@enduml

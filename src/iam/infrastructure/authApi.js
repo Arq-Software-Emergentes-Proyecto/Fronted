@@ -6,7 +6,9 @@ import {
 } from '@/shared/infrastructure/api/utils.js'
 import {
   LOCAL_PREVIEW_ENABLED,
+  OPEN_WIREFRAME_ACCESS,
   previewAdminAuthResult,
+  previewResidentAuthResult,
 } from '@/iam/application/localPreviewAuth.js'
 import {
   isFirebaseEmailRegistered,
@@ -133,6 +135,7 @@ async function seedAdminDefaults(ownerId, token) {
  */
 export const authApi = {
   async isEmailRegistered(email) {
+    if (OPEN_WIREFRAME_ACCESS) return true
     const { exists, methods } = await isFirebaseEmailRegistered(email)
     if (methods.includes('google.com') && !methods.includes('password')) {
       throw apiError('RESIDENT_USE_GOOGLE')
@@ -145,6 +148,12 @@ export const authApi = {
     const normalizedEmail = normalizeEmail(email)
     if (!normalizedEmail) {
       throw apiError('EMAIL_NOT_FOUND')
+    }
+    if (OPEN_WIREFRAME_ACCESS) {
+      return {
+        ...previewResidentAuthResult({ email: normalizedEmail }),
+        useFirebaseIdToken: false,
+      }
     }
     try {
       const { data } = await apiClient.post('/api/v1/authentication/sign-in-google', {
@@ -170,6 +179,12 @@ export const authApi = {
   },
 
   async login({ email, password }) {
+    if (OPEN_WIREFRAME_ACCESS) {
+      return {
+        ...previewAdminAuthResult({ email }),
+        profileIncomplete: false,
+      }
+    }
     try {
       const { identity, token } = await loginAdminWithFirebase({ email, password })
       try {
@@ -209,6 +224,22 @@ export const authApi = {
 
   /** Completa perfil tras Auth sin perfil (o tras fallo de POST en el registro). */
   async completeProfile(token, draft) {
+    if (OPEN_WIREFRAME_ACCESS) {
+      const preview = previewAdminAuthResult({
+        email: draft?.email,
+        name: draft?.name,
+      })
+      return {
+        user: {
+          ...preview.user,
+          dni: String(draft?.dni ?? ''),
+          address: String(draft?.address ?? ''),
+          company: String(draft?.company ?? ''),
+          ruc: String(draft?.ruc ?? ''),
+        },
+        token: preview.token,
+      }
+    }
     const profile = await upsertProfile(token, draft)
     if (!profile?.id) {
       throw apiError('PROFILE_SAVE_FAILED', 'No se pudo guardar el perfil en el servidor.')
@@ -218,6 +249,23 @@ export const authApi = {
   },
 
   async registerAdmin(payload) {
+    if (OPEN_WIREFRAME_ACCESS) {
+      const preview = previewAdminAuthResult({
+        email: payload?.email,
+        name: payload?.name,
+      })
+      return {
+        user: {
+          ...preview.user,
+          dni: String(payload?.dni ?? ''),
+          address: String(payload?.address ?? ''),
+          company: String(payload?.company ?? ''),
+          ruc: String(payload?.ruc ?? ''),
+        },
+        token: preview.token,
+        profileIncomplete: false,
+      }
+    }
     const { identity, token, profileDraft } = await registerAdminWithFirebase(payload)
     try {
       const profile = await upsertProfile(token, profileDraft)

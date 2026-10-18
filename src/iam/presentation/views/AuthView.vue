@@ -8,6 +8,7 @@ import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import { authApi } from '@/iam/infrastructure/authApi.js'
 import { residentsApi } from '@/residents/infrastructure/residentsApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
+import { OPEN_WIREFRAME_ACCESS } from '@/iam/application/localPreviewAuth.js'
 import { signInWithGoogle, refreshFirebaseIdToken } from '@/iam/infrastructure/googleIdentity.js'
 
 const route = useRoute()
@@ -201,6 +202,14 @@ function finishAdminSession(user, token) {
 async function onLoginContinue() {
   loginEmailError.value = ''
   const raw = loginEmail.value.trim()
+  if (OPEN_WIREFRAME_ACCESS) {
+    if (!raw) {
+      loginEmailError.value = t('auth.emailInvalid')
+      return
+    }
+    loginStep.value = 2
+    return
+  }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) {
     loginEmailError.value = t('auth.emailInvalid')
     return
@@ -348,7 +357,7 @@ async function onRegisterSubmit() {
   registerLoading.value = true
   registerError.value = ''
   try {
-    if (String(regPassword.value).length < 6) {
+    if (!OPEN_WIREFRAME_ACCESS && String(regPassword.value).length < 6) {
       registerError.value = t('auth.passwordTooShort')
       return
     }

@@ -1,6 +1,9 @@
 import axios from 'axios'
 import { API_BASE_URL } from '@/shared/infrastructure/envConfig.js'
-import { isPreviewAccessToken } from '@/iam/application/localPreviewAuth.js'
+import {
+  isPreviewAccessToken,
+  OPEN_WIREFRAME_ACCESS,
+} from '@/iam/application/localPreviewAuth.js'
 import { clearSession, getAccessToken } from '@/iam/application/sessionStore.js'
 
 /**
@@ -9,8 +12,8 @@ import { clearSession, getAccessToken } from '@/iam/application/sessionStore.js'
  * Errors are normalized so the rest of the app can branch on `error.code`
  * (e.g. 'NETWORK_ERROR', 'TIMEOUT', 'EMAIL_NOT_FOUND', or 'HTTP_404').
  *
- * In `npm run dev`, Vite serves a shared mock API so invite links work in
- * another browser (incognito). Production uses the real backend.
+ * Open-wireframe builds use the in-browser mock (local + Vercel).
+ * Otherwise production hits the real backend (Vercel rewrites → Railway).
  */
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -20,6 +23,15 @@ export const apiClient = axios.create({
     Accept: 'application/json',
   },
 })
+
+if (OPEN_WIREFRAME_ACCESS) {
+  apiClient.defaults.adapter = async (config) => {
+    const { localMockAdapter } = await import(
+      '@/shared/infrastructure/mock/mockAdapter.js'
+    )
+    return localMockAdapter(config)
+  }
+}
 
 apiClient.interceptors.request.use((config) => {
   const token = getAccessToken()

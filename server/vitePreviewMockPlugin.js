@@ -92,6 +92,17 @@ export function previewMockApiPlugin() {
         mockDb.installNodeSnapshot(readSnapshotFile())
       }
 
+      // Hot-reload mock modules when source changes (wireframe hardcode iteration).
+      server.watcher?.add([
+        path.join(process.cwd(), 'src/shared/infrastructure/mock'),
+      ])
+      server.watcher?.on('change', (file) => {
+        if (String(file).includes(`${path.sep}mock${path.sep}`)) {
+          mockAdapter = null
+          mockDb = null
+        }
+      })
+
       server.middlewares.use(async (req, res, next) => {
         const pathname = pathnameOf(req)
         if (!isMockApiPath(pathname)) {

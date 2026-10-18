@@ -1,0 +1,257 @@
+@startuml Figura98-BuildingFlex-DiagramaBD
+!theme plain
+skinparam linetype ortho
+skinparam shadowing false
+skinparam class {
+  BackgroundColor #FEFECE
+  BorderColor #333333
+  FontSize 11
+}
+skinparam package {
+  BackgroundColor #FFFFFF
+  BorderColor #666666
+  FontSize 12
+}
+title BuildingFlex — Figura 98. Diagrama de base de datos
+
+hide methods
+hide stereotypes
+
+package "IAM" {
+  entity "User" as User {
+    * id : UUID <<PK>>
+    --
+    ownerAdminId : UUID <<FK>>
+    email : VARCHAR
+    passwordHash : VARCHAR
+    role : VARCHAR
+    status : VARCHAR
+    createdAt : DATETIME
+  }
+
+  entity "Subscription" as Subscription {
+    * id : UUID <<PK>>
+    --
+    ownerAdminId : UUID <<FK>>
+    plan : VARCHAR
+    status : VARCHAR
+    startDate : DATETIME
+    endDate : DATETIME
+  }
+}
+
+package "Profiles" {
+  entity "AdminProfile" as AdminProfile {
+    * id : UUID <<PK>>
+    --
+    userId : UUID <<FK>>
+    fullName : VARCHAR
+    phone : VARCHAR
+    address : VARCHAR
+  }
+}
+
+package "Team" {
+  entity "Employee" as Employee {
+    * id : UUID <<PK>>
+    --
+    ownerAdminId : UUID <<FK>>
+    fullName : VARCHAR
+    position : VARCHAR
+    phone : VARCHAR
+    email : VARCHAR
+    status : VARCHAR
+  }
+
+  entity "Conversation" as Conversation {
+    * id : UUID <<PK>>
+    --
+    residentId : UUID <<FK>>
+    status : VARCHAR
+  }
+
+  entity "Message" as Message {
+    * id : UUID <<PK>>
+    --
+    conversationId : UUID <<FK>>
+    content : TEXT
+    createdAt : DATETIME
+    sender : VARCHAR
+  }
+}
+
+package "Finances" {
+  entity "Fee" as Fee {
+    * id : UUID <<PK>>
+    --
+    residentId : UUID <<FK>>
+    amount : DECIMAL
+    dueDate : DATE
+    status : VARCHAR
+    concept : VARCHAR
+  }
+
+  entity "Expense" as Expense {
+    * id : UUID <<PK>>
+    --
+    ownerAdminId : UUID <<FK>>
+    description : VARCHAR
+    category : VARCHAR
+    amount : DECIMAL
+    createdAt : DATETIME
+  }
+
+  entity "Utility" as Utility {
+    * id : UUID <<PK>>
+    --
+    residentId : UUID <<FK>>
+    type : VARCHAR
+    amount : DECIMAL
+    period : VARCHAR
+  }
+
+  entity "ExtraCharge" as ExtraCharge {
+    * id : UUID <<PK>>
+    --
+    residentId : UUID <<FK>>
+    description : VARCHAR
+    amount : DECIMAL
+    status : VARCHAR
+  }
+
+  entity "Payment" as Payment {
+    * id : UUID <<PK>>
+    --
+    feeId : UUID <<FK>>
+    residentId : UUID <<FK>>
+    amount : DECIMAL
+    paymentMethod : VARCHAR
+    status : VARCHAR
+    paidAt : DATETIME
+  }
+
+  entity "Payout" as Payout {
+    * id : UUID <<PK>>
+    --
+    ownerAdminId : UUID <<FK>>
+    amount : DECIMAL
+    status : VARCHAR
+    processedAt : DATETIME
+  }
+}
+
+package "Information" {
+  entity "Announcement" as Announcement {
+    * id : UUID <<PK>>
+    --
+    ownerAdminId : UUID <<FK>>
+    title : VARCHAR
+    content : TEXT
+    publishDate : DATETIME
+    status : VARCHAR
+  }
+}
+
+package "Import" {
+  entity "Folder" as Folder {
+    * id : UUID <<PK>>
+    --
+    ownerAdminId : UUID <<FK>>
+    name : VARCHAR
+    createdAt : DATETIME
+  }
+
+  entity "Document" as Document {
+    * id : UUID <<PK>>
+    --
+    folderId : UUID <<FK>>
+    fileName : VARCHAR
+    fileUrl : VARCHAR
+    fileType : VARCHAR
+    uploadedAt : DATETIME
+  }
+}
+
+package "SocialSpaces" {
+  entity "CommonSpace" as CommonSpace {
+    * id : UUID <<PK>>
+    --
+    ownerAdminId : UUID <<FK>>
+    name : VARCHAR
+    description : TEXT
+    capacity : INT
+    status : VARCHAR
+  }
+
+  entity "Reservation" as Reservation {
+    * id : UUID <<PK>>
+    --
+    spaceId : UUID <<FK>>
+    residentId : UUID <<FK>>
+    reservationDate : DATE
+    startTime : TIME
+    endTime : TIME
+    status : VARCHAR
+  }
+
+  entity "Guest" as Guest {
+    * id : UUID <<PK>>
+    --
+    reservationId : UUID <<FK>>
+    fullName : VARCHAR
+    documentNumber : VARCHAR
+    qrCode : VARCHAR
+    status : VARCHAR
+  }
+}
+
+package "Incidents" {
+  entity "ServiceProvider" as ServiceProvider {
+    * id : UUID <<PK>>
+    --
+    ownerAdminId : UUID <<FK>>
+    name : VARCHAR
+    serviceType : VARCHAR
+    phone : VARCHAR
+    email : VARCHAR
+    status : VARCHAR
+  }
+
+  entity "Incident" as Incident {
+    * id : UUID <<PK>>
+    --
+    residentId : UUID <<FK>>
+    providerId : UUID <<FK>>
+    title : VARCHAR
+    description : TEXT
+    priority : VARCHAR
+    status : VARCHAR
+    createdAt : DATETIME
+  }
+}
+
+' FK relationships
+User ||--o| Subscription : ownerAdminId
+User ||--|| AdminProfile : userId
+User ||--o{ Employee : ownerAdminId
+User ||--o{ Conversation : residentId
+Conversation ||--o{ Message : conversationId
+User ||--o{ Fee : residentId
+User ||--o{ Expense : ownerAdminId
+User ||--o{ Utility : residentId
+User ||--o{ ExtraCharge : residentId
+User ||--o{ Payment : residentId
+Fee ||--o{ Payment : feeId
+User ||--o{ Payout : ownerAdminId
+User ||--o{ Announcement : ownerAdminId
+User ||--o{ Folder : ownerAdminId
+Folder ||--o{ Document : folderId
+User ||--o{ CommonSpace : ownerAdminId
+CommonSpace ||--o{ Reservation : spaceId
+User ||--o{ Reservation : residentId
+Reservation ||--o{ Guest : reservationId
+User ||--o{ ServiceProvider : ownerAdminId
+User ||--o{ Incident : residentId
+ServiceProvider ||--o{ Incident : providerId
+
+@enduml

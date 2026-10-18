@@ -1,6 +1,6 @@
 /** Demo tenant used by local preview login (`preview-admin-1` / `preview-resident-1`). */
 export const MOCK_OWNER_ID = 'preview-admin-1'
-export const MOCK_DB_VERSION = 2
+export const MOCK_DB_VERSION = 4
 
 function pad(n) {
   return String(n).padStart(2, '0')
@@ -421,15 +421,22 @@ export function createSeedDb() {
     ],
     supportChats: [
       {
-        id: 'chat-1',
+        id: 'chat-admin-1',
         ownerAdminId: owner,
         residentId: 'preview-resident-1',
         residentName: 'Ana Torres',
         topic: 'Recibo de septiembre',
+        title: 'Recibo de septiembre',
+        titleSummarized: true,
+        kind: 'admin',
+        source: 'resident',
         status: 'open',
+        linkedChatId: '',
+        escalatedChatId: '',
         messages: [
           {
             id: 'msg-1',
+            role: 'resident',
             authorRole: 'resident',
             authorName: 'Ana Torres',
             body: 'Hola, el recibo de este mes incluye un cargo extra. ¿Pueden confirmarlo?',
@@ -437,6 +444,7 @@ export function createSeedDb() {
           },
           {
             id: 'msg-2',
+            role: 'admin',
             authorRole: 'admin',
             authorName: 'Admin demo',
             body: 'Sí, es el prorrateo de agua potable. Cualquier duda avísanos.',
@@ -445,6 +453,52 @@ export function createSeedDb() {
         ],
         createdAt: isoHoursAgo(5),
         updatedAt: isoHoursAgo(3),
+      },
+      {
+        id: 'chat-ai-1',
+        ownerAdminId: owner,
+        residentId: 'preview-resident-1',
+        residentName: 'Ana Torres',
+        topic: 'Consulta general',
+        title: 'Consulta general',
+        titleSummarized: true,
+        kind: 'ai',
+        source: 'resident',
+        status: 'open',
+        linkedChatId: '',
+        escalatedChatId: '',
+        messages: [
+          {
+            id: 'msg-ai-1',
+            role: 'user',
+            authorRole: 'resident',
+            authorName: 'Ana Torres',
+            body: '¿Cómo veo mis recibos pendientes?',
+            createdAt: isoHoursAgo(2),
+          },
+          {
+            id: 'msg-ai-2',
+            role: 'ai',
+            authorRole: 'assistant',
+            authorName: 'Asistente BuildingFlex',
+            body: 'Tus recibos y pagos están en Finanzas. Los pendientes aparecen con estado “Por pagar”. Si un cargo no cuadra, avísame el mes y el monto.',
+            createdAt: isoHoursAgo(2),
+          },
+        ],
+        createdAt: isoHoursAgo(2),
+        updatedAt: isoHoursAgo(2),
+      },
+    ],
+    profiles: [
+      {
+        id: owner,
+        name: 'Admin demo',
+        email: 'admin@demo.test',
+        role: 'admin',
+        dni: '12345678',
+        address: 'Av. Principal 123, Lima',
+        company: 'BuildingFex Demo',
+        ruc: '20123456789',
       },
     ],
     serviceProviders: [
@@ -470,8 +524,38 @@ export function createSeedDb() {
         ownerAdminId: owner,
       },
     ],
-    importUploads: [],
-    importFolders: [],
+    importFolders: [
+      {
+        id: `folder-home-${owner}`,
+        name: 'Home',
+        isHome: true,
+        isContext: false,
+        createdAt: isoHoursAgo(120),
+        ownerAdminId: owner,
+      },
+      {
+        id: 'folder-regs',
+        name: 'Reglamento',
+        isHome: false,
+        isContext: true,
+        createdAt: isoHoursAgo(100),
+        ownerAdminId: owner,
+      },
+    ],
+    importUploads: [
+      {
+        id: 'import-demo-1',
+        ownerAdminId: owner,
+        fileName: 'reglamento-interno.pdf',
+        mimeType: 'application/pdf',
+        size: 245760,
+        storagePath: `owners/${owner}/import/import-demo-1/reglamento-interno.pdf`,
+        folderId: 'folder-regs',
+        uploadStatus: 'confirmed',
+        indexingStatus: 'ready',
+        uploadedAt: isoHoursAgo(90),
+      },
+    ],
     residentExtraCharges: [],
     subscriptions: [
       {

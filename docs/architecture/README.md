@@ -1,51 +1,36 @@
-# BuildingFex — Diagramas C4 (Structurizr DSL)
+# BuildingFlex — Diagramas C4 (Structurizr DSL)
 
-Archivo: [`workspace.dsl`](./workspace.dsl)
+Archivo principal: [`workspace.dsl`](./workspace.dsl)  
+Módulo documentos: [`import-workspace.dsl`](./import-workspace.dsl) (vista Communications)
 
-## Vistas
+## 9 contextos (todos los diagramas C4 los referencian)
 
-| Nivel | Key | Qué muestra |
-|-------|-----|-------------|
-| **4.3.1 Landscape** | `SystemLandscape` | Todas las personas + BuildingFex + Firebase Auth/Storage, Gemini, Mercado Pago (vista de paisaje) |
-| **C1** | `SystemContext` | Mismo foco centrado en BuildingFex (contexto del sistema) |
-| **C2** | `Containers` | SPA, Edge MP (2º camino), API (1º camino), MySQL + externos |
-| **C3 SPA** | `SpaShellIam` | Shell + IAM + apiClient + mock |
-| **C3 SPA** | `SpaDomain` | Dominio autenticado + `GuestInviteView` pública |
-| **C3 SPA** | `SpaImportSupport` | Import (Storage) + Soporte (SignalR) |
-| **C3 API** | `ApiComponents` | Shared Kernel + módulos BC |
-| **C4** | `DeploymentProduction` | Vercel → Railway + Firebase + Gemini + MP |
-| **C4** | `DeploymentDevLocal` | Vite + API/MySQL local (excluyente) |
-| **C4** | `DeploymentDevProxy` | Vite → Railway staging (excluyente) |
+1. IAM  
+2. Profiles  
+3. Finances  
+4. Billing  
+5. Spaces  
+6. Incidents  
+7. Communications  
+8. Resident Care  
+9. Team  
+
+## Vistas a exportar / actualizar en el informe
+
+| Punto | Vista Structurizr | Archivo |
+|-------|-------------------|--------|
+| Diagramas: 9 contextos | `SystemLandscape`, `SystemContext`, `Containers`, `NineContexts`, `ApiComponents` | `workspace.dsl` |
+| 4.3.3 Billing | `ApiComponents` / `NineContexts` — grupo **4. Billing** | `workspace.dsl` |
+| 4.3.4 Deployment | `DeploymentProduction` — nota S/ 450 = tope | `workspace.dsl` |
+| Communications (docs) | `CommunicationsContainerView` | `import-workspace.dsl` |
 
 ## Cómo usarlo
 
-[Structurizr DSL Playground](https://structurizr.com/dsl) — pega todo `workspace.dsl`.
+1. Abre https://structurizr.com/dsl  
+2. Pega el contenido de `workspace.dsl`  
+3. Exporta cada vista y reemplaza las figuras del informe  
 
-```bash
-docker run -it --rm -p 8080:8080 \
-  -v "$(pwd)/docs/architecture:/usr/local/structurizr" \
-  structurizr/lite
-```
+## 4.3.4 — texto sugerido bajo el diagrama de deploy
 
-## Decisiones (código real)
-
-| Tema | Realidad |
-|------|----------|
-| Personas C1 | Solo Admin, Residente, Invitado de residente |
-| Auth | Firebase idToken + custom claims. Sin App JWT |
-| Guest | Componente SPA propio (`guestInviteUi`); sin shell ni Bearer |
-| Mercado Pago | **Dos caminos reales**: 1º `/api/v1/payments\|subscription` (token en API); 2º `/mp/*` Edge si falla. Deuda consciente; no colapsado en el diagrama |
-| Import | URL firmada V4 → PUT Storage → confirm |
-| Soporte | API + SignalR; Gemini solo servidor |
-| Dev | Dos entornos excluyentes: local vs proxy |
-
-## Flujos
-
-```
-Admin:     Firebase → SPA (idToken) → API → MySQL
-Residente: Invite → Google → claims → getIdToken(true) → API
-Pago:      SPA → API checkout; si falla → Edge /mp → Mercado Pago
-Import:    signed-url → PUT Storage → confirm → RAG worker
-Soporte:   REST/SignalR → API → Gemini (+ RAG) → MySQL
-Invitado:  /invite/:token → GET reservations?guestInviteToken= (anon)
-```
+> Despliegue productivo: **Vercel** (SPA + Edge Mercado Pago) → **Railway** (BuildingFlex.Api + **MySQL**) + Firebase Auth/Storage + Gemini.  
+> Los **S/ 450** de infraestructura en el análisis de costos son un **tope de presupuesto** (escenario de referencia tipo Render/PostgreSQL), **no** el costo exacto de este stack.
