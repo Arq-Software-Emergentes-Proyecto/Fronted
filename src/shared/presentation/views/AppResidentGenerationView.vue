@@ -21,7 +21,8 @@ const loadError = ref(false)
 const selectedId = ref(null)
 const draftGuest = ref('')
 const savingGuests = ref(false)
-const guestsError = ref(false)
+const guestsError = ref('')
+const cancellingId = ref(null)
 
 const nowMs = ref(Date.now())
 const qrByReservationId = ref({})
@@ -66,8 +67,9 @@ const selected = computed(
 
 const selectedGuestCount = computed(() => selected.value?.guests?.length ?? 0)
 
+/** Server-issued expiry (end of the event + 2 h, US027); local fallback only for the mock. */
 function inviteExpiryMs(r) {
-  return reservationInviteExpiresAtMs(r.date, r.startTime)
+  return reservationInviteExpiresAtMs(r)
 }
 
 function inviteLinkExpired(r) {
@@ -80,10 +82,52 @@ function formatExpiryClockFromReservation(r) {
   const exp = inviteExpiryMs(r)
   if (exp == null) return ''
   const d = new Date(exp)
-  return d.toLocaleTimeString(locale.value === 'es' ? 'es-PE' : 'en-US', {
+  return d.toLocaleString(locale.value === 'es' ? 'es-PE' : 'en-US', {
+    day: 'numeric',
+    month: 'short',
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function whatsAppShareUrl(r) {
+  const url = buildGuestInviteUrl(r.guestInviteToken)
+  if (!url) return ''
+  const text = t('socialSpaces.whatsAppMessage', {
+    space: spaceName(r.spaceId),
+    date: formatDate(r.date),
+    start: r.startTime,
+    end: r.endTime,
+    url,
+  })
+  return `https://wa.me/?text=${encodeURIComponent(text)}`
+}
+
+function reservationEndMs(r) {
+  const [y, m, d] = String(r.date ?? '').split('-').map(Number)
+  const [h, mi] = String(r.endTime ?? '').split(':').map(Number)
+  if (![y, m, d, h, mi].every(Number.isFinite)) return null
+  return new Date(y, m - 1, d, h, mi, 0, 0).getTime()
+}
+
+function canCancel(r) {
+  const end = reservationEndMs(r)
+  return end != null && nowMs.value < end
+}
+
+async function cancelReservation(r) {
+  if (cancellingId.value || !window.confirm(t('socialSpaces.cancelConfirm'))) return
+  cancellingId.value = r.id
+  guestsError.value = ''
+  try {
+    await reservationsApi.cancel(r.id)
+    reservations.value = reservations.value.filter((x) => x.id !== r.id)
+    if (String(selectedId.value) === String(r.id)) selectedId.value = null
+  } catch {
+    guestsError.value = t('socialSpaces.cancelError')
+  } finally {
+    cancellingId.value = null
+  }
 }
 
 function spaceName(spaceId) {
@@ -109,7 +153,7 @@ function slotLabel(r) {
 function selectReservation(id) {
   selectedId.value = String(selectedId.value) === String(id) ? null : id
   draftGuest.value = ''
-  guestsError.value = false
+  guestsError.value = ''
 }
 
 async function syncInviteQrs() {
@@ -152,7 +196,7 @@ async function persistGuests(nextGuests) {
   const res = selected.value
   if (!res?.id) return
   savingGuests.value = true
-  guestsError.value = false
+  guestsError.value = ''
   try {
     const updated = await reservationsApi.updateGuests(res.id, nextGuests)
     const idx = reservations.value.findIndex((x) => x.id === updated.id)
@@ -160,8 +204,13 @@ async function persistGuests(nextGuests) {
       reservations.value[idx] = updated
     }
     void syncInviteQrs()
-  } catch {
-    guestsError.value = true
+  } catch (error) {
+    const messages = {
+      RESERVATION_CAPACITY_EXCEEDED: 'socialSpaces.errCapacity',
+      RESERVATION_TOO_MANY_GUESTS: 'socialSpaces.errTooManyGuests',
+      RESERVATION_CANCELLED: 'socialSpaces.errCancelled',
+    }
+    guestsError.value = t(messages[error?.code] ?? 'resident.generationGuestsSaveError')
   } finally {
     savingGuests.value = false
   }
@@ -251,7 +300,7 @@ onUnmounted(() => {
       {{ t('app.reservationProfileMissing') }}
     </p>
     <p v-if="guestsError" class="gen-alert" role="alert">
-      {{ t('resident.generationGuestsSaveError') }}
+      {{ guestsError }}
     </p>
 
     <div
@@ -363,7 +412,7 @@ onUnmounted(() => {
 
             <div v-if="r.guestInviteToken && r.guests?.length" class="gen-invite">
               <h3 class="gen-invite__title">{{ t('resident.generationInviteTitle') }}</h3>
-              <p class="gen-invite__hint">{{ t('resident.generationInviteQrHelp') }}</p>
+              <p class="gen-invite__hint">{{ t('socialSpaces.inviteHelp') }}</p>
               <div class="gen-invite__row">
                 <input
                   readonly
@@ -379,6 +428,18 @@ onUnmounted(() => {
                 </button>
               </div>
               <template v-if="!inviteLinkExpired(r)">
+                <a
+                  class="gen-invite__whatsapp"
+                  :href="whatsAppShareUrl(r)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <i class="pi pi-whatsapp" aria-hidden="true" />
+                  {{ t('socialSpaces.shareWhatsApp') }}
+                </a>
+                <p class="gen-invite__hint">
+                  {{ t('socialSpaces.inviteValidUntil', { time: formatExpiryClockFromReservation(r) }) }}
+                </p>
                 <div v-if="qrByReservationId[r.id]" class="gen-invite__qr">
                   <img
                     :src="qrByReservationId[r.id]"
@@ -391,11 +452,23 @@ onUnmounted(() => {
               </template>
               <p v-else class="gen-invite__expired" role="alert">
                 {{
-                  t('resident.generationInviteExpired', {
+                  t('socialSpaces.inviteExpired', {
                     time: formatExpiryClockFromReservation(r),
                   })
                 }}
               </p>
+            </div>
+
+            <div v-if="canCancel(r)" class="gen-cancel">
+              <button
+                type="button"
+                class="gen-cancel__btn"
+                :disabled="cancellingId === r.id"
+                @click="cancelReservation(r)"
+              >
+                <i class="pi pi-times-circle" aria-hidden="true" />
+                {{ t('socialSpaces.cancelReservation') }}
+              </button>
             </div>
           </div>
         </article>
@@ -749,6 +822,61 @@ onUnmounted(() => {
 
 .gen-invite__copy:hover {
   color: #0071e3;
+}
+
+.gen-invite__whatsapp {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  align-self: flex-start;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  background: #25d366;
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.gen-invite__whatsapp:hover {
+  background: #1ebe5b;
+}
+
+.gen-invite__whatsapp:focus-visible,
+.gen-cancel__btn:focus-visible {
+  outline: 2px solid #0071e3;
+  outline-offset: 2px;
+}
+
+.gen-cancel {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
+.gen-cancel__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid rgba(180, 35, 24, 0.25);
+  border-radius: 8px;
+  background: #fff;
+  color: #b42318;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gen-cancel__btn:hover:not(:disabled) {
+  background: #fdecea;
+}
+
+.gen-cancel__btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
 }
 
 .gen-invite__qr {

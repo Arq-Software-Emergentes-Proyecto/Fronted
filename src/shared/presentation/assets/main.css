@@ -7,9 +7,12 @@
 }
 
 :root {
-  --apple-font:
-    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', 'Helvetica Neue',
-    Helvetica, Arial, sans-serif;
+  /* RNF007 style guide: Inter for functional content, Montserrat for titles (loaded in index.html). */
+  --bf-font-body:
+    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --bf-font-heading:
+    'Montserrat', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --apple-font: var(--bf-font-body);
   --apple-text: #1d1d1f;
   --apple-text-secondary: #86868b;
   --apple-text-tertiary: #6e6e73;
@@ -105,9 +108,61 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--bf-font-heading);
+}
+
+/* PrimeVue form controls and buttons inherit the body font (Inter) instead of the theme default. */
+button,
+input,
+select,
+textarea,
+.p-component {
+  font-family: inherit;
+}
+
 a {
   color: inherit;
   text-decoration: none;
+}
+
+/*
+ * RNF003: one invalid-field look across forms. Mark the control with aria-invalid="true"
+ * (PrimeVue: also :invalid), link the message with aria-describedby and render it as .bf-field-error.
+ * !important so it wins over component-scoped border / focus styles.
+ */
+input[aria-invalid='true'],
+textarea[aria-invalid='true'],
+select[aria-invalid='true'],
+.p-inputtext[aria-invalid='true'],
+.p-select[aria-invalid='true'],
+.p-select.p-invalid,
+.p-inputnumber[aria-invalid='true'] .p-inputtext,
+.p-datepicker[aria-invalid='true'] .p-inputtext {
+  border-color: #d70015 !important;
+  background-color: #fff6f6;
+  box-shadow: 0 0 0 3px rgba(215, 0, 21, 0.12) !important;
+}
+
+.bf-field--invalid > label,
+.bf-field--invalid > span:first-child,
+.bf-field--invalid .bf-field-label {
+  color: #b42318;
+}
+
+.bf-field-error {
+  display: block;
+  margin: 0.3rem 0 0;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.35;
+  color: #b42318;
+  text-align: left;
 }
 
 img {

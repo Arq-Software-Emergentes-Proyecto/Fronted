@@ -4,9 +4,15 @@ import { useI18n } from 'vue-i18n'
 import { useSession } from '@/iam/application/sessionStore.js'
 import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.js'
 import { spacesApi } from '@/socialSpaces/infrastructure/spacesApi.js'
-import { announcementsApi } from '@/information/infrastructure/announcementsApi.js'
+import { announcementsApi } from '@/communications/infrastructure/announcementsApi.js'
 import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
+import {
+  compareAnnouncementsForCarousel,
+  isAnnouncementActive,
+} from '@/communications/domain/model/announcementConstants.js'
+import noAnnouncementsIllustration from '@/communications/presentation/assets/no-announcements.svg'
 import { useResidentPaymentStore } from '@/finances/application/residentPaymentStore.js'
+import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 
 const { t, locale } = useI18n()
 const { state: sessionState } = useSession()
@@ -24,6 +30,13 @@ const isLoadingAnnouncements = ref(false)
 const incidents = ref([])
 const isLoadingIncidents = ref(false)
 
+/** RNF012: the dashboard data (or the finance summary) could not be loaded. */
+const dashboardLoadFailed = ref(false)
+const isRetrying = ref(false)
+const showLoadError = computed(
+  () => !isLoadingReservations.value && (dashboardLoadFailed.value || Boolean(paymentState.error)),
+)
+
 const currentIndex = ref(0)
 const showAllAnnouncements = ref(false)
 const showAllIncidents = ref(false)
@@ -33,12 +46,32 @@ const todayIso = new Date().toISOString().slice(0, 10)
 
 const allUpcomingReservations = computed(() => {
   return reservations.value
-    .filter((r) => r.date >= todayIso)
+    .filter((r) => r.status !== 'CANCELLED' && r.date >= todayIso)
     .sort((a, b) => {
       if (a.date !== b.date) return a.date.localeCompare(b.date)
       return a.startTime.localeCompare(b.startTime)
     })
 })
+
+/** US018: full booking history (past, upcoming and cancelled), newest first. */
+const reservationHistory = computed(() =>
+  reservations.value.slice().sort((a, b) => {
+    if (a.date !== b.date) return b.date.localeCompare(a.date)
+    return String(b.startTime).localeCompare(String(a.startTime))
+  }),
+)
+
+function reservationHistoryStatus(r) {
+  if (r.status === 'CANCELLED') return { key: 'cancelled', label: t('socialSpaces.statusCancelled') }
+  const now = new Date()
+  const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const nowTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+  if (r.date < localToday || (r.date === localToday && String(r.endTime) <= nowTime)) {
+    return { key: 'finished', label: t('socialSpaces.statusFinished') }
+  }
+  if (r.date === localToday) return { key: 'today', label: t('socialSpaces.statusToday') }
+  return { key: 'confirmed', label: t('socialSpaces.statusConfirmed') }
+}
 
 const todayReservations = computed(() => {
   return allUpcomingReservations.value.filter((r) => r.date === todayIso)
@@ -48,8 +81,20 @@ const otherUpcomingReservations = computed(() => {
   return allUpcomingReservations.value.filter((r) => r.date > todayIso)
 })
 
+// RF019/RF020: el servidor ya devuelve solo vigentes ordenados por prioridad; se re-aplica en cliente
+// por si un comunicado vence con el dashboard abierto (nunca se muestra uno vencido como vigente).
 const activeAnnouncements = computed(() =>
-  announcements.value.filter((a) => !a.expiresAt || new Date() < new Date(a.expiresAt)),
+  announcements.value
+    .filter((a) => isAnnouncementActive(a))
+    .slice()
+    .sort(compareAnnouncementsForCarousel),
+)
+
+watch(
+  () => activeAnnouncements.value.length,
+  (len) => {
+    if (currentIndex.value >= len) currentIndex.value = 0
+  },
 )
 
 const currentAnnouncement = computed(() => activeAnnouncements.value[currentIndex.value] ?? null)
@@ -64,21 +109,46 @@ const incidentsSummary = computed(() => {
   return summary
 })
 
-const financeSummary = computed(() => {
-  const fees = paymentState.fees || []
-  const paid = fees.filter((f) => f.status === 'Pagado').reduce((sum, f) => sum + f.amount, 0)
-  const pending = fees.filter((f) => f.status === 'Pendiente').reduce((sum, f) => sum + f.amount, 0)
+// RF017 / US017: la dona resume SOLO el mes actual (cuotas del mes o que vencen este mes),
+// más la deuda vencida que sigue impaga (arrastre). Sin movimientos → anillo gris neutro.
+const currentMonthKey = (() => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+})()
 
-  const overdue = fees
-    .filter((f) => {
-      if (f.status !== 'Pendiente') return false
-      const due = new Date(f.dueDate + 'T00:00:00')
-      const now = new Date(todayIso + 'T00:00:00')
-      return due < now
-    })
-    .reduce((sum, f) => sum + f.amount, 0)
+function isFeeOverdue(fee) {
+  if (fee.status !== 'Pendiente') return false
+  const due = new Date(fee.dueDate + 'T00:00:00')
+  const now = new Date(todayIso + 'T00:00:00')
+  return due < now
+}
+
+function isCurrentMonthMovement(fee) {
+  return (
+    String(fee.billingMonth || '') === currentMonthKey ||
+    String(fee.dueDate || '').startsWith(currentMonthKey)
+  )
+}
+
+const financeSummary = computed(() => {
+  const fees = (paymentState.fees || []).filter(
+    (f) => isCurrentMonthMovement(f) || isFeeOverdue(f),
+  )
+  const amount = (f) => Number(f.amount) || 0
+  const paid = fees.filter((f) => f.status === 'Pagado').reduce((sum, f) => sum + amount(f), 0)
+  const pending = fees.filter((f) => f.status === 'Pendiente').reduce((sum, f) => sum + amount(f), 0)
+  const overdue = fees.filter(isFeeOverdue).reduce((sum, f) => sum + amount(f), 0)
 
   return { paid, pending, overdue, total: paid + pending }
+})
+
+const financeMonthLabel = computed(() => {
+  const [y, m] = currentMonthKey.split('-').map(Number)
+  const label = new Date(y, m - 1, 1).toLocaleDateString(locale.value === 'es' ? 'es-PE' : 'en-US', {
+    month: 'long',
+    year: 'numeric',
+  })
+  return label.charAt(0).toUpperCase() + label.slice(1)
 })
 
 function prevAnn() {
@@ -173,7 +243,6 @@ function drawChart() {
 
   const { paid, pending, overdue } = financeSummary.value
   const total = paid + pending
-  if (total === 0) return
 
   const width = chartCanvas.value.width
   const height = chartCanvas.value.height
@@ -182,6 +251,19 @@ function drawChart() {
   const radius = Math.min(width, height) / 2 - 10
 
   ctx.clearRect(0, 0, width, height)
+
+  if (total === 0) {
+    // US017 "Residente sin historial": anillo gris neutro.
+    ctx.beginPath()
+    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI)
+    ctx.fillStyle = '#e5e5ea'
+    ctx.fill()
+    ctx.beginPath()
+    ctx.arc(centerX, centerY, radius * 0.7, 0, 2 * Math.PI)
+    ctx.fillStyle = '#fff'
+    ctx.fill()
+    return
+  }
 
   const data = [
     { val: paid, color: '#34c759' },
@@ -230,23 +312,27 @@ async function loadInitialData() {
   isLoadingReservations.value = true
   isLoadingAnnouncements.value = true
   isLoadingIncidents.value = true
+  dashboardLoadFailed.value = false
 
   try {
     const [resList, spaces, annList, allIncidents] = await Promise.all([
-      reservationsApi.listByResident(profile.value.id),
+      // RF018: historial completo de reservas (incluye pasadas y canceladas).
+      reservationsApi.listByResident(profile.value.id, { includeCancelled: true }),
       spacesApi.list(),
-      announcementsApi.list(),
-      incidentsApi.list(),
+      announcementsApi.listActive(),
+      // RF018: historial del residente filtrado en el servidor.
+      incidentsApi.listByResident(profile.value.id),
     ])
 
     reservations.value = resList
     spacesById.value = new Map(spaces.map((s) => [s.id, s]))
     announcements.value = annList
-    incidents.value = allIncidents.filter((i) => i.residentId === profile.value.id)
+    incidents.value = allIncidents
 
     await loadFinanceData(profile.value.id)
   } catch (err) {
     console.error('Error loading dashboard data', err)
+    dashboardLoadFailed.value = true
   } finally {
     isLoadingReservations.value = false
     isLoadingAnnouncements.value = false
@@ -263,8 +349,19 @@ watch(
   },
 )
 
+async function retryLoad() {
+  isRetrying.value = true
+  try {
+    await loadInitialData()
+  } finally {
+    isRetrying.value = false
+  }
+}
+
 onMounted(() => {
   loadInitialData()
+  // El anillo gris se dibuja aunque no haya datos (el watch solo corre si cambian).
+  nextTick(() => drawChart())
 })
 </script>
 
@@ -277,6 +374,8 @@ onMounted(() => {
         <h2 id="resident-kpi-heading" class="finance-panel__section-title">
           {{ t('resident.financeChartTitle') }}
         </h2>
+
+        <LoadErrorRetry v-if="showLoadError" :loading="isRetrying" @retry="retryLoad" />
 
         <div class="kpi-grid custom-scrollbar">
           <div class="kpi-card" :class="{ 'card-danger': financeSummary.overdue > 0 }">
@@ -338,18 +437,33 @@ onMounted(() => {
           <h2 id="resident-chart-heading" class="finance-panel__section-title">
             {{ t('resident.financeChartTitle') }}
           </h2>
+          <p class="chart-month">{{ t('financeOps.donutMonthHint', { month: financeMonthLabel }) }}</p>
           <div class="chart-wrap">
-            <div v-if="financeSummary.total > 0" class="chart-flex">
+            <div class="chart-flex">
               <div class="canvas-wrapper">
-                <canvas ref="chartCanvas" width="160" height="160"></canvas>
+                <canvas
+                  ref="chartCanvas"
+                  width="160"
+                  height="160"
+                  role="img"
+                  :aria-label="
+                    financeSummary.total > 0
+                      ? t('resident.financeChartTitle')
+                      : t('financeOps.donutEmpty')
+                  "
+                ></canvas>
                 <div class="chart-center-text">
-                  <span class="center-percent">
+                  <span v-if="financeSummary.total > 0" class="center-percent">
                     {{ Math.round((financeSummary.paid / financeSummary.total) * 100) }}%
                   </span>
+                  <span v-else class="center-percent center-percent--empty">—</span>
                   <span class="center-label">{{ t('resident.financeChartPaid') }}</span>
                 </div>
               </div>
-              <div class="chart-legend">
+              <p v-if="financeSummary.total === 0" class="dash-empty chart-empty-msg">
+                {{ t('financeOps.donutEmpty') }}
+              </p>
+              <div v-else class="chart-legend">
                 <div class="legend-item">
                   <span class="dot dot--paid"></span>
                   <span class="label">{{ t('resident.financeChartPaid') }}</span>
@@ -369,7 +483,6 @@ onMounted(() => {
                 </div>
               </div>
             </div>
-            <p v-else class="dash-empty chart-empty">{{ t('resident.financeChartEmpty') }}</p>
           </div>
         </section>
 
@@ -403,9 +516,16 @@ onMounted(() => {
           </div>
 
           <p v-if="isLoadingAnnouncements" class="dash-empty">…</p>
-          <p v-else-if="activeAnnouncements.length === 0" class="dash-empty">
-            {{ t('resident.announcementsEmpty') }}
-          </p>
+          <div v-else-if="activeAnnouncements.length === 0" class="ann-empty">
+            <img
+              :src="noAnnouncementsIllustration"
+              :alt="t('announcementFeed.emptyCarouselAlt')"
+              class="ann-empty__img"
+              width="160"
+              height="120"
+            />
+            <p class="dash-empty ann-empty__text">{{ t('announcementFeed.emptyCarousel') }}</p>
+          </div>
           <Transition v-else name="fade" mode="out-in">
             <article :key="currentIndex" class="ann-content">
               <div class="ann-content__top">
@@ -437,7 +557,7 @@ onMounted(() => {
             {{ t('resident.reservationsReminderTitle') }}
           </h2>
           <button
-            v-if="allUpcomingReservations.length > 0"
+            v-if="reservations.length > 0"
             type="button"
             class="btn-see-all"
             @click="showAllReservations = true"
@@ -523,7 +643,7 @@ onMounted(() => {
         <ul v-else class="dash-list" role="list">
           <li v-for="inc in incidents.slice(0, 5)" :key="inc.id" class="dash-row">
             <div class="dash-row__main">
-              <span class="dash-row__title">{{ inc.description }}</span>
+              <span class="dash-row__title">{{ inc.title || inc.description }}</span>
               <span class="dash-row__meta">{{ formatDate(inc.createdAt) }}</span>
             </div>
             <span class="inc-badge" :class="`inc-badge--${inc.status || 'open'}`">
@@ -554,7 +674,7 @@ onMounted(() => {
             </header>
             <div class="modal-body">
               <article
-                v-for="ann in announcements"
+                v-for="ann in activeAnnouncements"
                 :key="ann.id"
                 class="ann-all-item"
                 :class="{
@@ -607,10 +727,16 @@ onMounted(() => {
               <ul class="dash-list" role="list">
                 <li v-for="inc in incidents" :key="inc.id" class="dash-row">
                   <div class="dash-row__main">
-                    <span class="dash-row__title">{{ inc.description }}</span>
+                    <span class="dash-row__title">{{ inc.title || inc.description }}</span>
+                    <span v-if="inc.title" class="dash-row__meta">{{ inc.description }}</span>
                     <span class="dash-row__meta">
                       {{ formatDate(inc.createdAt) }}
-                      <template v-if="inc.provider"> · {{ inc.provider }}</template>
+                      <template v-if="inc.provider">
+                        · {{ inc.provider }}<template v-if="inc.providerPhone"> ({{ inc.providerPhone }})</template>
+                      </template>
+                    </span>
+                    <span v-if="inc.resolutionComment" class="dash-row__meta">
+                      {{ t('incidentFlow.resolutionTitle') }}: {{ inc.resolutionComment }}
                     </span>
                   </div>
                   <span class="inc-badge" :class="`inc-badge--${inc.status || 'open'}`">
@@ -634,22 +760,37 @@ onMounted(() => {
           <div
             class="modal-content"
             role="dialog"
-            :aria-label="t('resident.reservationsReminderTitle')"
+            :aria-label="t('socialSpaces.historyTitle')"
           >
             <header class="modal-header">
-              <h2 class="modal-title">{{ t('resident.reservationsReminderTitle') }}</h2>
+              <h2 class="modal-title">{{ t('socialSpaces.historyTitle') }}</h2>
               <button type="button" class="modal-close" @click="showAllReservations = false">
                 <i class="pi pi-times" aria-hidden="true"></i>
               </button>
             </header>
             <div class="modal-body">
-              <ul class="dash-list" role="list">
-                <li v-for="res in allUpcomingReservations" :key="res.id" class="dash-row">
+              <p v-if="!reservationHistory.length" class="dash-empty">
+                {{ t('socialSpaces.historyEmpty') }}
+              </p>
+              <ul v-else class="dash-list" role="list">
+                <li
+                  v-for="res in reservationHistory"
+                  :key="res.id"
+                  class="dash-row"
+                  :class="{ 'dash-row--cancelled': res.status === 'CANCELLED' }"
+                >
                   <div class="dash-row__main">
                     <span class="dash-row__title">{{ spaceNameFor(res) }}</span>
-                    <span class="dash-row__meta">{{ res.startTime }} – {{ res.endTime }}</span>
+                    <span class="dash-row__meta">
+                      {{ res.date }} · {{ res.startTime }} – {{ res.endTime }}
+                    </span>
                   </div>
-                  <span class="guest-badge guest-badge--yes">{{ res.date }}</span>
+                  <span
+                    class="guest-badge"
+                    :class="`resv-status--${reservationHistoryStatus(res).key}`"
+                  >
+                    {{ reservationHistoryStatus(res).label }}
+                  </span>
                 </li>
               </ul>
             </div>
@@ -850,6 +991,24 @@ onMounted(() => {
   min-height: 10rem;
 }
 
+.chart-month {
+  margin: -0.45rem 0 0.75rem;
+  font-size: 0.75rem;
+  color: #86868b;
+}
+
+.center-percent--empty {
+  color: #aeaeb2;
+}
+
+.chart-empty-msg {
+  flex: 1;
+  min-width: 10rem;
+  margin: 0;
+  font-size: 0.875rem;
+  color: #6e6e73;
+}
+
 .chart-flex {
   display: flex;
   align-items: center;
@@ -948,6 +1107,26 @@ onMounted(() => {
   color: #6e6e73;
 }
 
+.ann-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0 0.25rem;
+  text-align: center;
+}
+
+.ann-empty__img {
+  width: 10rem;
+  max-width: 100%;
+  height: auto;
+}
+
+.ann-empty__text {
+  margin: 0;
+  font-weight: 500;
+}
+
 .dash-list {
   list-style: none;
   margin: 0;
@@ -1024,6 +1203,27 @@ onMounted(() => {
 .guest-badge--no {
   background: #eeeef0;
   color: #6e6e73;
+}
+
+.resv-status--confirmed,
+.resv-status--today {
+  background: #e8f5e9;
+  color: #1b7a3d;
+}
+
+.resv-status--finished {
+  background: #eeeef0;
+  color: #6e6e73;
+}
+
+.resv-status--cancelled {
+  background: #fdecee;
+  color: #b42318;
+}
+
+.dash-row--cancelled .dash-row__title {
+  text-decoration: line-through;
+  color: #86868b;
 }
 
 .inc-badge--open {

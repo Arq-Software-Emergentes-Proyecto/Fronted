@@ -4,12 +4,15 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import Button from 'primevue/button'
 import SkipLink from '@/shared/presentation/components/SkipLink.vue'
+import LocaleSwitch from '@/shared/presentation/components/LocaleSwitch.vue'
 import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import { authApi } from '@/iam/infrastructure/authApi.js'
 import { residentsApi } from '@/residents/infrastructure/residentsApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
 import { OPEN_WIREFRAME_ACCESS } from '@/iam/application/localPreviewAuth.js'
 import { signInWithGoogle, refreshFirebaseIdToken } from '@/iam/infrastructure/googleIdentity.js'
+import { createResidentPasswordAccount } from '@/iam/infrastructure/firebaseAuth.js'
+import BuildingForm from '@/profiles/presentation/components/BuildingForm.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -43,7 +46,7 @@ const inviteToken = computed(() =>
   String(route.query.token ?? route.query.code ?? '').trim(),
 )
 
-const inviteStep = ref('welcome') // 'welcome' | 'google'
+const inviteStep = ref('welcome') // 'welcome' | 'google' (Google or email + password)
 const inviteResident = ref(null)
 const inviteFetchError = ref('')
 const inviteLoading = ref(false)
@@ -90,6 +93,10 @@ function googleAuthMessage(error) {
   if (error?.code === 'RESIDENT_ONLY') return t('auth.residentGoogleAdminBlocked')
   if (error?.code === 'RESIDENT_GOOGLE_REQUIRED') return t('auth.residentGoogleRequired')
   if (error?.code === 'RESIDENT_USE_GOOGLE') return t('auth.residentUseGoogle')
+  if (error?.code === 'PASSWORD_TOO_SHORT') return t('auth.passwordTooShort')
+  if (error?.code === 'INVALID_PASSWORD') return t('auth.passwordInvalid')
+  if (error?.code === 'TOO_MANY_REQUESTS') return t('auth.tooManyRequests')
+  if (error?.code === 'ACCOUNT_DEACTIVATED') return t('auth.accountDeactivated')
   return t('auth.inviteGoogleError')
 }
 
@@ -147,11 +154,76 @@ async function onResidentGoogleSignUp() {
   }
 }
 
+/** Invite completion with email + password instead of Google (US014: residents may use both). */
+const invitePwEmail = ref('')
+const invitePwPassword = ref('')
+const invitePwConfirm = ref('')
+/** RNF003: invite password control the current error refers to ('email' | 'password' | 'confirm'). */
+const inviteErrorField = ref(null)
+watch(residentError, (msg) => {
+  if (!msg) inviteErrorField.value = null
+}, { flush: 'sync' })
+
+async function onResidentPasswordSignUp() {
+  if (residentLoading.value) return
+  residentError.value = ''
+  const email = invitePwEmail.value.trim()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    residentError.value = t('auth.emailInvalid')
+    inviteErrorField.value = 'email'
+    return
+  }
+  if (String(invitePwPassword.value).length < 6) {
+    residentError.value = t('auth.passwordTooShort')
+    inviteErrorField.value = 'password'
+    return
+  }
+  if (invitePwPassword.value !== invitePwConfirm.value) {
+    residentError.value = t('auth.passwordMismatch')
+    inviteErrorField.value = 'confirm'
+    return
+  }
+  residentLoading.value = true
+  try {
+    const account = OPEN_WIREFRAME_ACCESS
+      ? { email, token: 'preview-password' }
+      : await createResidentPasswordAccount({
+          email,
+          password: invitePwPassword.value,
+          name: inviteName.value,
+        })
+    const authResult = await residentsApi.completeInviteWithPassword({
+      token: inviteToken.value,
+      email: account.email,
+      name: inviteName.value,
+      idToken: account.token,
+    })
+    const sessionToken = OPEN_WIREFRAME_ACCESS
+      ? authResult.token
+      : await resolveResidentToken({ token: null })
+    await applyResidentSession(authResult.user, sessionToken)
+  } catch (error) {
+    residentError.value = googleAuthMessage(error)
+  } finally {
+    residentLoading.value = false
+  }
+}
+
 const loginStep = ref(1)
 const loginEmail = ref('')
 const loginPassword = ref('')
 const loginEmailError = ref('')
 const loginLoading = ref(false)
+/** RNF003: which login control the current error refers to ('email' | 'password' | null). */
+const loginErrorField = ref(null)
+watch(loginEmailError, (msg) => {
+  if (!msg) loginErrorField.value = null
+}, { flush: 'sync' })
+
+function setLoginError(message, field = null) {
+  loginEmailError.value = message
+  loginErrorField.value = field
+}
 
 const regName = ref('')
 const regEmail = ref('')
@@ -162,6 +234,45 @@ const regCompany = ref('')
 const regRuc = ref('')
 const registerError = ref('')
 const registerLoading = ref(false)
+
+/** RNF003: per-field errors (i18n keys) for the register / complete-profile forms. */
+const regErrors = ref({})
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function clearRegError(field) {
+  if (regErrors.value[field]) regErrors.value = { ...regErrors.value, [field]: '' }
+}
+
+function regFieldAttrs(field) {
+  const invalid = Boolean(regErrors.value[field])
+  return {
+    'aria-invalid': invalid ? 'true' : 'false',
+    'aria-describedby': invalid ? `reg-${field}-error` : undefined,
+  }
+}
+
+/** @param {string[]} required */
+function validateRegFields(required, { password = false } = {}) {
+  const errors = {}
+  const values = {
+    name: regName.value,
+    email: regEmail.value,
+    password: regPassword.value,
+    dni: regDni.value,
+    address: regAddress.value,
+    company: regCompany.value,
+    ruc: regRuc.value,
+  }
+  for (const field of required) {
+    if (!String(values[field] ?? '').trim()) errors[field] = 'common.fieldRequired'
+  }
+  if (!errors.email && !EMAIL_PATTERN.test(String(regEmail.value).trim())) errors.email = 'auth.emailInvalid'
+  if (password && !errors.password && !OPEN_WIREFRAME_ACCESS && String(regPassword.value).length < 6) {
+    errors.password = 'auth.passwordTooShort'
+  }
+  regErrors.value = errors
+  return Object.keys(errors).length === 0
+}
 
 /** Auth ok sin fila en profiles → completar perfil antes de entrar. */
 const completeProfileMode = ref(false)
@@ -181,7 +292,23 @@ function enterCompleteProfile({ token, identity, draft }) {
   completeProfileError.value = ''
 }
 
-function finishAdminSession(user, token) {
+/** US015: after a new admin registers, ask for the building, then go to plan selection. */
+const onboardingStep = ref(null) // null | 'building'
+
+function onOnboardingBuildingSaved(building) {
+  onboardingStep.value = null
+  router.push({
+    name: AppRouteNames.APP_SETTINGS,
+    query: { tab: 'plans', ...(building?.suggestedPlanId ? { suggestedPlan: building.suggestedPlanId } : {}) },
+  })
+}
+
+function onOnboardingSkip() {
+  onboardingStep.value = null
+  navigateAfterAuth({ name: AppRouteNames.APP_DASHBOARD })
+}
+
+function finishAdminSession(user, token, { onboarding = false } = {}) {
   setAdminSession(
     {
       id: user.id,
@@ -196,6 +323,10 @@ function finishAdminSession(user, token) {
   )
   completeProfileMode.value = false
   pendingAuthToken.value = null
+  if (onboarding) {
+    onboardingStep.value = 'building'
+    return
+  }
   navigateAfterAuth({ name: AppRouteNames.APP_DASHBOARD })
 }
 
@@ -204,27 +335,27 @@ async function onLoginContinue() {
   const raw = loginEmail.value.trim()
   if (OPEN_WIREFRAME_ACCESS) {
     if (!raw) {
-      loginEmailError.value = t('auth.emailInvalid')
+      setLoginError(t('auth.emailInvalid'), 'email')
       return
     }
     loginStep.value = 2
     return
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) {
-    loginEmailError.value = t('auth.emailInvalid')
+    setLoginError(t('auth.emailInvalid'), 'email')
     return
   }
   loginLoading.value = true
   try {
     const exists = await authApi.isEmailRegistered(raw)
     if (!exists) {
-      loginEmailError.value = t('auth.emailNotRegistered')
+      setLoginError(t('auth.emailNotRegistered'), 'email')
       return
     }
     loginStep.value = 2
   } catch (e) {
     if (e?.code === 'RESIDENT_USE_GOOGLE') {
-      loginEmailError.value = t('auth.residentUseGoogle')
+      setLoginError(t('auth.residentUseGoogle'), 'email')
       return
     }
     loginStep.value = 2
@@ -264,6 +395,10 @@ async function handleLoginSubmit() {
       await onLoginContinue()
       return
     }
+    if (!loginPassword.value) {
+      setLoginError(t('common.fieldRequired'), 'password')
+      return
+    }
     await onLoginSubmit()
   } catch (e) {
     loginEmailError.value = e?.message || t('auth.genericError')
@@ -279,8 +414,9 @@ async function onLoginSubmit() {
       password: loginPassword.value,
     })
 
+    // US014: one form, routed by the role the API reports.
     if (user.role === 'resident') {
-      loginEmailError.value = t('auth.residentUseGoogle')
+      await applyResidentSession(user, token)
       return
     }
 
@@ -300,11 +436,15 @@ async function onLoginSubmit() {
       return
     }
     if (error?.code === 'INVALID_PASSWORD') {
-      loginEmailError.value = t('auth.passwordInvalid')
+      setLoginError(t('auth.passwordInvalid'), 'password')
       return
     }
     if (error?.code === 'TOO_MANY_REQUESTS') {
       loginEmailError.value = t('auth.tooManyRequests')
+      return
+    }
+    if (error?.code === 'ACCOUNT_DEACTIVATED') {
+      loginEmailError.value = t('auth.accountDeactivated')
       return
     }
     if (error?.code === 'RESIDENT_USE_GOOGLE') {
@@ -314,7 +454,7 @@ async function onLoginSubmit() {
     if (error?.code === 'EMAIL_NOT_FOUND') {
       loginStep.value = 1
       loginPassword.value = ''
-      loginEmailError.value = t('auth.emailNotRegistered')
+      setLoginError(t('auth.emailNotRegistered'), 'email')
       return
     }
     loginEmailError.value = t('auth.genericError')
@@ -323,8 +463,28 @@ async function onLoginSubmit() {
   }
 }
 
+/** Resident tab: email + password in a single step (Google stays available above). */
+async function onResidentPasswordLogin() {
+  if (loginLoading.value) return
+  loginEmailError.value = ''
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail.value.trim())) {
+    setLoginError(t('auth.emailInvalid'), 'email')
+    return
+  }
+  if (!loginPassword.value) {
+    setLoginError(t('common.fieldRequired'), 'password')
+    return
+  }
+  await onLoginSubmit()
+}
+
 async function onCompleteProfileSubmit() {
   if (completeProfileLoading.value || !pendingAuthToken.value) return
+  completeProfileError.value = ''
+  if (!validateRegFields(['name', 'email'])) {
+    completeProfileError.value = t('common.fieldsHighlighted')
+    return
+  }
   completeProfileLoading.value = true
   completeProfileError.value = ''
   try {
@@ -336,7 +496,7 @@ async function onCompleteProfileSubmit() {
       company: regCompany.value,
       ruc: regRuc.value,
     })
-    finishAdminSession(user, token)
+    finishAdminSession(user, token, { onboarding: true })
   } catch (error) {
     if (error?.code === 'ADMIN_BOOTSTRAP_CLOSED' || error?.status === 409 || error?.code === 'HTTP_409') {
       completeProfileError.value = t('auth.adminBootstrapClosed')
@@ -354,13 +514,13 @@ async function onCompleteProfileSubmit() {
 
 async function onRegisterSubmit() {
   if (registerLoading.value) return
-  registerLoading.value = true
   registerError.value = ''
+  if (!validateRegFields(['name', 'email', 'password', 'dni', 'address', 'company', 'ruc'], { password: true })) {
+    registerError.value = t('common.fieldsHighlighted')
+    return
+  }
+  registerLoading.value = true
   try {
-    if (!OPEN_WIREFRAME_ACCESS && String(regPassword.value).length < 6) {
-      registerError.value = t('auth.passwordTooShort')
-      return
-    }
     const { user, token } = await authApi.registerAdmin({
       name: regName.value,
       email: regEmail.value,
@@ -370,7 +530,7 @@ async function onRegisterSubmit() {
       company: regCompany.value,
       ruc: regRuc.value,
     })
-    finishAdminSession(user, token)
+    finishAdminSession(user, token, { onboarding: true })
   } catch (error) {
     if (error?.code === 'PROFILE_INCOMPLETE_AFTER_AUTH') {
       enterCompleteProfile({
@@ -386,6 +546,7 @@ async function onRegisterSubmit() {
     }
     if (error?.code === 'EMAIL_ALREADY_EXISTS') {
       registerError.value = t('auth.emailAlreadyExists')
+      regErrors.value = { ...regErrors.value, email: 'auth.emailAlreadyExists' }
       return
     }
     if (error?.code === 'NETWORK_ERROR' || error?.code === 'TIMEOUT') {
@@ -419,6 +580,7 @@ watch(
     if (name === AppRouteNames.REGISTER) {
       registerError.value = ''
       registerLoading.value = false
+      regErrors.value = {}
     }
   },
 )
@@ -435,6 +597,9 @@ watch(loginEmail, () => {
 <template>
   <div class="auth-page">
     <SkipLink />
+    <header class="auth-topbar">
+      <LocaleSwitch />
+    </header>
     <main id="main-content" class="auth-main" role="main" tabindex="-1">
       <div v-if="isResidentInvite" class="auth-shell">
         <div v-if="inviteStep === 'welcome'" class="auth-card auth-card--centered">
@@ -490,7 +655,7 @@ watch(loginEmail, () => {
           <p class="auth-subtitle">{{ t('auth.inviteGoogleSubtitle') }}</p>
 
           <div class="auth-form auth-form--narrow" :aria-label="t('auth.inviteGoogleAria')">
-            <p v-if="residentError" class="auth-error" role="alert">{{ residentError }}</p>
+            <p v-if="residentError" id="invite-error" class="auth-error" role="alert">{{ residentError }}</p>
             <button
               type="button"
               class="auth-google"
@@ -507,6 +672,73 @@ watch(loginEmail, () => {
               </span>
               <span>{{ residentLoading ? t('auth.inviteGoogleLoading') : t('auth.inviteGoogleButton') }}</span>
             </button>
+
+            <p class="auth-divider" role="separator">{{ t('auth.orPasswordDivider') }}</p>
+
+            <form
+              class="auth-form auth-form--nested"
+              :aria-label="t('auth.invitePasswordAria')"
+              novalidate
+              @submit.prevent="onResidentPasswordSignUp"
+            >
+              <p class="auth-subtitle auth-subtitle--compact">{{ t('auth.invitePasswordHint') }}</p>
+              <div class="auth-field">
+                <input
+                  v-model="invitePwEmail"
+                  class="auth-input"
+                  type="email"
+                  name="email"
+                  autocomplete="email"
+                  :disabled="residentLoading"
+                  required
+                  :aria-label="t('auth.emailPlaceholder')"
+                  :placeholder="t('auth.emailPlaceholder')"
+                  :aria-invalid="inviteErrorField === 'email' ? 'true' : 'false'"
+                  :aria-describedby="inviteErrorField === 'email' ? 'invite-error' : undefined"
+                />
+              </div>
+              <div class="auth-field">
+                <input
+                  v-model="invitePwPassword"
+                  class="auth-input"
+                  type="password"
+                  name="new-password"
+                  autocomplete="new-password"
+                  minlength="6"
+                  :disabled="residentLoading"
+                  required
+                  :aria-label="t('auth.passwordPlaceholder')"
+                  :placeholder="t('auth.passwordPlaceholder')"
+                  :aria-invalid="inviteErrorField === 'password' ? 'true' : 'false'"
+                  :aria-describedby="inviteErrorField === 'password' ? 'invite-error' : undefined"
+                />
+              </div>
+              <div class="auth-field">
+                <input
+                  v-model="invitePwConfirm"
+                  class="auth-input"
+                  type="password"
+                  name="confirm-password"
+                  autocomplete="new-password"
+                  minlength="6"
+                  :disabled="residentLoading"
+                  required
+                  :aria-label="t('auth.passwordConfirmPlaceholder')"
+                  :placeholder="t('auth.passwordConfirmPlaceholder')"
+                  :aria-invalid="inviteErrorField === 'confirm' ? 'true' : 'false'"
+                  :aria-describedby="inviteErrorField === 'confirm' ? 'invite-error' : undefined"
+                />
+              </div>
+              <Button
+                type="submit"
+                class="auth-submit"
+                rounded
+                severity="info"
+                :label="t('auth.invitePasswordSubmit')"
+                :loading="residentLoading"
+                :disabled="residentLoading"
+              />
+            </form>
           </div>
         </div>
       </div>
@@ -551,7 +783,31 @@ watch(loginEmail, () => {
           </div>
         </nav>
 
-        <div v-if="completeProfileMode" class="auth-card auth-card--centered">
+        <div v-if="onboardingStep === 'building'" class="auth-card auth-card--centered">
+          <div class="auth-brand">
+            <img
+              src="/logo-buildingfex.png"
+              :alt="t('brand')"
+              class="auth-logo"
+              width="200"
+              height="48"
+              decoding="async"
+            />
+          </div>
+          <p class="auth-onboarding-step">{{ t('buildings.onboarding.step') }}</p>
+          <h1 class="auth-title auth-title--center">{{ t('buildings.onboarding.title') }}</h1>
+          <p class="auth-subtitle">{{ t('buildings.onboarding.subtitle') }}</p>
+          <div class="auth-form auth-form--narrow">
+            <BuildingForm
+              :submit-label="t('buildings.onboarding.submit')"
+              show-skip
+              @saved="onOnboardingBuildingSaved"
+              @skip="onOnboardingSkip"
+            />
+          </div>
+        </div>
+
+        <div v-else-if="completeProfileMode" class="auth-card auth-card--centered">
           <div class="auth-brand">
             <img
               src="/logo-buildingfex.png"
@@ -568,6 +824,7 @@ watch(loginEmail, () => {
           <form
             class="auth-form auth-form--narrow"
             :aria-label="t('auth.ariaCompleteProfile')"
+            novalidate
             @submit.prevent="onCompleteProfileSubmit"
           >
             <div class="auth-field">
@@ -581,7 +838,10 @@ watch(loginEmail, () => {
                 required
                 :aria-label="t('auth.fullNamePlaceholder')"
                 :placeholder="t('auth.fullNamePlaceholder')"
+                v-bind="regFieldAttrs('name')"
+                @input="clearRegError('name')"
               />
+              <p v-if="regErrors.name" id="reg-name-error" class="bf-field-error">{{ t(regErrors.name) }}</p>
             </div>
             <div class="auth-field">
               <input
@@ -594,7 +854,10 @@ watch(loginEmail, () => {
                 required
                 :aria-label="t('auth.emailPlaceholder')"
                 :placeholder="t('auth.emailPlaceholder')"
+                v-bind="regFieldAttrs('email')"
+                @input="clearRegError('email')"
               />
+              <p v-if="regErrors.email" id="reg-email-error" class="bf-field-error">{{ t(regErrors.email) }}</p>
             </div>
             <div class="auth-field">
               <input
@@ -605,7 +868,10 @@ watch(loginEmail, () => {
                 :disabled="completeProfileLoading"
                 :aria-label="t('auth.dniPlaceholder')"
                 :placeholder="t('auth.dniPlaceholder')"
+                v-bind="regFieldAttrs('dni')"
+                @input="clearRegError('dni')"
               />
+              <p v-if="regErrors.dni" id="reg-dni-error" class="bf-field-error">{{ t(regErrors.dni) }}</p>
             </div>
             <div class="auth-field">
               <input
@@ -616,7 +882,10 @@ watch(loginEmail, () => {
                 :disabled="completeProfileLoading"
                 :aria-label="t('auth.companyPlaceholder')"
                 :placeholder="t('auth.companyPlaceholder')"
+                v-bind="regFieldAttrs('company')"
+                @input="clearRegError('company')"
               />
+              <p v-if="regErrors.company" id="reg-company-error" class="bf-field-error">{{ t(regErrors.company) }}</p>
             </div>
             <div class="auth-field">
               <input
@@ -627,7 +896,10 @@ watch(loginEmail, () => {
                 :disabled="completeProfileLoading"
                 :aria-label="t('auth.rucPlaceholder')"
                 :placeholder="t('auth.rucPlaceholder')"
+                v-bind="regFieldAttrs('ruc')"
+                @input="clearRegError('ruc')"
               />
+              <p v-if="regErrors.ruc" id="reg-ruc-error" class="bf-field-error">{{ t(regErrors.ruc) }}</p>
             </div>
             <div class="auth-field">
               <input
@@ -639,7 +911,10 @@ watch(loginEmail, () => {
                 :disabled="completeProfileLoading"
                 :aria-label="t('auth.addressPlaceholder')"
                 :placeholder="t('auth.addressPlaceholder')"
+                v-bind="regFieldAttrs('address')"
+                @input="clearRegError('address')"
               />
+              <p v-if="regErrors.address" id="reg-address-error" class="bf-field-error">{{ t(regErrors.address) }}</p>
             </div>
             <p v-if="completeProfileError" class="auth-error" role="alert">{{ completeProfileError }}</p>
             <Button
@@ -666,7 +941,7 @@ watch(loginEmail, () => {
           <h1 class="auth-title auth-title--center">{{ t('auth.loginTitle') }}</h1>
           <p class="auth-subtitle">{{ t('auth.loginFirebaseHint') }}</p>
 
-          <form class="auth-form auth-form--narrow" :aria-label="t('auth.ariaLogin')" @submit.prevent="handleLoginSubmit">
+          <form class="auth-form auth-form--narrow" :aria-label="t('auth.ariaLogin')" novalidate @submit.prevent="handleLoginSubmit">
             <div class="auth-field">
               <input
                 v-model="loginEmail"
@@ -678,6 +953,8 @@ watch(loginEmail, () => {
                 required
                 :aria-label="t('auth.emailPlaceholder')"
                 :placeholder="t('auth.emailPlaceholder')"
+                :aria-invalid="loginErrorField === 'email' ? 'true' : 'false'"
+                :aria-describedby="loginErrorField === 'email' ? 'login-error' : undefined"
               />
             </div>
             <div v-if="loginStep === 2" class="auth-field auth-field--step2">
@@ -691,9 +968,11 @@ watch(loginEmail, () => {
                 required
                 :aria-label="t('auth.passwordPlaceholder')"
                 :placeholder="t('auth.passwordPlaceholder')"
+                :aria-invalid="loginErrorField === 'password' ? 'true' : 'false'"
+                :aria-describedby="loginErrorField === 'password' ? 'login-error' : undefined"
               />
             </div>
-            <p v-if="loginEmailError" class="auth-error" role="alert">{{ loginEmailError }}</p>
+            <p v-if="loginEmailError" id="login-error" class="auth-error" role="alert">{{ loginEmailError }}</p>
             <Button
               type="submit"
               class="auth-submit"
@@ -720,7 +999,7 @@ watch(loginEmail, () => {
           <h1 class="auth-title auth-title--center">{{ t('auth.residentLoginTitle') }}</h1>
           <p class="auth-subtitle">{{ t('auth.residentLoginSubtitle') }}</p>
           <div class="auth-form auth-form--narrow" :aria-label="t('auth.residentLoginAria')">
-            <p v-if="loginEmailError" class="auth-error" role="alert">{{ loginEmailError }}</p>
+            <p v-if="loginEmailError" id="login-error" class="auth-error" role="alert">{{ loginEmailError }}</p>
             <button
               type="button"
               class="auth-google"
@@ -737,6 +1016,55 @@ watch(loginEmail, () => {
               </span>
               <span>{{ loginLoading ? t('auth.inviteGoogleLoading') : t('auth.inviteGoogleButton') }}</span>
             </button>
+
+            <p class="auth-divider" role="separator">{{ t('auth.orPasswordDivider') }}</p>
+
+            <form
+              class="auth-form auth-form--nested"
+              :aria-label="t('auth.residentPasswordLoginAria')"
+              novalidate
+              @submit.prevent="onResidentPasswordLogin"
+            >
+              <div class="auth-field">
+                <input
+                  v-model="loginEmail"
+                  class="auth-input"
+                  type="email"
+                  name="email"
+                  autocomplete="email"
+                  :disabled="loginLoading"
+                  required
+                  :aria-label="t('auth.emailPlaceholder')"
+                  :placeholder="t('auth.emailPlaceholder')"
+                  :aria-invalid="loginErrorField === 'email' ? 'true' : 'false'"
+                  :aria-describedby="loginErrorField === 'email' ? 'login-error' : undefined"
+                />
+              </div>
+              <div class="auth-field">
+                <input
+                  v-model="loginPassword"
+                  class="auth-input"
+                  type="password"
+                  name="password"
+                  autocomplete="current-password"
+                  :disabled="loginLoading"
+                  required
+                  :aria-label="t('auth.passwordPlaceholder')"
+                  :placeholder="t('auth.passwordPlaceholder')"
+                  :aria-invalid="loginErrorField === 'password' ? 'true' : 'false'"
+                  :aria-describedby="loginErrorField === 'password' ? 'login-error' : undefined"
+                />
+              </div>
+              <Button
+                type="submit"
+                class="auth-submit"
+                rounded
+                severity="info"
+                :label="t('auth.signIn')"
+                :loading="loginLoading"
+                :disabled="loginLoading"
+              />
+            </form>
           </div>
         </div>
 
@@ -754,7 +1082,7 @@ watch(loginEmail, () => {
           <h1 class="auth-title auth-title--center">{{ t('auth.registerTitle') }}</h1>
           <p class="auth-subtitle">{{ t('auth.registerFirebaseHint') }}</p>
 
-          <form class="auth-form auth-form--narrow" :aria-label="t('auth.ariaRegister')" @submit.prevent="onRegisterSubmit">
+          <form class="auth-form auth-form--narrow" :aria-label="t('auth.ariaRegister')" novalidate @submit.prevent="onRegisterSubmit">
             <div class="auth-field">
               <input
                 v-model="regName"
@@ -766,7 +1094,10 @@ watch(loginEmail, () => {
                 required
                 :aria-label="t('auth.fullNamePlaceholder')"
                 :placeholder="t('auth.fullNamePlaceholder')"
+                v-bind="regFieldAttrs('name')"
+                @input="clearRegError('name')"
               />
+              <p v-if="regErrors.name" id="reg-name-error" class="bf-field-error">{{ t(regErrors.name) }}</p>
             </div>
             <div class="auth-field">
               <input
@@ -779,7 +1110,10 @@ watch(loginEmail, () => {
                 required
                 :aria-label="t('auth.emailPlaceholder')"
                 :placeholder="t('auth.emailPlaceholder')"
+                v-bind="regFieldAttrs('email')"
+                @input="clearRegError('email')"
               />
+              <p v-if="regErrors.email" id="reg-email-error" class="bf-field-error">{{ t(regErrors.email) }}</p>
             </div>
             <div class="auth-field">
               <input
@@ -792,7 +1126,10 @@ watch(loginEmail, () => {
                 required
                 :aria-label="t('auth.passwordPlaceholder')"
                 :placeholder="t('auth.passwordPlaceholder')"
+                v-bind="regFieldAttrs('password')"
+                @input="clearRegError('password')"
               />
+              <p v-if="regErrors.password" id="reg-password-error" class="bf-field-error">{{ t(regErrors.password) }}</p>
             </div>
             <div class="auth-field">
               <input
@@ -805,7 +1142,10 @@ watch(loginEmail, () => {
                 required
                 :aria-label="t('auth.dniPlaceholder')"
                 :placeholder="t('auth.dniPlaceholder')"
+                v-bind="regFieldAttrs('dni')"
+                @input="clearRegError('dni')"
               />
+              <p v-if="regErrors.dni" id="reg-dni-error" class="bf-field-error">{{ t(regErrors.dni) }}</p>
             </div>
             <div class="auth-field">
               <input
@@ -818,7 +1158,10 @@ watch(loginEmail, () => {
                 required
                 :aria-label="t('auth.addressPlaceholder')"
                 :placeholder="t('auth.addressPlaceholder')"
+                v-bind="regFieldAttrs('address')"
+                @input="clearRegError('address')"
               />
+              <p v-if="regErrors.address" id="reg-address-error" class="bf-field-error">{{ t(regErrors.address) }}</p>
             </div>
             <div class="auth-field">
               <input
@@ -831,7 +1174,10 @@ watch(loginEmail, () => {
                 required
                 :aria-label="t('auth.companyPlaceholder')"
                 :placeholder="t('auth.companyPlaceholder')"
+                v-bind="regFieldAttrs('company')"
+                @input="clearRegError('company')"
               />
+              <p v-if="regErrors.company" id="reg-company-error" class="bf-field-error">{{ t(regErrors.company) }}</p>
             </div>
             <div class="auth-field">
               <input
@@ -844,7 +1190,10 @@ watch(loginEmail, () => {
                 required
                 :aria-label="t('auth.rucPlaceholder')"
                 :placeholder="t('auth.rucPlaceholder')"
+                v-bind="regFieldAttrs('ruc')"
+                @input="clearRegError('ruc')"
               />
+              <p v-if="regErrors.ruc" id="reg-ruc-error" class="bf-field-error">{{ t(regErrors.ruc) }}</p>
             </div>
             <p v-if="registerError" class="auth-error" role="alert">{{ registerError }}</p>
             <Button
@@ -864,6 +1213,16 @@ watch(loginEmail, () => {
 </template>
 
 <style scoped>
+.auth-onboarding-step {
+  margin: 0 0 0.25rem;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #0a84ff;
+}
+
 .auth-page {
   min-height: 100vh;
   min-height: 100dvh;
@@ -874,12 +1233,18 @@ watch(loginEmail, () => {
   -webkit-font-smoothing: antialiased;
 }
 
+.auth-topbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: calc(env(safe-area-inset-top, 0px) + 0.85rem) 1.25rem 0;
+}
+
 .auth-main {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: calc(env(safe-area-inset-top, 0px) + 2rem) 1.25rem 2.5rem;
+  padding: 1.25rem 1.25rem 2.5rem;
 }
 
 .auth-shell {
@@ -1032,11 +1397,41 @@ watch(loginEmail, () => {
   width: 100%;
 }
 
+.auth-form--nested {
+  gap: 0.75rem;
+}
+
+.auth-subtitle--compact {
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.25rem 0;
+  font-size: 0.8125rem;
+  color: #6e6e73;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #d2d2d7;
+}
+
 .auth-field {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
   text-align: left;
+}
+
+.auth-field .bf-field-error {
+  margin-top: 0;
 }
 
 .auth-field--step2 {

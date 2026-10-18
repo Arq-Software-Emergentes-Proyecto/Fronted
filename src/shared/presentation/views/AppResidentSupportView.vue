@@ -3,13 +3,14 @@ import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useSession, getActiveDataOwnerId } from '@/iam/application/sessionStore.js'
-import { supportApi } from '@/support/infrastructure/supportApi.js'
+import { normalizeChat, supportApi } from '@/residentCare/infrastructure/supportApi.js'
+import { RESIDENT_FAQS, searchFaqs, suggestFaqTerms } from '@/residentCare/domain/faq.js'
 import {
   isDocumentVisible,
   joinSupportChat,
   joinSupportOwner,
   onSupportChatUpdated,
-} from '@/support/infrastructure/supportRealtime.js'
+} from '@/residentCare/infrastructure/supportRealtime.js'
 
 const { t, locale } = useI18n()
 const { state: sessionState } = useSession()
@@ -23,6 +24,33 @@ const syncError = ref('')
 const creatingBlank = ref(false)
 const chatsReady = ref(false)
 const lastListSync = ref('')
+/** 'faq' (Soporte Técnico: preguntas frecuentes) | 'chat' (asistente / administración). */
+const view = ref('faq')
+const faqQuery = ref('')
+const openFaqId = ref('')
+/** Texto en vuelo (se muestra como burbuja pendiente) y último fallo reintentable. */
+const pendingText = ref('')
+const sendFailure = ref(null)
+const aiNotice = ref('')
+
+const filteredFaqs = computed(() => searchFaqs(RESIDENT_FAQS, faqQuery.value, t))
+const faqSuggestions = computed(() =>
+  filteredFaqs.value.length ? [] : suggestFaqTerms(RESIDENT_FAQS, faqQuery.value, 4, locale.value),
+)
+
+function toggleFaq(id) {
+  openFaqId.value = openFaqId.value === id ? '' : id
+}
+
+function applyFaqSuggestion(term) {
+  faqQuery.value = term
+  openFaqId.value = ''
+}
+
+function openChatView() {
+  view.value = 'chat'
+  scrollAiToBottom()
+}
 
 const residentId = computed(() => sessionState.profile?.id ?? '')
 const ownerId = computed(() => getActiveDataOwnerId() || sessionState.profile?.ownerAdminId || '')
@@ -42,12 +70,22 @@ const displayMessages = computed(() => {
       body: row.body,
       createdAt: row.createdAt,
     }))
-  return [...base, ...extras].sort((a, b) =>
+  const rows = [...base, ...extras].sort((a, b) =>
     String(a.createdAt || '').localeCompare(String(b.createdAt || '')),
   )
+  if (pendingText.value) {
+    rows.push({ id: '__pending__', role: 'user', body: pendingText.value, pending: true })
+  }
+  return rows
 })
 
-const hasAiMessages = computed(() => displayMessages.value.length > 0)
+const hasAiMessages = computed(() => displayMessages.value.length > 0 || Boolean(sendFailure.value))
+const activeStatusNote = computed(() => {
+  const status = activeAiChat.value?.status
+  if (status === 'derived') return t('supportResident.statusDerived')
+  if (status === 'closed') return t('supportResident.statusClosed')
+  return ''
+})
 
 function messageWho(role) {
   if (role === 'user') return t('supportResident.labelYou')
@@ -232,6 +270,26 @@ async function startAiChat() {
 
 function openAiChat(id) {
   activeAiChatId.value = id
+  sendFailure.value = null
+  aiNotice.value = ''
+}
+
+/** Traduce el error del POST a un mensaje claro y si se puede reintentar (US033 / TS009 / RNF012). */
+function describeSendError(error) {
+  const code = error?.code
+  if (code === 'GEMINI_API_KEY_MISSING') {
+    return { message: t('supportResident.aiMissingKey'), retryable: false, offerAdmin: true }
+  }
+  if (code === 'AI_UNAVAILABLE' || error?.status === 503) {
+    return { message: t('supportResident.aiUnavailable'), retryable: true, offerAdmin: true }
+  }
+  if (code === 'GEMINI_RATE_LIMITED') {
+    return { message: t('supportResident.aiBusy'), retryable: true, offerAdmin: false }
+  }
+  if (code === 'TIMEOUT' || code === 'NETWORK_ERROR') {
+    return { message: t('supportResident.aiNetworkError'), retryable: true, offerAdmin: false }
+  }
+  return { message: t('supportResident.sendError'), retryable: true, offerAdmin: false }
 }
 
 async function sendAiMessage(preset) {
@@ -242,26 +300,47 @@ async function sendAiMessage(preset) {
   const chatId = activeAiChatId.value
   if (!chatId) return
 
-  aiInput.value = ''
+  // El input no se limpia hasta que el servidor confirma: si falla, el texto no se pierde.
   aiSending.value = true
+  pendingText.value = text
+  sendFailure.value = null
+  aiNotice.value = ''
+  scrollAiToBottom()
   try {
     const updated = await supportApi.postMessage(chatId, text, locale.value)
     upsertLocalChat(updated)
+    if (aiInput.value.trim() === text) aiInput.value = ''
     if (updated.escalatedChatId) await refreshAdminThread()
     syncError.value = ''
   } catch (error) {
     console.error(error)
-    if (error?.code === 'GEMINI_RATE_LIMITED' || error?.status === 429) {
-      syncError.value = t('supportResident.aiBusy')
-    } else if (error?.code === 'GEMINI_API_KEY_MISSING') {
-      syncError.value = t('supportResident.aiMissingKey')
+    if (error?.code === 'AI_MONTHLY_CAP_REACHED') {
+      // Tope del plan: el servidor ya guardó y derivó la consulta a administración.
+      if (error?.payload?.chat) upsertLocalChat(normalizeChat(error.payload.chat))
+      if (aiInput.value.trim() === text) aiInput.value = ''
+      aiNotice.value = t('supportResident.aiCapReached')
+      await refreshAdminThread()
     } else {
-      syncError.value = t('supportResident.syncError')
+      if (!aiInput.value.trim()) aiInput.value = text
+      sendFailure.value = { text, chatId, ...describeSendError(error) }
     }
   } finally {
+    pendingText.value = ''
     aiSending.value = false
     scrollAiToBottom()
   }
+}
+
+function retryFailedMessage() {
+  const failed = sendFailure.value
+  if (!failed) return
+  if (failed.chatId) activeAiChatId.value = failed.chatId
+  void sendAiMessage(failed.text)
+}
+
+function askForAdmin() {
+  sendFailure.value = null
+  void sendAiMessage(t('supportResident.aiSuggestionAdmin'))
 }
 
 function onAiSuggestion(kind) {
@@ -286,8 +365,94 @@ function onAiSuggestion(kind) {
         {{ syncError }}
       </p>
 
-      <div class="ai-shell">
-        <aside class="ai-sidebar" aria-label="Chat history">
+      <section v-if="view === 'faq'" class="faq-panel" aria-labelledby="faq-heading">
+        <header class="faq-head">
+          <div>
+            <h2 id="faq-heading" class="faq-title">{{ t('supportResident.title') }}</h2>
+            <p class="faq-sub">{{ t('supportResident.faqDescription') }}</p>
+          </div>
+          <button type="button" class="faq-cta" @click="openChatView">
+            <i class="pi pi-comments" aria-hidden="true" />
+            {{ t('supportResident.startAiChatBtn') }}
+          </button>
+        </header>
+
+        <div class="faq-search" role="search">
+          <i class="pi pi-search" aria-hidden="true" />
+          <input
+            v-model="faqQuery"
+            type="search"
+            :placeholder="t('supportResident.searchPlaceholder')"
+            :aria-label="t('supportResident.faqSearchLabel')"
+          />
+          <button
+            v-if="faqQuery"
+            type="button"
+            class="faq-search__clear"
+            :aria-label="t('supportResident.faqClear')"
+            @click="faqQuery = ''"
+          >
+            <i class="pi pi-times" aria-hidden="true" />
+          </button>
+        </div>
+
+        <h3 class="faq-section-title">{{ t('supportResident.faqTitle') }}</h3>
+        <ul v-if="filteredFaqs.length" class="faq-list" role="list">
+          <li
+            v-for="faq in filteredFaqs"
+            :key="faq.id"
+            class="faq-item"
+            :class="{ 'is-open': openFaqId === faq.id }"
+          >
+            <button
+              type="button"
+              class="faq-q"
+              :aria-expanded="openFaqId === faq.id"
+              :aria-controls="`faq-a-${faq.id}`"
+              @click="toggleFaq(faq.id)"
+            >
+              <span>{{ t(faq.questionKey) }}</span>
+              <i
+                class="pi"
+                :class="openFaqId === faq.id ? 'pi-chevron-up' : 'pi-chevron-down'"
+                aria-hidden="true"
+              />
+            </button>
+            <p v-show="openFaqId === faq.id" :id="`faq-a-${faq.id}`" class="faq-a">
+              {{ t(faq.answerKey) }}
+            </p>
+          </li>
+        </ul>
+        <div v-else class="faq-empty" role="status">
+          <p>{{ t('supportResident.faqNoResults') }}</p>
+          <p class="faq-suggest">
+            <span>{{ t('supportResident.faqSuggestions') }}</span>
+            <button
+              v-for="term in faqSuggestions"
+              :key="term"
+              type="button"
+              class="faq-chip"
+              @click="applyFaqSuggestion(term)"
+            >
+              {{ term }}
+            </button>
+          </p>
+        </div>
+
+        <div class="faq-contact">
+          <span>{{ t('supportResident.faqNotFound') }}</span>
+          <button type="button" class="faq-link" @click="openChatView">
+            {{ t('supportResident.faqContactSupport') }}
+          </button>
+        </div>
+      </section>
+
+      <div v-else class="ai-shell">
+        <aside class="ai-sidebar" :aria-label="t('common.chatHistoryAria')">
+          <button type="button" class="ai-back" @click="view = 'faq'">
+            <i class="pi pi-question-circle" aria-hidden="true" />
+            {{ t('supportResident.aiBackToFaqs') }}
+          </button>
           <button type="button" class="ai-new" @click="startAiChat">
             <i class="pi pi-plus" aria-hidden="true" />
             {{ t('supportResident.aiNewChat') }}
@@ -358,16 +523,47 @@ function onAiSuggestion(kind) {
                   'ai-msg--user': m.role === 'user',
                   'ai-msg--ai': m.role === 'ai',
                   'ai-msg--admin': m.role === 'admin',
+                  'ai-msg--pending': m.pending,
                 }"
               >
-                <span class="ai-msg__who">{{ messageWho(m.role) }}</span>
+                <span class="ai-msg__who">{{ m.pending ? t('supportResident.aiPending') : messageWho(m.role) }}</span>
                 <p>{{ m.body }}</p>
+                <p v-if="m.citedSource" class="ai-msg__source">
+                  <i class="pi pi-file" aria-hidden="true" />
+                  {{ t('supportResident.sourceLabel') }}: {{ m.citedSource }}
+                </p>
               </div>
               <div v-if="aiSending" class="ai-msg ai-msg--ai ai-msg--typing">
                 <span class="ai-msg__who">{{ t('supportResident.aiLabel') }}</span>
                 <p>{{ t('supportResident.aiTyping') }}</p>
               </div>
+              <div v-if="sendFailure" class="ai-alert ai-alert--error" role="alert">
+                <p>{{ sendFailure.message }}</p>
+                <div class="ai-alert__actions">
+                  <button
+                    v-if="sendFailure.retryable"
+                    type="button"
+                    class="ai-alert__btn"
+                    :disabled="aiSending"
+                    @click="retryFailedMessage"
+                  >
+                    <i class="pi pi-refresh" aria-hidden="true" />
+                    {{ t('supportResident.retry') }}
+                  </button>
+                  <button
+                    v-if="sendFailure.offerAdmin"
+                    type="button"
+                    class="ai-alert__btn ai-alert__btn--ghost"
+                    :disabled="aiSending"
+                    @click="askForAdmin"
+                  >
+                    {{ t('supportResident.talkToAdmin') }}
+                  </button>
+                </div>
+              </div>
+              <p v-if="aiNotice" class="ai-alert ai-alert--info" role="status">{{ aiNotice }}</p>
             </div>
+            <p v-if="activeStatusNote" class="ai-status-note">{{ activeStatusNote }}</p>
             <div class="ai-dock">
               <div class="ai-composer">
                 <span class="ai-composer__plus" aria-hidden="true">
@@ -718,6 +914,292 @@ function onAiSuggestion(kind) {
 
 .ai-msg--typing p {
   color: var(--apple-text-secondary, #86868b);
+}
+
+.ai-msg--pending {
+  opacity: 0.6;
+}
+
+.ai-msg__source {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.5rem !important;
+  font-size: 0.75rem !important;
+  font-weight: 600;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.ai-alert {
+  align-self: stretch;
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.ai-alert p {
+  margin: 0;
+}
+
+.ai-alert--error {
+  background: #fef3f2;
+  border: 1px solid #fecdca;
+  color: #b42318;
+}
+
+.ai-alert--info {
+  background: rgba(30, 58, 138, 0.06);
+  border: 1px solid rgba(30, 58, 138, 0.18);
+  color: var(--apple-blue, #1e3a8a);
+}
+
+.ai-alert__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.55rem;
+}
+
+.ai-alert__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.38rem 0.8rem;
+  border: none;
+  border-radius: 980px;
+  background: #b42318;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ai-alert__btn--ghost {
+  background: #fff;
+  color: #b42318;
+  border: 1px solid #fecdca;
+}
+
+.ai-alert__btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.ai-status-note {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0.35rem 1.25rem 0;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.ai-back {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: none;
+  background: none;
+  color: var(--apple-text-secondary, #6e6e73);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ai-back:hover {
+  color: var(--apple-blue, #1e3a8a);
+}
+
+/* FAQ — Soporte Técnico (RF008 / RF009) */
+.faq-panel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 1.5rem 1.5rem 2rem;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.faq-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.faq-title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  color: var(--apple-text, #1d1d1f);
+}
+
+.faq-sub {
+  margin: 0.35rem 0 0;
+  font-size: 0.875rem;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.faq-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.6rem 1.05rem;
+  border: none;
+  border-radius: 980px;
+  background: var(--apple-blue, #1e3a8a);
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.faq-cta:hover {
+  background: var(--apple-blue-hover, #172554);
+}
+
+.faq-search {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  max-width: 40rem;
+  margin-top: 1.25rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--apple-border-hairline, #d2d2d7);
+  border-radius: 980px;
+  color: var(--apple-text-secondary, #86868b);
+}
+
+.faq-search:focus-within {
+  border-color: var(--apple-blue, #1e3a8a);
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.16);
+}
+
+.faq-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--apple-text, #1d1d1f);
+}
+
+.faq-search__clear {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.faq-section-title {
+  margin: 1.5rem 0 0.6rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--apple-text-secondary, #86868b);
+}
+
+.faq-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 48rem;
+}
+
+.faq-item {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+}
+
+.faq-q {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.9rem 0.25rem;
+  border: none;
+  background: none;
+  text-align: left;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--apple-text, #1d1d1f);
+  cursor: pointer;
+}
+
+.faq-item.is-open .faq-q,
+.faq-q:hover {
+  color: var(--apple-blue, #1e3a8a);
+}
+
+.faq-a {
+  margin: 0;
+  padding: 0 0.25rem 1rem;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--apple-text-secondary, #424245);
+}
+
+.faq-empty {
+  max-width: 48rem;
+  padding: 1rem 0;
+  font-size: 0.9rem;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.faq-empty p {
+  margin: 0 0 0.5rem;
+}
+
+.faq-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.faq-chip {
+  padding: 0.25rem 0.7rem;
+  border: 1px solid rgba(30, 58, 138, 0.25);
+  border-radius: 980px;
+  background: rgba(30, 58, 138, 0.06);
+  color: var(--apple-blue, #1e3a8a);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.faq-contact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+  font-size: 0.875rem;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.faq-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--apple-blue, #1e3a8a);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .ai-dock {

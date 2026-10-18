@@ -78,6 +78,18 @@ apiClient.interceptors.response.use(
       }
     }
 
+    // IAM: the admin deactivated this account → end the session (every request would get 403).
+    if (error.response.status === 403 && apiCode === 'ACCOUNT_DEACTIVATED') {
+      const url = String(error.config?.url ?? '')
+      const token = getAccessToken()
+      if (!url.includes('/authentication/') && token && !isPreviewAccessToken(token)) {
+        clearSession()
+        if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
+          window.location.assign('/login?session=deactivated')
+        }
+      }
+    }
+
     const httpError = new Error(apiCode ?? `HTTP_${error.response.status}`)
     httpError.code = apiCode ?? `HTTP_${error.response.status}`
     httpError.status = error.response.status

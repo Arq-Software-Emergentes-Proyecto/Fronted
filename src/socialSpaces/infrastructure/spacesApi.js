@@ -8,14 +8,22 @@ import { apiError, publicSpace } from '@/shared/infrastructure/api/utils.js'
  *
  * Owns: catalog of common areas administrators publish for residents.
  * Errors expose `error.code`: 'SPACE_NAME_REQUIRED', 'SPACE_NOT_FOUND'.
+ * Spaces carry `rules`, `status` ('AVAILABLE' | 'MAINTENANCE': no new bookings) and
+ * `maxReservationsPerDay` (null = no daily limit).
  */
+
+function parseOptionalPositiveInt(value) {
+  if (value === '' || value == null) return null
+  const n = Number(value)
+  return Number.isInteger(n) && n > 0 ? n : null
+}
 export const spacesApi = {
   async list() {
     const { data } = await apiClient.get('/socialSpaces', { params: withOwnerParams() })
     return Array.isArray(data) ? data.map(publicSpace) : []
   },
 
-  async add({ name, description, capacity, imageUrl }) {
+  async add({ name, description, capacity, imageUrl, rules, status, maxReservationsPerDay }) {
     const cleanName = String(name ?? '').trim()
     const cleanDescription = String(description ?? '').trim()
     const cleanImageUrl = String(imageUrl ?? '').trim()
@@ -32,6 +40,9 @@ export const spacesApi = {
       description: cleanDescription,
       capacity: Number.isFinite(parsedCapacity) ? parsedCapacity : null,
       imageUrl: cleanImageUrl,
+      rules: String(rules ?? '').trim(),
+      status: status === 'MAINTENANCE' ? 'MAINTENANCE' : 'AVAILABLE',
+      maxReservationsPerDay: parseOptionalPositiveInt(maxReservationsPerDay),
       ...(ownerId ? { ownerAdminId: ownerId } : {}),
     }
 
@@ -39,7 +50,7 @@ export const spacesApi = {
     return publicSpace(created)
   },
 
-  async update({ id, name, description, capacity, imageUrl }) {
+  async update({ id, name, description, capacity, imageUrl, rules, status, maxReservationsPerDay }) {
     const cleanId = String(id ?? '').trim()
     if (!cleanId) {
       throw apiError('SPACE_NOT_FOUND')
@@ -61,6 +72,11 @@ export const spacesApi = {
 
     if (imageUrl !== undefined) {
       payload.imageUrl = String(imageUrl ?? '').trim()
+    }
+    if (rules !== undefined) payload.rules = String(rules ?? '').trim()
+    if (status !== undefined) payload.status = status === 'MAINTENANCE' ? 'MAINTENANCE' : 'AVAILABLE'
+    if (maxReservationsPerDay !== undefined) {
+      payload.maxReservationsPerDay = parseOptionalPositiveInt(maxReservationsPerDay)
     }
 
     const { data: updated } = await apiClient.patch(

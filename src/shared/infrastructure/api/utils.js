@@ -49,6 +49,7 @@ export function publicResident(user) {
     billFromNextMonth: Boolean(user.billFromNextMonth),
     inviteToken: user.inviteToken ?? user.InviteToken ?? null,
     inviteExpiresAt: user.inviteExpiresAt ?? user.InviteExpiresAt ?? null,
+    accountStatus: String(user.accountStatus ?? '').toUpperCase() === 'DEACTIVATED' ? 'DEACTIVATED' : 'ACTIVE',
     hasCredentials:
       user.hasCredentials === true ||
       user.authProvider === 'google' ||
@@ -64,6 +65,9 @@ export function publicSpace(space) {
     description: space.description ?? '',
     capacity: space.capacity ?? null,
     imageUrl: space.imageUrl ?? '',
+    rules: space.rules ?? '',
+    status: String(space.status ?? '').toUpperCase() === 'MAINTENANCE' ? 'MAINTENANCE' : 'AVAILABLE',
+    maxReservationsPerDay: space.maxReservationsPerDay ?? null,
   }
 }
 
@@ -93,6 +97,9 @@ export function publicReservation(reservation, options = {}) {
     date: reservation.date,
     startTime: reservation.startTime,
     endTime: reservation.endTime,
+    status: String(reservation.status ?? '').toUpperCase() === 'CANCELLED' ? 'CANCELLED' : 'CONFIRMED',
+    cancelledAt: reservation.cancelledAt ?? null,
+    guestInviteExpiresAt: reservation.guestInviteExpiresAt ?? null,
     guests,
   }
   if (!omitInviteToken) {
@@ -101,30 +108,32 @@ export function publicReservation(reservation, options = {}) {
   return base
 }
 
-/** Minutes after reservation start when the guest-invite QR and link stop working. */
-export const INVITE_QR_VALID_MINUTES_AFTER_START = 25
+/** US027: the guest QR/link expires 2 h after the reservation ENDS (server value wins when present). */
+export const INVITE_QR_VALID_MINUTES_AFTER_END = 120
 
 /**
- * @param {string} dateStr YYYY-MM-DD
- * @param {string} startTimeStr HH:mm
- * @param {number} [extraMinutesAfterStart]
+ * Expiry instant of a reservation's guest pass.
+ * Prefers the server-issued `guestInviteExpiresAt`; falls back to date + endTime + 2 h (local time)
+ * for the offline mock.
+ * @param {{ guestInviteExpiresAt?: string|null, date?: string, endTime?: string }} reservation
  * @returns {number | null} expiry instant (ms), or null if inputs invalid
  */
-export function reservationInviteExpiresAtMs(
-  dateStr,
-  startTimeStr,
-  extraMinutesAfterStart = INVITE_QR_VALID_MINUTES_AFTER_START,
-) {
-  const date = String(dateStr ?? '').trim()
-  const time = String(startTimeStr ?? '').trim()
+export function reservationInviteExpiresAtMs(reservation) {
+  const serverValue = reservation?.guestInviteExpiresAt ?? reservation?.expiresAt
+  if (serverValue) {
+    const t = new Date(serverValue).getTime()
+    if (!Number.isNaN(t)) return t
+  }
+  const date = String(reservation?.date ?? '').trim()
+  const time = String(reservation?.endTime ?? '').trim()
   const [y, mo, d] = date.split('-').map(Number)
   const [h, mi] = time.split(':').map(Number)
   if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return null
   if (!Number.isFinite(h) || !Number.isFinite(mi)) return null
-  const start = new Date(y, mo - 1, d, h, mi, 0, 0)
-  const t = start.getTime()
+  const end = new Date(y, mo - 1, d, h, mi, 0, 0)
+  const t = end.getTime()
   if (Number.isNaN(t)) return null
-  return t + extraMinutesAfterStart * 60 * 1000
+  return t + INVITE_QR_VALID_MINUTES_AFTER_END * 60 * 1000
 }
 
 export function timeToMinutes(value) {

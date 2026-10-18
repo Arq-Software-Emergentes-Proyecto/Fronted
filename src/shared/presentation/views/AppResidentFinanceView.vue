@@ -14,6 +14,9 @@ import {
   MpPendingKeys,
 } from '@/shared/infrastructure/mercadoPagoCheckoutClient.js'
 import { useResidentPaymentStore } from '@/finances/application/residentPaymentStore.js'
+import { financesApi } from '@/finances/infrastructure/financesApi.js'
+import DebtTrafficLightGrid from '@/finances/presentation/components/DebtTrafficLightGrid.vue'
+import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 
 const { t, locale } = useI18n()
 const { state } = useSession()
@@ -49,16 +52,53 @@ const hasOverdue = computed(() =>
 )
 
 onMounted(async () => {
-  if (profile.value.id) await loadData(profile.value.id)
+  if (profile.value.id) await Promise.all([loadData(profile.value.id), loadMyCalendar()])
   await handlePaymentReturnFromRoute()
 })
 
 watch(
   () => profile.value.id,
   async (id, prev) => {
-    if (id && id !== prev) await loadData(id)
+    if (id && id !== prev) await Promise.all([loadData(id), loadMyCalendar()])
   },
 )
+
+// RF029: mis meses en el semáforo (el backend limita al residente autenticado).
+const myCalendar = ref({ months: [], residents: [], dueSoonDays: 5 })
+const myCalendarLoading = ref(false)
+const myCalendarError = ref('')
+
+async function loadMyCalendar() {
+  myCalendarLoading.value = true
+  myCalendarError.value = ''
+  try {
+    myCalendar.value = await financesApi.getPaymentCalendar({ months: 6 })
+  } catch {
+    myCalendarError.value = t('financeOps.trafficLoadError')
+  } finally {
+    myCalendarLoading.value = false
+  }
+}
+
+// RF022 / US022: recibo descargable del pago aprobado.
+const downloadingPaymentId = ref('')
+
+async function downloadReceipt(pay) {
+  if (!pay?.id || downloadingPaymentId.value) return
+  downloadingPaymentId.value = String(pay.id)
+  try {
+    await financesApi.downloadPaymentReceipt(pay.id)
+  } catch {
+    toast.add({
+      severity: 'error',
+      summary: t('financeOps.downloadReceipt'),
+      detail: t('financeOps.downloadError'),
+      life: 4000,
+    })
+  } finally {
+    downloadingPaymentId.value = ''
+  }
+}
 
 async function handlePaymentReturnFromRoute() {
   if (!profile.value.id) return
@@ -118,12 +158,12 @@ async function handlePaymentReturnFromRoute() {
       paymentId,
     })
 
-    await loadData(profile.value.id)
+    await Promise.all([loadData(profile.value.id), loadMyCalendar()])
     toast.add({
       severity: 'success',
       summary: t('residentFinance.paymentSuccessTitle'),
-      detail: t('residentFinance.paymentSuccessDetail'),
-      life: 5000,
+      detail: `${t('residentFinance.paymentSuccessDetail')} ${t('financeOps.paymentReceiptReady')}`,
+      life: 6000,
     })
   } catch {
     await loadData(profile.value.id)
@@ -276,7 +316,11 @@ function translateMonth(value) {
     <h1 class="visually-hidden">{{ t('resident.financeTitle') }}</h1>
 
     <div class="finance-page">
-      <p v-if="paymentState.error" class="dash-error">{{ paymentState.error }}</p>
+      <LoadErrorRetry
+        v-if="paymentState.error"
+        :loading="paymentState.isLoading"
+        @retry="loadData(profile.id)"
+      />
 
       <!-- Recibos por pagar -->
       <section class="finance-panel" aria-labelledby="pending-heading">
@@ -373,15 +417,69 @@ function translateMonth(value) {
               <span class="inc-badge inc-badge--resolved">
                 {{ t('residentFinance.statusPaid') }}
               </span>
+              <button
+                type="button"
+                class="receipt-btn"
+                :disabled="downloadingPaymentId === String(pay.id)"
+                :aria-label="`${t('financeOps.downloadReceipt')} · ${translateMonth(pay.feeMonth)}`"
+                @click="downloadReceipt(pay)"
+              >
+                <i class="pi pi-download" aria-hidden="true" />
+                {{
+                  downloadingPaymentId === String(pay.id)
+                    ? t('financeOps.downloading')
+                    : t('financeOps.downloadReceipt')
+                }}
+              </button>
             </div>
           </li>
         </ul>
+      </section>
+
+      <!-- Semáforo de mis cuotas (RF029) -->
+      <section class="finance-panel" aria-labelledby="my-traffic-heading">
+        <h2 id="my-traffic-heading" class="finance-panel__section-title">
+          {{ t('financeOps.myTrafficTitle') }}
+        </h2>
+        <DebtTrafficLightGrid
+          compact
+          :months="myCalendar.months"
+          :residents="myCalendar.residents"
+          :due-soon-days="myCalendar.dueSoonDays"
+          :loading="myCalendarLoading"
+          :error="myCalendarError"
+          @retry="loadMyCalendar"
+        />
       </section>
     </div>
   </div>
 </template>
 
 <style scoped>
+.receipt-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+  color: #1d1d1f;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.receipt-btn:hover:not(:disabled) {
+  background: #f5f5f7;
+}
+
+.receipt-btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
 .app-view {
   padding: 1.75rem 1.5rem 2.5rem;
   max-width: 72rem;

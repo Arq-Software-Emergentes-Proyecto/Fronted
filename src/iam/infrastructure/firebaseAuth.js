@@ -1,7 +1,13 @@
 import {
+  EmailAuthProvider,
+  GoogleAuthProvider,
   createUserWithEmailAndPassword,
   fetchSignInMethodsForEmail,
+  linkWithCredential,
+  reauthenticateWithPopup,
+  sendEmailVerification,
   signInWithEmailAndPassword,
+  updatePassword,
   updateProfile,
 } from 'firebase/auth'
 import { apiError, normalizeEmail } from '@/shared/infrastructure/api/utils.js'
@@ -130,4 +136,96 @@ export async function loginAdminWithFirebase({ email, password }) {
   } catch (error) {
     throw mapAuthError(error)
   }
+}
+
+/**
+ * Multirole login (US014): email/password sign-in for any role. The role is resolved
+ * afterwards by the API (GET /api/v1/authentication/me).
+ */
+export const signInWithPasswordFirebase = loginAdminWithFirebase
+
+/**
+ * Resident accepting an invite with email + password instead of Google.
+ * Creates the Firebase email/password account (or signs into it if it already exists
+ * with that same password, e.g. a retried invite) and returns its idToken.
+ */
+export async function createResidentPasswordAccount({ email, password, name }) {
+  const normalized = normalizeEmail(email)
+  const secret = String(password ?? '')
+  if (!normalized || !secret) throw apiError('RESIDENT_FIELDS_REQUIRED')
+
+  const auth = getFirebaseAuth()
+  try {
+    const credential = await createUserWithEmailAndPassword(auth, normalized, secret)
+    if (String(name ?? '').trim()) {
+      await updateProfile(credential.user, { displayName: String(name).trim() }).catch(() => {})
+    }
+    // A verified email keeps Firebase from dropping this password credential if the
+    // resident later signs in with Google using the same address. Best effort.
+    sendEmailVerification(credential.user).catch(() => {})
+    return { uid: credential.user.uid, email: normalized, token: await credential.user.getIdToken() }
+  } catch (error) {
+    const code = String(error?.code ?? '')
+    if (code === 'auth/weak-password') throw apiError('PASSWORD_TOO_SHORT')
+    if (code !== 'auth/email-already-in-use') throw mapAuthError(error)
+  }
+
+  try {
+    const credential = await signInWithEmailAndPassword(auth, normalized, secret)
+    return { uid: credential.user.uid, email: normalized, token: await credential.user.getIdToken() }
+  } catch {
+    throw apiError('EMAIL_ALREADY_EXISTS')
+  }
+}
+
+function hasProvider(user, providerId) {
+  return (user?.providerData ?? []).some((p) => p?.providerId === providerId)
+}
+
+/**
+ * Signed-in resident (Google) adds an email/password credential to the SAME Firebase
+ * account (same uid), or changes it if it already has one. Afterwards they can sign in
+ * with Google or with email + password.
+ * Throws REAUTH_REQUIRED when there is no Firebase session in this browser.
+ */
+export async function setPasswordForCurrentUser(password) {
+  const secret = String(password ?? '')
+  if (secret.length < 6) throw apiError('PASSWORD_TOO_SHORT')
+
+  const auth = getFirebaseAuth()
+  if (typeof auth.authStateReady === 'function') await auth.authStateReady()
+  const user = auth.currentUser
+  if (!user) throw apiError('REAUTH_REQUIRED')
+  const email = normalizeEmail(user.email)
+  if (!email) throw apiError('EMAIL_NOT_FOUND')
+
+  const alreadyHasPassword = hasProvider(user, 'password')
+  const run = () =>
+    alreadyHasPassword
+      ? updatePassword(user, secret)
+      : linkWithCredential(user, EmailAuthProvider.credential(email, secret))
+
+  try {
+    await run()
+  } catch (error) {
+    const code = String(error?.code ?? '')
+    if (code === 'auth/requires-recent-login' && hasProvider(user, 'google.com')) {
+      const provider = new GoogleAuthProvider()
+      provider.setCustomParameters({ prompt: 'select_account', login_hint: email })
+      await reauthenticateWithPopup(user, provider)
+      await run()
+    } else if (code === 'auth/requires-recent-login') {
+      throw apiError('REAUTH_REQUIRED')
+    } else if (code === 'auth/provider-already-linked') {
+      await updatePassword(user, secret)
+    } else if (code === 'auth/weak-password') {
+      throw apiError('PASSWORD_TOO_SHORT')
+    } else if (code === 'auth/email-already-in-use' || code === 'auth/credential-already-in-use') {
+      throw apiError('EMAIL_ALREADY_EXISTS')
+    } else {
+      throw mapAuthError(error)
+    }
+  }
+
+  return { email, changed: alreadyHasPassword }
 }

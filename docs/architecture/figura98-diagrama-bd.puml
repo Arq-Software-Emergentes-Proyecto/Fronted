@@ -28,7 +28,9 @@ package "IAM" {
     status : VARCHAR
     createdAt : DATETIME
   }
+}
 
+package "Billing" {
   entity "Subscription" as Subscription {
     * id : UUID <<PK>>
     --
@@ -140,7 +142,7 @@ package "Finances" {
   }
 }
 
-package "Information" {
+package "Communications" {
   entity "Announcement" as Announcement {
     * id : UUID <<PK>>
     --
@@ -150,9 +152,7 @@ package "Information" {
     publishDate : DATETIME
     status : VARCHAR
   }
-}
 
-package "Import" {
   entity "Folder" as Folder {
     * id : UUID <<PK>>
     --

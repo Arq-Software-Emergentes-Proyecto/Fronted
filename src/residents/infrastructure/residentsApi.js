@@ -10,11 +10,21 @@ import {
   normalizeEmail,
   publicResident,
 } from '@/shared/infrastructure/api/utils.js'
-import { getResidentLimitForActiveOwner, refreshSubscriptionFromApi } from '@/shared/infrastructure/subscriptionPlanStorage.js'
+import { getResidentLimitForActiveOwner, refreshSubscriptionFromApi } from '@/billing/infrastructure/subscriptionPlanStorage.js'
 import { parseDepartmentNumber } from '@/shared/domain/departmentNumber.js'
 import { todayYmd } from '@/finances/domain/billingCycle.js'
 
 const USERS_BASE = '/api/v1/users'
+const RESIDENTS_IMPORT_BASE = '/api/v1/residents/import'
+
+/** Invite link the admin shares with the resident (no email provider is integrated). */
+export function residentInviteLink(resident) {
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : ''
+  const params = new URLSearchParams({ invite: '1' })
+  if (resident?.inviteToken) params.set('token', resident.inviteToken)
+  else params.set('code', resident?.code || '')
+  return `${baseUrl}/login?${params.toString()}`
+}
 
 /**
  * Residents bounded-context API.
@@ -88,12 +98,56 @@ export const residentsApi = {
     return publicResident(created)
   },
 
+  /**
+   * US016: upload an .xlsx/.csv roster. The API validates every row first and rejects the whole file
+   * with a per-row report (error.payload.errors) when any required cell is invalid.
+   * @param {File} file
+   * @returns {Promise<{ created: number, totalRows: number, residents: ReturnType<typeof publicResident>[] }>}
+   */
+  async importFile(file) {
+    if (!file) throw apiError('FILE_REQUIRED')
+    const form = new FormData()
+    form.append('file', file, file.name)
+    const { data } = await apiClient.post(`${RESIDENTS_IMPORT_BASE}`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000,
+    })
+    await refreshSubscriptionFromApi().catch(() => {})
+    const residents = Array.isArray(data?.residents) ? data.residents.map(publicResident) : []
+    return {
+      created: Number(data?.created ?? residents.length),
+      totalRows: Number(data?.totalRows ?? residents.length),
+      residents,
+    }
+  },
+
+  /** Template download (authenticated) → Blob. @param {'xlsx' | 'csv'} format */
+  async downloadImportTemplate(format = 'xlsx') {
+    const response = await apiClient.get(`${RESIDENTS_IMPORT_BASE}/template`, {
+      params: { format },
+      responseType: 'blob',
+    })
+    return response.data
+  },
+
   async setBillFromNextMonth(id, billFromNextMonth) {
     const cleanId = String(id ?? '').trim()
     if (!cleanId) throw apiError('RESIDENT_NOT_FOUND')
     const { data } = await apiClient.patch(`${USERS_BASE}/${encodeURIComponent(cleanId)}`, {
       billFromNextMonth: Boolean(billFromNextMonth),
     })
+    return publicResident(data)
+  },
+
+  /**
+   * IAM AccountStatus: DEACTIVATED residents cannot sign in and every request gets
+   * 403 ACCOUNT_DEACTIVATED (data is kept, unlike delete). Reversible with reactivate.
+   */
+  async setAccountActive(id, active) {
+    const cleanId = String(id ?? '').trim()
+    if (!cleanId) throw apiError('RESIDENT_NOT_FOUND')
+    const action = active ? 'reactivate' : 'deactivate'
+    const { data } = await apiClient.patch(`${USERS_BASE}/${encodeURIComponent(cleanId)}/${action}`)
     return publicResident(data)
   },
 
@@ -172,6 +226,40 @@ export const residentsApi = {
     }
 
     return { id: cleanId, summary, errors }
+  },
+
+  /**
+   * Accept the invite with email + password (Firebase email/password account) instead of Google.
+   * The API binds the Firebase uid to the resident exactly like complete-google.
+   */
+  async completeInviteWithPassword({ token, email, name, idToken }) {
+    const inviteToken = String(token ?? '').trim()
+    const cleanEmail = normalizeEmail(email)
+    if (!inviteToken || !cleanEmail || !idToken) {
+      throw apiError('RESIDENT_FIELDS_REQUIRED')
+    }
+    try {
+      const { data } = await apiClient.post('/api/v1/authentication/residents/complete-invite', {
+        token: inviteToken,
+        email: cleanEmail,
+        name: String(name ?? '').trim(),
+        idToken: String(idToken),
+        provider: 'password',
+      })
+      return parseAuthResponse(data)
+    } catch (error) {
+      if (error?.code === 'RESIDENT_NOT_FOUND') throw apiError('RESIDENT_NOT_FOUND')
+      if (error?.code === 'EMAIL_ALREADY_EXISTS') throw apiError('EMAIL_ALREADY_EXISTS')
+      if (
+        error?.code === 'INVALID_ID_TOKEN' ||
+        error?.code === 'INVITE_EXPIRED' ||
+        error?.code === 'INVITE_ALREADY_USED' ||
+        error?.code === 'INVITE_EMAIL_MISMATCH'
+      ) {
+        throw apiError(error.code, error.payload?.message)
+      }
+      throw error
+    }
   },
 
   async completeInviteWithGoogle({ token, code, email, name, googleSub, idToken }) {

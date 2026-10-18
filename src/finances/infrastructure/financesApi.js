@@ -1,6 +1,7 @@
 import { apiClient } from '@/shared/infrastructure/api/apiClient.js'
 import { withOwnerParams } from '@/shared/infrastructure/api/ownerQuery.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
+import { OPEN_WIREFRAME_ACCESS } from '@/iam/application/localPreviewAuth.js'
 import { Receipt } from '../domain/receipt.js'
 import { normalizeSettings, settingsToPayload } from '../domain/billingCycle.js'
 
@@ -90,7 +91,8 @@ export const financesApi = {
         amount: Number(receipt.amount) + Number(receipt.lateFee || 0) + Number(receipt.extraCharges || 0),
         dueDate: receipt.dueDate,
         status: receipt.status === 'Paid' ? 'Pagado' : 'Pendiente',
-        concept: receipt.concept || "Mantenimiento"
+        concept: receipt.concept || "Mantenimiento",
+        billingMonth: receipt.billingMonth || '',
       };
     });
 
@@ -112,8 +114,9 @@ export const financesApi = {
     // 4. Combine both
     const combined = [...mappedReceipts, ...mappedFees];
 
-    // 5. Fallback if totally empty
-    if (combined.length === 0) {
+    // 5. Wireframe/mock mode only: placeholder row so screenshots are not empty.
+    // With the real API an empty list means "no debt" — never invent a pending fee.
+    if (combined.length === 0 && OPEN_WIREFRAME_ACCESS) {
       return [
         {
           id: `mock-1-${residentId}`,
@@ -128,22 +131,7 @@ export const financesApi = {
     }
     
     // Sort by due date descending
-    return combined.sort((a, b) => b.dueDate.localeCompare(a.dueDate));
-  },
-
-  async addFee(feeData) {
-    const ownerId = getActiveDataOwnerId()
-    const receiptData = {
-      residentId: feeData.residentId,
-      issueDate: new Date().toISOString().split('T')[0],
-      dueDate: feeData.dueDate,
-      amount: feeData.amount,
-      status: feeData.status === 'Pagado' ? 'Paid' : 'Pending',
-      lateFee: 0,
-      ...(ownerId ? { ownerAdminId: ownerId } : {})
-    };
-    const { data } = await apiClient.post('/receipts', receiptData);
-    return data;
+    return combined.sort((a, b) => String(b.dueDate ?? '').localeCompare(String(a.dueDate ?? '')));
   },
 
   async getPayments(residentId) {
@@ -156,38 +144,68 @@ export const financesApi = {
     return Array.isArray(data) ? data : []
   },
 
-  async addPayment(paymentData) {
-    const ownerId = getActiveDataOwnerId()
-    const payload = {
-      ...paymentData,
-      ...(ownerId ? { ownerAdminId: ownerId } : {}),
-    }
-    const { data } = await apiClient.post('/payments', payload);
-    return data;
-  },
-
-  async updateFeeStatus(feeId, status) {
-    const idStr = String(feeId);
-    if (idStr.startsWith('receipt-')) {
-      const realId = idStr.replace('receipt-', '');
-      const statusEn = status === 'Pagado' ? 'Paid' : 'Pending';
-      const { data } = await apiClient.patch(`/receipts/${realId}`, { status: statusEn });
-      return data;
-    } else if (idStr.startsWith('fee-')) {
-      const realId = idStr.replace('fee-', '');
-      const statusEs = status === 'Pagado' ? 'Pagado' : 'Pendiente';
-      const { data } = await apiClient.patch(`/fees/${realId}`, { status: statusEs });
-      return data;
-    }
-    // Fallback for non-prefixed or mock
-    return { id: feeId, status };
-  },
-
   async getDashboardKpis() {
     const { data } = await apiClient.get('/kpi', { params: withOwnerParams() })
     const row = Array.isArray(data) ? data[0] : data
     if (!row || typeof row !== 'object') return { monthlyChart: [] }
     return row
+  },
+
+  /** TS003 / RF021: facturación idempotente del mes en el servidor (default: mes actual). */
+  async generateMonthlyReceipts(month) {
+    const { data } = await apiClient.post(
+      '/api/v1/finances/receipts/generate',
+      month ? { month } : {},
+    )
+    return data
+  },
+
+  /** US021: alertas de facturación (p. ej. MISSING_MONTHLY_CHARGE). */
+  async getBillingAlerts() {
+    const { data } = await apiClient.get('/api/v1/finances/billing-alerts')
+    return Array.isArray(data) ? data : []
+  },
+
+  /** RF029: semáforo residente × mes. Residente: solo su fila (lo fuerza el backend). */
+  async getPaymentCalendar({ residentId, months = 6 } = {}) {
+    const params = { months }
+    if (residentId) params.residentId = residentId
+    const { data } = await apiClient.get('/api/v1/finances/payment-calendar', { params })
+    return {
+      today: data?.today ?? '',
+      dueSoonDays: Number(data?.dueSoonDays) || 5,
+      months: Array.isArray(data?.months) ? data.months : [],
+      residents: Array.isArray(data?.residents) ? data.residents : [],
+    }
+  },
+
+  /** RF030: ingresos, egresos y balance neto de un mes "yyyy-MM". */
+  async getMonthlyBalance(month) {
+    const { data } = await apiClient.get('/api/v1/finances/balance', {
+      params: month ? { month } : {},
+    })
+    return {
+      month: data?.month ?? month,
+      income: Number(data?.income) || 0,
+      expenses: Number(data?.expenses) || 0,
+      net: Number(data?.net) || 0,
+    }
+  },
+
+  /** RF022: comprobante PDF de un pago aprobado. */
+  async downloadPaymentReceipt(paymentId) {
+    await downloadPdf(
+      `/api/v1/finances/payments/${encodeURIComponent(String(paymentId))}/receipt-pdf`,
+      `recibo-${paymentId}.pdf`,
+    )
+  },
+
+  /** RF022: comprobante PDF de un recibo pagado. */
+  async downloadReceiptPdf(receiptId) {
+    await downloadPdf(
+      `/api/v1/finances/receipts/${encodeURIComponent(String(receiptId))}/pdf`,
+      `recibo-${receiptId}.pdf`,
+    )
   },
 
   async updateSettings(settings) {
@@ -211,4 +229,24 @@ export const financesApi = {
 
     return normalizeSettings(data)
   },
+}
+
+/** Descarga autenticada (Bearer) de un PDF y dispara el guardado en el navegador. */
+async function downloadPdf(url, fallbackName) {
+  const response = await apiClient.get(url, { responseType: 'blob' })
+  const disposition = String(response.headers?.['content-disposition'] ?? '')
+  const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i)
+  const fileName = match ? decodeURIComponent(match[1]) : fallbackName
+  const blob =
+    response.data instanceof Blob
+      ? response.data
+      : new Blob([response.data], { type: 'application/pdf' })
+  const href = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = href
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(href), 1000)
 }

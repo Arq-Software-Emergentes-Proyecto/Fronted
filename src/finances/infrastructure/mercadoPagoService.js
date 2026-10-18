@@ -26,6 +26,10 @@ export async function checkoutMaintenanceFees({
   const ownerId = getActiveDataOwnerId()
   const frontendBaseUrl = typeof window !== 'undefined' ? window.location.origin : undefined
 
+  // The API snapshots the pending items + total (checkoutId). Reconciliation only pays
+  // those items and requires the approved amount to match, so the fallback below must
+  // reuse the server amount and reference instead of the client-side total.
+  let serverCheckout = null
   try {
     const { data } = await apiClient.post('/api/v1/payments/checkout', {
       residentId: String(residentId),
@@ -40,17 +44,26 @@ export async function checkoutMaintenanceFees({
         demo: false,
       }
     }
-  } catch {
-    /* fall through to Checkout Pro on this app */
+    if (data?.checkoutId) serverCheckout = data
+  } catch (error) {
+    // Nothing pending / forbidden: do not open a payment the server cannot reconcile.
+    if (error?.status === 400 || error?.status === 403) throw error
+    /* network error: fall through to Checkout Pro on this app */
   }
+
+  const fallbackAmount =
+    serverCheckout?.amount != null ? Number(serverCheckout.amount) : amount
+  const externalReference =
+    serverCheckout?.externalReference ||
+    `maintenance:${residentId}:${ownerId || ''}`
 
   return startMercadoPagoCheckout({
     kind: 'maintenance',
     residentId: String(residentId),
-    amount,
+    amount: fallbackAmount,
     title: title || 'Cuotas BuildingFex',
     payerEmail,
-    externalReference: `maintenance:${residentId}:${ownerId || ''}`,
+    externalReference,
     successUrl: checkoutReturnUrl(AppPaths.APP_RESIDENT_FINANCE),
     failureUrl: checkoutReturnUrl(AppPaths.APP_RESIDENT_FINANCE, { payment: 'failure' }),
     pendingUrl: checkoutReturnUrl(AppPaths.APP_RESIDENT_FINANCE, { payment: 'pending' }),

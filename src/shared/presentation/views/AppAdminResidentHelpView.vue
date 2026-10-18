@@ -2,13 +2,13 @@
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { supportApi } from '@/support/infrastructure/supportApi.js'
+import { ChatStatus, isPendingChat, supportApi } from '@/residentCare/infrastructure/supportApi.js'
 import { useSession, getActiveDataOwnerId } from '@/iam/application/sessionStore.js'
 import {
   isDocumentVisible,
   joinSupportOwner,
   onSupportChatUpdated,
-} from '@/support/infrastructure/supportRealtime.js'
+} from '@/residentCare/infrastructure/supportRealtime.js'
 
 const { t, locale } = useI18n()
 const { state: sessionState } = useSession()
@@ -21,9 +21,56 @@ const loadingList = ref(true)
 const loadError = ref('')
 const messagesEl = ref(null)
 const lastListSync = ref('')
+/** US032: 'pending' | 'answered' | 'all'. */
+const filter = ref('all')
+const statusBusy = ref(false)
+const aiUsage = ref(null)
 
 const ownerId = computed(() => getActiveDataOwnerId() || sessionState.profile?.id || '')
 const selected = computed(() => chats.value.find((row) => row.id === selectedId.value) || null)
+const pendingCount = computed(() => chats.value.filter(isPendingChat).length)
+const filteredChats = computed(() => {
+  if (filter.value === 'pending') return chats.value.filter(isPendingChat)
+  if (filter.value === 'answered') return chats.value.filter((row) => row.status === ChatStatus.ANSWERED)
+  return chats.value
+})
+
+function statusLabel(row) {
+  if (row?.status === ChatStatus.CLOSED) return t('supportAdmin.statusClosed')
+  if (isPendingChat(row)) return t('supportAdmin.statusOpen')
+  return t('supportAdmin.statusAnswered')
+}
+
+function statusClass(row) {
+  if (row?.status === ChatStatus.CLOSED) return 'is-closed'
+  return isPendingChat(row) ? 'is-pending' : 'is-answered'
+}
+
+async function setSelectedStatus(status) {
+  const id = selected.value?.id
+  if (!id || statusBusy.value) return
+  statusBusy.value = true
+  try {
+    const updated = status === ChatStatus.CLOSED
+      ? await supportApi.closeChat(id)
+      : await supportApi.updateStatus(id, status)
+    upsertChat(updated)
+    loadError.value = ''
+  } catch (e) {
+    console.error(e)
+    loadError.value = t('supportAdmin.statusError')
+  } finally {
+    statusBusy.value = false
+  }
+}
+
+async function loadAiUsage() {
+  try {
+    aiUsage.value = await supportApi.getAiUsage()
+  } catch {
+    aiUsage.value = null
+  }
+}
 
 function formatWhen(iso) {
   if (!iso) return ''
@@ -142,6 +189,7 @@ function startFallbackPolling() {
 }
 
 watch(ownerId, async () => {
+  void loadAiUsage()
   await bindChats()
   await bindRealtime()
   startFallbackPolling()
@@ -175,7 +223,7 @@ async function sendReply() {
     loadError.value = ''
   } catch (e) {
     console.error(e)
-    loadError.value = t('supportAdmin.loadError')
+    loadError.value = t('supportAdmin.sendError')
   } finally {
     sending.value = false
   }
@@ -195,23 +243,70 @@ async function sendReply() {
             <i class="pi pi-refresh" aria-hidden="true" />
             {{ t('supportAdmin.refresh') }}
           </button>
+          <div class="inbox-filter" role="tablist" :aria-label="t('supportAdmin.inboxHeading')">
+            <button
+              type="button"
+              role="tab"
+              class="inbox-filter__btn"
+              :class="{ 'is-active': filter === 'pending' }"
+              :aria-selected="filter === 'pending'"
+              @click="filter = 'pending'"
+            >
+              {{ t('supportAdmin.filterPending') }}
+              <span
+                v-if="pendingCount"
+                class="inbox-badge"
+                :aria-label="t('supportAdmin.pendingBadge', { n: pendingCount })"
+              >{{ pendingCount }}</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              class="inbox-filter__btn"
+              :class="{ 'is-active': filter === 'answered' }"
+              :aria-selected="filter === 'answered'"
+              @click="filter = 'answered'"
+            >
+              {{ t('supportAdmin.filterAnswered') }}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              class="inbox-filter__btn"
+              :class="{ 'is-active': filter === 'all' }"
+              :aria-selected="filter === 'all'"
+              @click="filter = 'all'"
+            >
+              {{ t('supportAdmin.filterAll') }}
+            </button>
+          </div>
           <p class="ai-recents-label">{{ t('supportAdmin.inboxHeading') }}</p>
           <p v-if="!loadingList && !chats.length" class="ai-empty">
             {{ t('supportAdmin.emptyList') }}
           </p>
+          <p v-else-if="!loadingList && !filteredChats.length" class="ai-empty">
+            {{ t('supportAdmin.emptyFiltered') }}
+          </p>
           <ul v-else class="ai-recent-list" role="list">
-            <li v-for="c in chats" :key="c.id">
+            <li v-for="c in filteredChats" :key="c.id">
               <button
                 type="button"
                 class="ai-recent"
                 :class="{ 'is-active': c.id === selectedId }"
                 @click="selectChat(c)"
               >
-                <span class="ai-recent__title">{{ chatTitle(c) }}</span>
-                <span class="ai-recent__meta">{{ chatMeta(c) }}</span>
+                <span class="ai-recent__title">
+                  <span class="status-dot" :class="statusClass(c)" aria-hidden="true" />
+                  {{ chatTitle(c) }}
+                </span>
+                <span class="ai-recent__meta">{{ statusLabel(c) }} · {{ chatMeta(c) }}</span>
               </button>
             </li>
           </ul>
+          <p v-if="aiUsage" class="ai-usage" :class="{ 'is-reached': aiUsage.capReached }">
+            {{ t('supportAdmin.aiUsage', { used: aiUsage.used, cap: aiUsage.cap }) }}
+            <span v-if="aiUsage.capReached" class="ai-usage__note">{{ t('supportAdmin.aiUsageReached') }}</span>
+          </p>
         </aside>
 
         <section class="ai-main" aria-labelledby="help-prompt-heading">
@@ -226,9 +321,40 @@ async function sendReply() {
                 {{ selected.residentName || selected.residentId }}
               </h2>
               <p class="ai-thread-head__meta">
+                <span class="status-pill" :class="statusClass(selected)">{{ statusLabel(selected) }}</span>
                 {{ t('supportAdmin.topicLabel') }}: {{ selected.topic || '—' }}
                 <span v-if="selected.createdAt"> · {{ formatWhen(selected.createdAt) }}</span>
               </p>
+              <div class="ai-thread-head__actions">
+                <button
+                  v-if="selected.status !== 'answered'"
+                  type="button"
+                  class="head-btn head-btn--primary"
+                  :disabled="statusBusy"
+                  @click="setSelectedStatus('answered')"
+                >
+                  <i class="pi pi-check" aria-hidden="true" />
+                  {{ t('supportAdmin.markAnswered') }}
+                </button>
+                <button
+                  v-if="selected.status !== 'open'"
+                  type="button"
+                  class="head-btn"
+                  :disabled="statusBusy"
+                  @click="setSelectedStatus('open')"
+                >
+                  {{ selected.status === 'closed' ? t('supportAdmin.reopenChat') : t('supportAdmin.markPending') }}
+                </button>
+                <button
+                  v-if="selected.status !== 'closed'"
+                  type="button"
+                  class="head-btn"
+                  :disabled="statusBusy"
+                  @click="setSelectedStatus('closed')"
+                >
+                  {{ t('supportAdmin.closeChat') }}
+                </button>
+              </div>
             </header>
             <div ref="messagesEl" class="ai-thread" role="log" aria-live="polite">
               <div
@@ -243,6 +369,10 @@ async function sendReply() {
               >
                 <span class="ai-msg__who">{{ bubbleRole(m.authorRole) }}</span>
                 <p>{{ m.body }}</p>
+                <p v-if="m.citedSource" class="ai-msg__source">
+                  <i class="pi pi-file" aria-hidden="true" />
+                  {{ t('supportAdmin.sourceLabel') }}: {{ m.citedSource }}
+                </p>
               </div>
             </div>
             <div class="ai-dock">
@@ -611,6 +741,147 @@ async function sendReply() {
   align-self: flex-end;
   background: rgba(30, 58, 138, 0.1);
   color: var(--apple-blue, #1e3a8a);
+}
+
+.ai-msg__source {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.5rem !important;
+  font-size: 0.75rem !important;
+  font-weight: 600;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.inbox-filter {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.inbox-filter__btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.38rem 0.4rem;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--apple-text-secondary, #6e6e73);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.inbox-filter__btn.is-active {
+  background: #fff;
+  color: var(--apple-blue, #1e3a8a);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.inbox-badge {
+  min-width: 1.15rem;
+  padding: 0 0.32rem;
+  border-radius: 980px;
+  background: #d92d20;
+  color: #fff;
+  font-size: 0.65rem;
+  line-height: 1.15rem;
+  text-align: center;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.3rem;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: #98a2b3;
+}
+
+.status-dot.is-pending {
+  background: #d92d20;
+}
+
+.status-dot.is-answered {
+  background: #12b76a;
+}
+
+.status-pill {
+  display: inline-block;
+  margin-right: 0.4rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: 980px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: #f2f4f7;
+  color: #475467;
+}
+
+.status-pill.is-pending {
+  background: #fef3f2;
+  color: #b42318;
+}
+
+.status-pill.is-answered {
+  background: #ecfdf3;
+  color: #027a48;
+}
+
+.ai-thread-head__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+}
+
+.head-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.32rem 0.75rem;
+  border: 1px solid var(--apple-border-hairline, #d2d2d7);
+  border-radius: 980px;
+  background: #fff;
+  color: var(--apple-text, #1d1d1f);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.head-btn--primary {
+  border-color: var(--apple-blue, #1e3a8a);
+  background: var(--apple-blue, #1e3a8a);
+  color: #fff;
+}
+
+.head-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.ai-usage {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0.5rem 0.35rem 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  font-size: 0.72rem;
+  color: var(--apple-text-secondary, #6e6e73);
+}
+
+.ai-usage.is-reached {
+  color: #b42318;
+}
+
+.ai-usage__note {
+  display: block;
+  margin-top: 0.2rem;
 }
 
 .ai-dock {

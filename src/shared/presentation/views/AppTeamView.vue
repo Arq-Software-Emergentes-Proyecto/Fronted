@@ -1,16 +1,28 @@
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
+import Dropdown from 'primevue/dropdown'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
-import { teamWorkersApi } from '@/team/infrastructure/teamWorkersApi.js'
+import { teamWorkersApi, STAFF_POSITIONS } from '@/team/infrastructure/teamWorkersApi.js'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
+import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
+import TeamTasksPanel from '@/team/presentation/components/TeamTasksPanel.vue'
+import TeamShiftsPanel from '@/team/presentation/components/TeamShiftsPanel.vue'
 
 const { t, locale } = useI18n()
+
+const positionOptions = computed(() =>
+  STAFF_POSITIONS.map((value) => ({ value, label: t(`teamMgmt.positions.${value}`) })),
+)
+
+function positionLabel(position) {
+  return STAFF_POSITIONS.includes(position) ? t(`teamMgmt.positions.${position}`) : '—'
+}
 
 const workers = ref([])
 const loading = ref(false)
@@ -26,7 +38,17 @@ const form = reactive({
   dni: '',
   salary: null,
   photoUrl: '',
+  position: 'MAINTENANCE',
 })
+
+/** RNF003: required fields left empty after a submit attempt. */
+const fieldErrors = reactive({ name: false, phone: false, dni: false, salary: false })
+/** RNF012: the worker list itself failed to load (retryable). */
+const listLoadFailed = ref(false)
+
+function errorIdFor(field, invalid) {
+  return invalid ? `team-worker-${field}-error` : undefined
+}
 
 const MAX_IMAGE_DIMENSION = 1024
 const IMAGE_OUTPUT_QUALITY = 0.82
@@ -79,7 +101,11 @@ function resetForm() {
   form.dni = ''
   form.salary = null
   form.photoUrl = ''
+  form.position = 'MAINTENANCE'
   submitError.value = ''
+  Object.keys(fieldErrors).forEach((key) => {
+    fieldErrors[key] = false
+  })
 }
 
 function openModal() {
@@ -94,10 +120,12 @@ function closeModal() {
 async function loadWorkers() {
   loading.value = true
   loadError.value = ''
+  listLoadFailed.value = false
   try {
     workers.value = await teamWorkersApi.list()
   } catch {
     loadError.value = t('teamMgmt.loadError')
+    listLoadFailed.value = true
     workers.value = []
   } finally {
     loading.value = false
@@ -131,12 +159,11 @@ async function submitWorker() {
       ? Number.NaN
       : Number(form.salary)
 
-  if (
-    !form.name.trim() ||
-    !form.phone.trim() ||
-    !form.dni.trim() ||
-    !Number.isFinite(salaryNum)
-  ) {
+  fieldErrors.name = !form.name.trim()
+  fieldErrors.phone = !form.phone.trim()
+  fieldErrors.dni = !form.dni.trim()
+  fieldErrors.salary = !Number.isFinite(salaryNum)
+  if (fieldErrors.name || fieldErrors.phone || fieldErrors.dni || fieldErrors.salary) {
     submitError.value = t('teamMgmt.requiredFields')
     return
   }
@@ -149,6 +176,7 @@ async function submitWorker() {
       dni: form.dni,
       salary: salaryNum,
       photoUrl: form.photoUrl,
+      position: form.position,
     })
     closeModal()
     await loadWorkers()
@@ -191,6 +219,67 @@ async function confirmDelete() {
   }
 }
 
+/** DeactivateStaff (Team 5.8): INACTIVE workers get no new tasks/shifts; open tasks can be reassigned. */
+const pendingDeactivate = ref(null)
+const reassignToId = ref(null)
+const togglingStatus = ref(false)
+const statusError = ref('')
+const tasksPanel = ref(null)
+
+const reassignOptions = computed(() => [
+  { value: null, label: t('teamMgmt.keepTasksAssigned') },
+  ...workers.value
+    .filter((w) => w.id !== pendingDeactivate.value?.id && w.status !== 'INACTIVE')
+    .map((w) => ({ value: w.id, label: w.name })),
+])
+
+function askDeactivate(worker) {
+  statusError.value = ''
+  reassignToId.value = null
+  pendingDeactivate.value = worker
+}
+
+function closeDeactivate() {
+  if (togglingStatus.value) return
+  pendingDeactivate.value = null
+}
+
+async function confirmDeactivate() {
+  const worker = pendingDeactivate.value
+  if (!worker || togglingStatus.value) return
+  togglingStatus.value = true
+  statusError.value = ''
+  try {
+    await teamWorkersApi.deactivate(worker.id, { reassignToId: reassignToId.value })
+    pendingDeactivate.value = null
+    await refreshAll()
+  } catch (err) {
+    statusError.value =
+      err?.code === 'WORKLOAD_EXCEEDED' ? t('teamMgmt.tasks.workloadExceeded') : t('teamMgmt.statusError')
+  } finally {
+    togglingStatus.value = false
+  }
+}
+
+async function reactivateWorker(worker) {
+  if (togglingStatus.value) return
+  togglingStatus.value = true
+  loadError.value = ''
+  try {
+    await teamWorkersApi.reactivate(worker.id)
+    await loadWorkers()
+  } catch {
+    loadError.value = t('teamMgmt.statusError')
+  } finally {
+    togglingStatus.value = false
+  }
+}
+
+async function refreshAll() {
+  await loadWorkers()
+  await tasksPanel.value?.reload?.()
+}
+
 function formatSalary(data) {
   const n = Number(data.salary)
   if (!Number.isFinite(n)) return '—'
@@ -223,17 +312,24 @@ onMounted(loadWorkers)
       :draggable="false"
     >
       <div class="team-form">
-        <div class="team-form__field">
+        <div class="team-form__field" :class="{ 'bf-field--invalid': fieldErrors.name }">
           <label for="team-worker-name">{{ t('teamMgmt.nameLabel') }}</label>
           <InputText
             id="team-worker-name"
             v-model="form.name"
             class="team-form__input"
             autocomplete="name"
+            required
+            :invalid="fieldErrors.name"
+            :aria-describedby="errorIdFor('name', fieldErrors.name)"
             fluid
+            @update:model-value="fieldErrors.name = false"
           />
+          <small v-if="fieldErrors.name" id="team-worker-name-error" class="bf-field-error">
+            {{ t('common.fieldRequired') }}
+          </small>
         </div>
-        <div class="team-form__field">
+        <div class="team-form__field" :class="{ 'bf-field--invalid': fieldErrors.phone }">
           <label for="team-worker-phone">{{ t('teamMgmt.phoneLabel') }}</label>
           <InputText
             id="team-worker-phone"
@@ -241,21 +337,58 @@ onMounted(loadWorkers)
             class="team-form__input"
             inputmode="tel"
             autocomplete="tel"
+            required
+            :invalid="fieldErrors.phone"
+            :aria-describedby="errorIdFor('phone', fieldErrors.phone)"
             fluid
+            @update:model-value="fieldErrors.phone = false"
           />
+          <small v-if="fieldErrors.phone" id="team-worker-phone-error" class="bf-field-error">
+            {{ t('common.fieldRequired') }}
+          </small>
         </div>
-        <div class="team-form__field">
+        <div class="team-form__field" :class="{ 'bf-field--invalid': fieldErrors.dni }">
           <label for="team-worker-dni">{{ t('teamMgmt.dniLabel') }}</label>
-          <InputText id="team-worker-dni" v-model="form.dni" class="team-form__input" fluid />
+          <InputText
+            id="team-worker-dni"
+            v-model="form.dni"
+            class="team-form__input"
+            required
+            :invalid="fieldErrors.dni"
+            :aria-describedby="errorIdFor('dni', fieldErrors.dni)"
+            fluid
+            @update:model-value="fieldErrors.dni = false"
+          />
+          <small v-if="fieldErrors.dni" id="team-worker-dni-error" class="bf-field-error">
+            {{ t('common.fieldRequired') }}
+          </small>
         </div>
-        <div class="team-form__field">
+        <div class="team-form__field" :class="{ 'bf-field--invalid': fieldErrors.salary }">
           <label for="team-worker-salary">{{ t('teamMgmt.salaryLabel') }}</label>
           <InputNumber
-            id="team-worker-salary"
             v-model="form.salary"
+            input-id="team-worker-salary"
             class="team-form__input-num w-full"
             :min="0"
             :maxFractionDigits="2"
+            :invalid="fieldErrors.salary"
+            :pt="{ pcInputText: { root: { 'aria-describedby': errorIdFor('salary', fieldErrors.salary) } } }"
+            fluid
+            @update:model-value="fieldErrors.salary = false"
+          />
+          <small v-if="fieldErrors.salary" id="team-worker-salary-error" class="bf-field-error">
+            {{ t('common.fieldRequired') }}
+          </small>
+        </div>
+        <div class="team-form__field">
+          <label for="team-worker-position">{{ t('teamMgmt.positionLabel') }}</label>
+          <Dropdown
+            v-model="form.position"
+            input-id="team-worker-position"
+            :options="positionOptions"
+            option-label="label"
+            option-value="value"
+            class="team-form__input w-full"
             fluid
           />
         </div>
@@ -325,6 +458,43 @@ onMounted(loadWorkers)
           {{ formatSalary(data) }}
         </template>
       </Column>
+      <Column :header="t('teamMgmt.tablePosition')">
+        <template #body="{ data }">{{ positionLabel(data.position) }}</template>
+      </Column>
+      <Column :header="t('teamMgmt.tableOpenTasks')">
+        <template #body="{ data }">{{ data.openTasks ?? 0 }}</template>
+      </Column>
+      <Column :header="t('teamMgmt.tableStatus')" class="team-col-status">
+        <template #body="{ data }">
+          <div class="team-status">
+            <span
+              class="team-status__badge"
+              :class="data.status === 'INACTIVE' ? 'team-status__badge--inactive' : 'team-status__badge--active'"
+            >
+              {{ t(`teamMgmt.statuses.${data.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE'}`) }}
+            </span>
+            <Button
+              v-if="data.status === 'INACTIVE'"
+              type="button"
+              size="small"
+              text
+              :label="t('teamMgmt.reactivate')"
+              :disabled="togglingStatus"
+              @click="reactivateWorker(data)"
+            />
+            <Button
+              v-else
+              type="button"
+              size="small"
+              text
+              severity="secondary"
+              :label="t('teamMgmt.deactivate')"
+              :disabled="togglingStatus"
+              @click="askDeactivate(data)"
+            />
+          </div>
+        </template>
+      </Column>
       <Column :header="t('app.deleteAction')" class="team-col-actions">
         <template #body="{ data }">
           <Button
@@ -365,7 +535,52 @@ onMounted(loadWorkers)
       </template>
     </Dialog>
 
-    <p v-if="loadError" class="app-view__error" role="alert">{{ loadError }}</p>
+    <Dialog
+      :visible="pendingDeactivate != null"
+      modal
+      :header="t('teamMgmt.deactivateModalTitle')"
+      class="team-delete-dialog"
+      :style="{ width: 'min(26rem, 92vw)' }"
+      :draggable="false"
+      :closable="!togglingStatus"
+      @update:visible="(open) => { if (!open) closeDeactivate() }"
+    >
+      <p class="team-delete-dialog__text">
+        {{ t('teamMgmt.deactivateConfirm', { name: pendingDeactivate?.name || '' }) }}
+      </p>
+      <div v-if="(pendingDeactivate?.openTasks ?? 0) > 0" class="team-form__field team-deactivate__reassign">
+        <label for="team-reassign-to">
+          {{ t('teamMgmt.reassignLabel', { count: pendingDeactivate?.openTasks ?? 0 }) }}
+        </label>
+        <Dropdown
+          v-model="reassignToId"
+          input-id="team-reassign-to"
+          :options="reassignOptions"
+          option-label="label"
+          option-value="value"
+          fluid
+        />
+      </div>
+      <p v-if="statusError" class="team-form__error" role="alert">{{ statusError }}</p>
+      <template #footer>
+        <ConfirmActions
+          :cancel-label="t('app.cancelAction')"
+          :confirm-label="t('teamMgmt.deactivate')"
+          confirm-variant="danger"
+          :loading="togglingStatus"
+          @cancel="closeDeactivate"
+          @confirm="confirmDeactivate"
+        />
+      </template>
+    </Dialog>
+
+    <LoadErrorRetry v-if="listLoadFailed" :message="loadError" :loading="loading" @retry="loadWorkers" />
+    <p v-else-if="loadError" class="app-view__error" role="alert">{{ loadError }}</p>
+
+    <template v-if="!listLoadFailed">
+      <TeamTasksPanel ref="tasksPanel" :workers="workers" @changed="loadWorkers" />
+      <TeamShiftsPanel :workers="workers" />
+    </template>
   </div>
 </template>
 
@@ -518,6 +733,35 @@ onMounted(loadWorkers)
 .team-dialog :deep(.p-dialog-footer),
 .team-delete-dialog :deep(.p-dialog-footer) {
   gap: 0.5rem;
+}
+
+.team-status {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.team-status__badge {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.team-status__badge--active {
+  background: #e8f7ee;
+  color: #1a7f37;
+}
+
+.team-status__badge--inactive {
+  background: #f2f2f7;
+  color: #6e6e73;
+}
+
+.team-deactivate__reassign {
+  margin-top: 0.85rem;
 }
 
 .team-dialog :deep(.p-inputnumber) {

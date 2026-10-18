@@ -1,64 +1,147 @@
 <script setup>
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
+import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
 import { serviceProvidersApi } from '@/incidents/infrastructure/serviceProvidersApi.js'
+import IncidentResolveDialog from '@/incidents/presentation/components/IncidentResolveDialog.vue'
+import {
+  IncidentRealtimeEvent,
+  IncidentStatus,
+  INCIDENT_TITLE_MAX,
+} from '@/incidents/domain/model/incidentConstants.js'
+import { incidentPriorityLabel, incidentPriorityOptions } from '@/incidents/presentation/incidentLabels.js'
+import {
+  markIncidentsSeen,
+  onIncidentRealtime,
+} from '@/incidents/application/incidentRealtimeStore.js'
+import { teamWorkersApi } from '@/team/infrastructure/teamWorkersApi.js'
+import { teamTasksApi } from '@/team/infrastructure/teamTasksApi.js'
 
 const { t, locale } = useI18n()
+
+/** Team: "Crear tarea de mantenimiento" desde una incidencia (MaintenanceTask.incidentId). */
+const activeWorkers = ref([])
+const taskBusyId = ref('')
+const taskNotice = ref({ id: '', text: '', error: false })
+
+async function loadActiveWorkers() {
+  try {
+    const list = await teamWorkersApi.list()
+    activeWorkers.value = list.filter((w) => w?.id && w.status !== 'INACTIVE')
+  } catch {
+    activeWorkers.value = []
+  }
+}
+
+async function createTaskFromIncident(row, event) {
+  const staffId = event.target.value
+  event.target.value = ''
+  if (!staffId || taskBusyId.value) return
+  taskBusyId.value = row.id
+  taskNotice.value = { id: '', text: '', error: false }
+  try {
+    const description = [row.title, row.description].filter(Boolean).join(' — ').slice(0, 2000)
+    await teamTasksApi.create({ staffId, incidentId: row.id, description: description || row.id })
+    taskNotice.value = { id: row.id, text: t('teamMgmt.tasks.createdFromIncident'), error: false }
+  } catch (err) {
+    const text =
+      err?.code === 'WORKLOAD_EXCEEDED'
+        ? t('teamMgmt.tasks.workloadExceeded')
+        : err?.code === 'WORKER_INACTIVE'
+          ? t('teamMgmt.tasks.workerInactive')
+          : t('teamMgmt.tasks.saveError')
+    taskNotice.value = { id: row.id, text, error: true }
+  } finally {
+    taskBusyId.value = ''
+  }
+}
+
+const LEGACY_PROVIDER = '__legacy__'
 
 const incidents = ref([])
 const serviceProviders = ref([])
 const loading = ref(false)
 const error = ref(null)
+/** RNF012: the incidents list itself failed to load (retryable). */
+const loadFailed = ref(false)
 const composing = ref(false)
 const sending = ref(false)
 const savingId = ref('')
+const draftTitle = ref('')
 const draftDescription = ref('')
-const draftProvider = ref('')
+const draftProviderId = ref('')
+const draftPriority = ref('')
+const draftCategory = ref('')
+const titleTouched = ref(false)
+const descriptionTouched = ref(false)
 const statusFilter = ref('all')
+const resolving = ref(null)
+const resolveError = ref('')
 
 const statusOptions = computed(() => [
-  { label: t('incidentStatusOpen'), value: 'open' },
-  { label: t('incidentStatusInProgress'), value: 'in-progress' },
-  { label: t('incidentStatusResolved'), value: 'resolved' },
+  { label: t('incidentStatusOpen'), value: IncidentStatus.OPEN },
+  { label: t('incidentStatusInProgress'), value: IncidentStatus.IN_PROGRESS },
+  { label: t('incidentStatusResolved'), value: IncidentStatus.RESOLVED },
 ])
+
+const priorityOptions = computed(() => incidentPriorityOptions(t))
 
 const filters = computed(() => [
   { id: 'all', label: t('information.filterAll') },
   ...statusOptions.value.map((opt) => ({ id: opt.value, label: opt.label })),
 ])
 
-const providerOptions = computed(() => {
-  const names = serviceProviders.value
-    .map((row) => String(row?.name ?? '').trim())
-    .filter(Boolean)
-  const unique = [...new Set(names)]
-  unique.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-  const draft = String(draftProvider.value ?? '').trim()
-  if (draft && !unique.includes(draft)) unique.unshift(draft)
-  return unique
-})
+const providerOptions = computed(() =>
+  serviceProviders.value
+    .filter((row) => row?.id && String(row?.name ?? '').trim())
+    .map((row) => ({ id: String(row.id), name: String(row.name).trim(), specialty: row.specialty || '' }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
+)
 
 const visibleIncidents = computed(() => {
   if (statusFilter.value === 'all') return incidents.value
-  return incidents.value.filter((row) => (row.status || 'open') === statusFilter.value)
+  return incidents.value.filter((row) => (row.status || IncidentStatus.OPEN) === statusFilter.value)
 })
+
+// US024: campos obligatorios marcados en rojo; envío bloqueado mientras falten.
+const titleInvalid = computed(() => titleTouched.value && !draftTitle.value.trim())
+const descriptionInvalid = computed(() => descriptionTouched.value && !draftDescription.value.trim())
+const canSubmit = computed(() => !!draftTitle.value.trim() && !!draftDescription.value.trim())
+
+function resetDraft() {
+  draftTitle.value = ''
+  draftDescription.value = ''
+  draftProviderId.value = ''
+  draftPriority.value = ''
+  draftCategory.value = ''
+  titleTouched.value = false
+  descriptionTouched.value = false
+}
 
 function startCompose() {
   composing.value = true
-  draftDescription.value = ''
-  draftProvider.value = ''
+  resetDraft()
 }
 
 function cancelCompose() {
   composing.value = false
-  draftDescription.value = ''
-  draftProvider.value = ''
+  resetDraft()
 }
 
 function statusLabel(status) {
   const match = statusOptions.value.find((row) => row.value === status)
   return match?.label ?? String(status ?? '—')
+}
+
+/** Valor del select de proveedor: assigneeId, o match por nombre para incidencias antiguas. */
+function providerValue(row) {
+  if (row.providerId) return String(row.providerId)
+  if (!row.provider) return ''
+  const byName = providerOptions.value.find(
+    (p) => p.name.localeCompare(String(row.provider).trim(), undefined, { sensitivity: 'base' }) === 0,
+  )
+  return byName ? byName.id : LEGACY_PROVIDER
 }
 
 function formatWhen(iso) {
@@ -75,6 +158,7 @@ function formatWhen(iso) {
 
 function resolveErrorMessage(err, fallbackKey = 'app.incidentsSaveError') {
   const payload = err?.payload
+  if (payload?.code === 'RESOLUTION_COMMENT_REQUIRED') return t('incidentFlow.resolutionCommentRequired')
   if (payload && typeof payload === 'object' && typeof payload.message === 'string') {
     return payload.message
   }
@@ -92,32 +176,40 @@ async function loadServiceProviders() {
   }
 }
 
-async function loadIncidents() {
+async function loadIncidents({ silent = false } = {}) {
   try {
-    loading.value = true
+    if (!silent) loading.value = true
     error.value = null
+    loadFailed.value = false
     const list = await incidentsApi.list()
     incidents.value = list
       .slice()
       .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
   } catch (err) {
     error.value = resolveErrorMessage(err, 'app.incidentsLoadError')
+    loadFailed.value = true
   } finally {
     loading.value = false
   }
 }
 
 async function createIncident() {
+  titleTouched.value = true
+  descriptionTouched.value = true
+  const title = draftTitle.value.trim()
   const description = draftDescription.value.trim()
-  if (!description || sending.value) return
+  if (!title || !description || sending.value) return
   sending.value = true
   try {
     error.value = null
     await incidentsApi.add({
       id: `incident-${Date.now()}`,
+      title,
       description,
-      status: 'open',
-      provider: draftProvider.value.trim(),
+      status: IncidentStatus.OPEN,
+      providerId: draftProviderId.value || null,
+      priority: draftPriority.value || null,
+      category: draftCategory.value.trim() || null,
       residentId: null,
       residentName: '',
       createdAt: new Date().toISOString(),
@@ -131,18 +223,50 @@ async function createIncident() {
   }
 }
 
-async function updateIncident(row, patch) {
+async function runSave(row, action) {
   if (!row?.id || savingId.value) return
   savingId.value = row.id
   try {
     error.value = null
-    await incidentsApi.update(row.id, {
-      ...row,
-      ...patch,
-    })
-    await loadIncidents()
+    await action()
+    await loadIncidents({ silent: true })
   } catch (err) {
     error.value = resolveErrorMessage(err)
+  } finally {
+    savingId.value = ''
+  }
+}
+
+/** Estado: "Resuelto" abre el modal que exige comentario de resolución (US031). */
+function onStatusChange(row, event) {
+  const next = event.target.value
+  if (next === IncidentStatus.RESOLVED) {
+    event.target.value = row.status || IncidentStatus.OPEN
+    resolveError.value = ''
+    resolving.value = row
+    return
+  }
+  runSave(row, () => incidentsApi.update(row.id, { ...row, status: next }))
+}
+
+/** PATCH /assign: asignar un proveedor pasa la incidencia abierta a "en proceso". */
+function onProviderChange(row, event) {
+  const providerId = event.target.value
+  if (providerId === LEGACY_PROVIDER) return
+  runSave(row, () => incidentsApi.assign(row.id, providerId))
+}
+
+async function confirmResolve(comment) {
+  const row = resolving.value
+  if (!row) return
+  savingId.value = row.id
+  resolveError.value = ''
+  try {
+    await incidentsApi.resolve(row.id, comment)
+    resolving.value = null
+    await loadIncidents({ silent: true })
+  } catch (err) {
+    resolveError.value = resolveErrorMessage(err)
   } finally {
     savingId.value = ''
   }
@@ -159,9 +283,21 @@ async function deleteIncident(id) {
   }
 }
 
+// RF024: nuevas incidencias / cambios en tiempo real (conexión iniciada por el shell del admin).
+let stopRealtime = () => {}
+
 onMounted(async () => {
-  await Promise.all([loadIncidents(), loadServiceProviders()])
+  markIncidentsSeen()
+  stopRealtime = onIncidentRealtime((type) => {
+    if (type === IncidentRealtimeEvent.CREATED) markIncidentsSeen()
+    if (type === IncidentRealtimeEvent.CREATED || type === IncidentRealtimeEvent.UPDATED) {
+      loadIncidents({ silent: true })
+    }
+  })
+  await Promise.all([loadIncidents(), loadServiceProviders(), loadActiveWorkers()])
 })
+
+onBeforeUnmount(() => stopRealtime())
 </script>
 
 <template>
@@ -170,34 +306,75 @@ onMounted(async () => {
       <h1 class="visually-hidden">{{ t('app.pageIncidents') }}</h1>
     </header>
 
-    <p v-if="error" class="inc-alert" role="alert">{{ error }}</p>
+    <LoadErrorRetry v-if="loadFailed" :message="error" :loading="loading" @retry="loadIncidents()" />
+    <p v-else-if="error" class="inc-alert" role="alert">{{ error }}</p>
 
     <section v-if="composing" class="inc-form" aria-labelledby="inc-form-heading">
       <h2 id="inc-form-heading" class="inc-form__title">{{ t('app.newIncident') }}</h2>
 
-      <label class="inc-form__field" for="inc-draft-provider">
-        <span>{{ t('app.incidentProvider') }}</span>
-        <select id="inc-draft-provider" v-model="draftProvider" :disabled="sending">
-          <option value="">{{ t('app.incidentUnassignProvider') }}</option>
-          <option v-for="name in providerOptions" :key="`draft-${name}`" :value="name">
-            {{ name }}
-          </option>
-        </select>
+      <label class="inc-form__field" for="inc-draft-title">
+        <span>{{ t('incidentFlow.titleLabel') }} *</span>
+        <input
+          id="inc-draft-title"
+          v-model="draftTitle"
+          type="text"
+          :maxlength="INCIDENT_TITLE_MAX"
+          :class="{ 'is-invalid': titleInvalid }"
+          :aria-invalid="titleInvalid"
+          :placeholder="t('incidentFlow.titlePlaceholder')"
+          :disabled="sending"
+          @blur="titleTouched = true"
+        />
       </label>
-      <p v-if="!serviceProviders.length" class="inc-form__hint">
-        {{ t('app.incidentProvidersEmptyHint') }}
-      </p>
+      <p v-if="titleInvalid" class="inc-form__error" role="alert">{{ t('incidentFlow.fieldRequired') }}</p>
 
       <label class="inc-form__field" for="inc-draft-description">
-        <span>{{ t('app.incidentDescription') }}</span>
+        <span>{{ t('app.incidentDescription') }} *</span>
         <textarea
           id="inc-draft-description"
           v-model="draftDescription"
           rows="5"
+          :class="{ 'is-invalid': descriptionInvalid }"
+          :aria-invalid="descriptionInvalid"
           :placeholder="t('app.incidentDescription')"
           :disabled="sending"
+          @blur="descriptionTouched = true"
         />
       </label>
+      <p v-if="descriptionInvalid" class="inc-form__error" role="alert">{{ t('incidentFlow.fieldRequired') }}</p>
+
+      <div class="inc-form__row">
+        <label class="inc-form__field" for="inc-draft-provider">
+          <span>{{ t('app.incidentProvider') }}</span>
+          <select id="inc-draft-provider" v-model="draftProviderId" :disabled="sending">
+            <option value="">{{ t('app.incidentUnassignProvider') }}</option>
+            <option v-for="p in providerOptions" :key="`draft-${p.id}`" :value="p.id">
+              {{ p.name }}<template v-if="p.specialty"> · {{ p.specialty }}</template>
+            </option>
+          </select>
+        </label>
+        <label class="inc-form__field" for="inc-draft-priority">
+          <span>{{ t('incidentFlow.priorityLabel') }}</span>
+          <select id="inc-draft-priority" v-model="draftPriority" :disabled="sending">
+            <option value="">{{ t('incidentFlow.priorityNone') }}</option>
+            <option v-for="opt in priorityOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+          </select>
+        </label>
+        <label class="inc-form__field" for="inc-draft-category">
+          <span>{{ t('incidentFlow.categoryLabel') }}</span>
+          <input
+            id="inc-draft-category"
+            v-model="draftCategory"
+            type="text"
+            maxlength="50"
+            :placeholder="t('incidentFlow.categoryPlaceholder')"
+            :disabled="sending"
+          />
+        </label>
+      </div>
+      <p v-if="!serviceProviders.length" class="inc-form__hint">
+        {{ t('app.incidentProvidersEmptyHint') }}
+      </p>
 
       <div class="bf-actions">
         <button type="button" class="bf-btn bf-btn--cancel" :disabled="sending" @click="cancelCompose">
@@ -206,7 +383,7 @@ onMounted(async () => {
         <button
           type="button"
           class="bf-btn bf-btn--confirm"
-          :disabled="sending || !draftDescription.trim()"
+          :disabled="sending || !canSubmit"
           @click="createIncident"
         >
           {{ t('app.newIncident') }}
@@ -257,6 +434,10 @@ onMounted(async () => {
               <span class="inc-badge" :class="`inc-badge--${row.status || 'open'}`">
                 {{ statusLabel(row.status) }}
               </span>
+              <span v-if="row.priority" class="inc-chip" :class="`inc-chip--${row.priority}`">
+                {{ incidentPriorityLabel(t, row.priority) }}
+              </span>
+              <span v-if="row.category" class="inc-chip">{{ row.category }}</span>
             </div>
             <button
               type="button"
@@ -268,7 +449,12 @@ onMounted(async () => {
             </button>
           </header>
 
+          <h3 v-if="row.title" class="inc-card__title">{{ row.title }}</h3>
           <p class="inc-card__body">{{ row.description }}</p>
+          <p v-if="row.resolutionComment" class="inc-card__resolution">
+            <i class="pi pi-check-circle" aria-hidden="true" />
+            {{ row.resolutionComment }}
+          </p>
 
           <footer class="inc-card__meta">
             <span v-if="row.residentName">
@@ -278,6 +464,7 @@ onMounted(async () => {
             <span>
               <i class="pi pi-wrench" aria-hidden="true" />
               {{ row.provider || t('app.noProviderAssigned') }}
+              <template v-if="row.provider && row.providerPhone"> · {{ row.providerPhone }}</template>
             </span>
             <time v-if="row.createdAt" :datetime="row.createdAt">{{ formatWhen(row.createdAt) }}</time>
           </footer>
@@ -288,7 +475,7 @@ onMounted(async () => {
               <select
                 :value="row.status || 'open'"
                 :disabled="savingId === row.id"
-                @change="updateIncident(row, { status: $event.target.value })"
+                @change="onStatusChange(row, $event)"
               >
                 <option v-for="opt in statusOptions" :key="opt.value" :value="opt.value">
                   {{ opt.label }}
@@ -298,24 +485,53 @@ onMounted(async () => {
             <label class="inc-card__field">
               <span>{{ t('app.incidentProvider') }}</span>
               <select
-                :value="row.provider || ''"
+                :value="providerValue(row)"
                 :disabled="savingId === row.id"
-                @change="updateIncident(row, { provider: $event.target.value })"
+                @change="onProviderChange(row, $event)"
               >
                 <option value="">{{ t('app.incidentUnassignProvider') }}</option>
-                <option
-                  v-for="name in providerOptions"
-                  :key="`${row.id}-${name}`"
-                  :value="name"
-                >
-                  {{ name }}
+                <option v-if="providerValue(row) === LEGACY_PROVIDER" :value="LEGACY_PROVIDER" disabled>
+                  {{ row.provider }}
+                </option>
+                <option v-for="p in providerOptions" :key="`${row.id}-${p.id}`" :value="p.id">
+                  {{ p.name }}
+                </option>
+              </select>
+            </label>
+            <label v-if="activeWorkers.length" class="inc-card__field">
+              <span>{{ t('teamMgmt.tasks.createFromIncident') }}</span>
+              <select
+                value=""
+                :disabled="taskBusyId === row.id"
+                @change="createTaskFromIncident(row, $event)"
+              >
+                <option value="">{{ t('teamMgmt.tasks.workerPlaceholder') }}</option>
+                <option v-for="w in activeWorkers" :key="`${row.id}-w-${w.id}`" :value="w.id">
+                  {{ w.name }}
                 </option>
               </select>
             </label>
           </div>
+          <p
+            v-if="taskNotice.id === row.id && taskNotice.text"
+            class="inc-card__task-notice"
+            :class="{ 'inc-card__task-notice--error': taskNotice.error }"
+            role="status"
+          >
+            {{ taskNotice.text }}
+          </p>
         </article>
       </li>
     </ul>
+
+    <IncidentResolveDialog
+      :open="!!resolving"
+      :incident-title="resolving?.title || ''"
+      :busy="!!resolving && savingId === resolving.id"
+      :server-error="resolveError"
+      @cancel="resolving = null"
+      @confirm="confirmResolve"
+    />
   </div>
 </template>
 
@@ -586,6 +802,16 @@ onMounted(async () => {
   gap: 0.55rem;
 }
 
+.inc-card__task-notice {
+  margin: 0.4rem 0 0;
+  font-size: 0.78rem;
+  color: #1a7f37;
+}
+
+.inc-card__task-notice--error {
+  color: #b42318;
+}
+
 .inc-badge {
   display: inline-flex;
   align-items: center;
@@ -636,5 +862,84 @@ onMounted(async () => {
 .app-view :deep(.bf-btn--confirm:not(:disabled):focus-visible) {
   animation: none;
   box-shadow: none;
+}
+
+.inc-form__row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.75rem;
+}
+
+.inc-form__field input {
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--apple-border-hairline, #d2d2d7);
+  border-radius: 12px;
+  background: #fff;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 400;
+  color: var(--apple-text, #1d1d1f);
+  outline: none;
+}
+
+.inc-form__field input:focus {
+  border-color: #0071e3;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.16);
+}
+
+.inc-form__field input.is-invalid,
+.inc-form__field textarea.is-invalid {
+  border-color: #d92d20;
+  box-shadow: 0 0 0 3px rgba(217, 45, 32, 0.14);
+}
+
+.inc-form__error {
+  margin: -0.65rem 0 0;
+  font-size: 0.78rem;
+  color: #b42318;
+}
+
+.inc-card__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--apple-text, #1d1d1f);
+  word-break: break-word;
+}
+
+.inc-card__resolution {
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: 10px;
+  background: #f1f8f2;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: #1b5e33;
+  white-space: pre-wrap;
+}
+
+.inc-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.5rem;
+  border-radius: 980px;
+  background: #f2f2f7;
+  color: #3a3a3c;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.inc-chip--high {
+  background: #fff1e6;
+  color: #c2410c;
+}
+
+.inc-chip--critical {
+  background: #fdecee;
+  color: #b42318;
 }
 </style>

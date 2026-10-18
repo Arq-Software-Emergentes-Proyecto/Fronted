@@ -19,10 +19,20 @@ export const adminManagementExpensesApi = {
     const parsedAmount = amount === '' || amount == null ? Number.NaN : Number(amount)
     const dateStr = String(purchaseDate ?? '').trim()
 
-    if (!cleanName || !Number.isFinite(parsedAmount) || parsedAmount < 0 || !dateStr) {
-      throw apiError(
-        'ADMIN_EXPENSE_FIELDS_REQUIRED',
-        'Name, a valid amount, and purchase date are required.',
+    // US030: monto > 0 y nombre obligatorios (mismo contrato que el backend: 400 + field).
+    if (!cleanName) {
+      throw Object.assign(apiError('ADMIN_EXPENSE_NAME_REQUIRED', 'Name is required.'), { field: 'name' })
+    }
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      throw Object.assign(
+        apiError('ADMIN_EXPENSE_AMOUNT_INVALID', 'Amount must be greater than zero.'),
+        { field: 'amount' },
+      )
+    }
+    if (!dateStr) {
+      throw Object.assign(
+        apiError('ADMIN_EXPENSE_FIELDS_REQUIRED', 'Purchase date is required.'),
+        { field: 'purchaseDate' },
       )
     }
 
