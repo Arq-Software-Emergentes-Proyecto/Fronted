@@ -9,8 +9,8 @@ import {
   SubscriptionPlanId,
   isPaidSubscriptionPlan,
   maxResidentsForSubscriptionPlan,
-} from '@/shared/domain/subscriptionPlans.js'
-import { subscriptionApi } from '@/shared/infrastructure/subscriptionApi.js'
+} from '@/billing/domain/subscriptionPlans.js'
+import { subscriptionApi } from '@/billing/infrastructure/subscriptionApi.js'
 import {
   clearPendingCheckout,
   MpPendingKeys,
@@ -23,7 +23,7 @@ import { formatDayMonth, normalizeAdmissionPayRange, normalizeSettings } from '@
 import {
   applySubscriptionSnapshot,
   refreshSubscriptionFromApi,
-} from '@/shared/infrastructure/subscriptionPlanStorage.js'
+} from '@/billing/infrastructure/subscriptionPlanStorage.js'
 
 const route = useRoute()
 const router = useRouter()

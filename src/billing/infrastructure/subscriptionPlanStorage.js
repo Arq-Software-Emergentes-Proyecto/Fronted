@@ -1,6 +1,6 @@
 import { getActiveDataOwnerId } from '@/iam/application/sessionStore.js'
-import { maxResidentsForSubscriptionPlan } from '@/shared/domain/subscriptionPlans.js'
-import { subscriptionApi } from '@/shared/infrastructure/subscriptionApi.js'
+import { maxResidentsForSubscriptionPlan } from '@/billing/domain/subscriptionPlans.js'
+import { subscriptionApi } from '@/billing/infrastructure/subscriptionApi.js'
 
 const STORAGE_KEY = 'buildingfex.subscriptionPlanByOwner'
 const CACHE_KEY = 'buildingfex.subscriptionCacheByOwner'

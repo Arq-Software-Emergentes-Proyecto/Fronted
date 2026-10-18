@@ -2,8 +2,8 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Button from 'primevue/button'
-import { importUploadsApi } from '@/import/infrastructure/importUploadsApi.js'
-import { importFoldersApi, isContextFolder, isHomeFolder, isSystemFolder } from '@/import/infrastructure/importFoldersApi.js'
+import { importUploadsApi } from '@/communications/infrastructure/importUploadsApi.js'
+import { importFoldersApi, isContextFolder, isHomeFolder, isSystemFolder } from '@/communications/infrastructure/importFoldersApi.js'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 
 const { t, locale } = useI18n()

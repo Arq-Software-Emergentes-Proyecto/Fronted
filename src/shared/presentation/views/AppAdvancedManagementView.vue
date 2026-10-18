@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Button from 'primevue/button'
-import { getResidentLimitForActiveOwner, refreshSubscriptionFromApi } from '@/shared/infrastructure/subscriptionPlanStorage.js'
+import { getResidentLimitForActiveOwner, refreshSubscriptionFromApi } from '@/billing/infrastructure/subscriptionPlanStorage.js'
 import {
   deriveFloorFromDepartment,
   parseDepartmentNumber,

@@ -1,4 +1,4 @@
-import { SUBSCRIPTION_PLAN_PRICES_PEN, SUBSCRIPTION_PLAN_RESIDENT_LIMITS } from '@/shared/domain/subscriptionPlans.js'
+import { SUBSCRIPTION_PLAN_PRICES_PEN, SUBSCRIPTION_PLAN_RESIDENT_LIMITS } from '@/billing/domain/subscriptionPlans.js'
 import { createSeedDb, MOCK_DB_VERSION } from './seed.js'
 
 export const MOCK_DB_STORAGE_KEY = 'buildingfex.localMockDb.v2'

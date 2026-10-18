@@ -10,7 +10,7 @@ import {
   normalizeEmail,
   publicResident,
 } from '@/shared/infrastructure/api/utils.js'
-import { getResidentLimitForActiveOwner, refreshSubscriptionFromApi } from '@/shared/infrastructure/subscriptionPlanStorage.js'
+import { getResidentLimitForActiveOwner, refreshSubscriptionFromApi } from '@/billing/infrastructure/subscriptionPlanStorage.js'
 import { parseDepartmentNumber } from '@/shared/domain/departmentNumber.js'
 import { todayYmd } from '@/finances/domain/billingCycle.js'
 

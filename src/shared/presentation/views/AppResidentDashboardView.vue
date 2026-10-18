@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useSession } from '@/iam/application/sessionStore.js'
 import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.js'
 import { spacesApi } from '@/socialSpaces/infrastructure/spacesApi.js'
-import { announcementsApi } from '@/information/infrastructure/announcementsApi.js'
+import { announcementsApi } from '@/communications/infrastructure/announcementsApi.js'
 import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
 import { useResidentPaymentStore } from '@/finances/application/residentPaymentStore.js'
 

@@ -1,5 +1,5 @@
 <script setup>
-import InformationPage from '@/information/presentation/views/InformationPage.vue'
+import InformationPage from '@/communications/presentation/views/InformationPage.vue'
 </script>
 
 <template>

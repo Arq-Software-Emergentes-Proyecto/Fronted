@@ -40,10 +40,10 @@ workspace "BuildingFlex" "Plataforma multi-tenant de gestión de condominios: co
                 spacesUi = component "Espacios & Generación UI" "Reservas autenticadas admin/residente, solapes, lista invitados (máx 5), genera QR. AppGenerationView, reservationsApi." "Vue 3 SFC"
                 guestInviteUi = component "Invitación pública de reserva" "Ruta AllowAnonymous /invite/:token. Sin shell ni Bearer. GuestInviteView." "Vue 3 SFC"
                 incidentsUi = component "Incidencias & Proveedores UI" "Tablero open/in-progress/resolved; catálogo serviceProviders. AppIncidentsView, incidentsApi." "Vue 3 SFC"
-                informationUi = component "Información / Comunicados UI" "Announcements (prioridad, vigencia). AppInformationView, announcementsApi." "Vue 3 SFC"
-                importUi = component "SPA – vista Documentos" "Carpetas + signed-url → PUT Storage → confirm. AppImportView, importUploadsApi." "Vue 3 SFC"
-                supportUi = component "Soporte UI (IA + SignalR)" "Chat IA REST + hub /hubs/support. Sin Gemini en browser. AppResidentSupportView, AppAdminResidentHelpView, supportApi." "Vue 3 SFC"
-                settingsUi = component "Ajustes & Suscripción UI" "Perfil /api/v1/profiles; planes free/essential/standard/scale. AppSettingsView, subscriptionApi." "Vue 3 SFC"
+                announcementsUi = component "Communications — Comunicados UI" "Announcements (prioridad, vigencia). AppInformationView, announcementsApi." "Vue 3 SFC"
+                documentsUi = component "Communications — vista Documentos" "Carpetas + signed-url → PUT Storage → confirm. AppImportView, importUploadsApi." "Vue 3 SFC"
+                residentCareUi = component "Resident Care UI (IA + SignalR)" "Chat IA REST + hub /hubs/support. Sin Gemini en browser. AppResidentSupportView, AppAdminResidentHelpView, supportApi." "Vue 3 SFC"
+                settingsUi = component "Ajustes (Profiles) & Billing UI" "Perfil /api/v1/profiles; planes free/essential/standard/scale. AppSettingsView, subscriptionApi." "Vue 3 SFC"
                 teamUi = component "Equipo UI" "CRUD teamWorkers. AppTeamView, teamWorkersApi." "Vue 3 SFC"
                 apiClientComp = component "API Client & Multi-tenancy" "Axios Bearer Firebase idToken; withOwnerParams(ownerAdminId). apiClient.js, ownerQuery." "Axios"
                 mpClientComp = component "Mercado Pago Client" "Intenta /api/v1/payments|subscription; si falla → fetch /mp/* (Edge). Dual path real en mercadoPagoService / subscriptionApi." "Fetch / Axios"
@@ -90,7 +90,7 @@ workspace "BuildingFlex" "Plataforma multi-tenant de gestión de condominios: co
                 }
 
                 group "8. Resident Care" {
-                    supportMod = component "Resident Care Chat" "REST + SignalR /hubs/support. Escalado = 2da fila admin ligada." "ASP.NET Core"
+                    residentCareMod = component "Resident Care Chat" "REST + SignalR /hubs/support. Escalado = 2da fila admin ligada." "ASP.NET Core"
                     indexingWorker = component "Indexing Worker" "Tras confirm, embebe documento → ai_context_chunks." "HostedService"
                     ragAccess = component "RAG chunks" "Lectura de ai_context_chunks para el asistente." "ASP.NET Core"
                 }
@@ -143,9 +143,9 @@ workspace "BuildingFlex" "Plataforma multi-tenant de gestión de condominios: co
         buildingFex.spa.shellUi -> buildingFex.spa.financesUi "Finanzas"
         buildingFex.spa.shellUi -> buildingFex.spa.spacesUi "Espacios autenticados"
         buildingFex.spa.shellUi -> buildingFex.spa.incidentsUi "Incidencias"
-        buildingFex.spa.shellUi -> buildingFex.spa.informationUi "Información"
-        buildingFex.spa.shellUi -> buildingFex.spa.importUi "Documentos"
-        buildingFex.spa.shellUi -> buildingFex.spa.supportUi "Soporte"
+        buildingFex.spa.shellUi -> buildingFex.spa.announcementsUi "Comunicados"
+        buildingFex.spa.shellUi -> buildingFex.spa.documentsUi "Documentos"
+        buildingFex.spa.shellUi -> buildingFex.spa.residentCareUi "Resident Care"
         buildingFex.spa.shellUi -> buildingFex.spa.settingsUi "Ajustes"
         buildingFex.spa.shellUi -> buildingFex.spa.teamUi "Equipo"
         buildingFex.spa.shellUi -> buildingFex.spa.iamUi "Sesión inválida → login"
@@ -163,13 +163,13 @@ workspace "BuildingFlex" "Plataforma multi-tenant de gestión de condominios: co
         buildingFex.spa.spacesUi -> buildingFex.spa.apiClientComp "socialSpaces, reservations (auth)"
         buildingFex.spa.guestInviteUi -> buildingFex.spa.apiClientComp "GET reservations?guestInviteToken= (anon)"
         buildingFex.spa.incidentsUi -> buildingFex.spa.apiClientComp "incidents, serviceProviders"
-        buildingFex.spa.informationUi -> buildingFex.spa.apiClientComp "announcements"
-        buildingFex.spa.importUi -> buildingFex.spa.apiClientComp "signed-url + confirm"
-        buildingFex.spa.importUi -> firebaseStorage "PUT firmado" "HTTPS"
+        buildingFex.spa.announcementsUi -> buildingFex.spa.apiClientComp "announcements"
+        buildingFex.spa.documentsUi -> buildingFex.spa.apiClientComp "signed-url + confirm"
+        buildingFex.spa.documentsUi -> firebaseStorage "PUT firmado" "HTTPS"
         buildingFex.spa.teamUi -> buildingFex.spa.apiClientComp "teamWorkers"
         buildingFex.spa.settingsUi -> buildingFex.spa.apiClientComp "profiles + subscription"
         buildingFex.spa.settingsUi -> buildingFex.spa.mpClientComp "Checkout plan (API→Edge)"
-        buildingFex.spa.supportUi -> buildingFex.spa.apiClientComp "REST support + SignalR"
+        buildingFex.spa.residentCareUi -> buildingFex.spa.apiClientComp "REST support + SignalR"
 
         buildingFex.spa.apiClientComp -> buildingFex.api "Compat + /api/v1 + /hubs/support" "HTTPS/WSS"
         buildingFex.spa.mpClientComp -> buildingFex.api "1º /api/v1/payments|subscription" "HTTPS"
@@ -188,7 +188,7 @@ workspace "BuildingFlex" "Plataforma multi-tenant de gestión de condominios: co
         buildingFex.spa.apiClientComp -> buildingFex.api.announcementsMod "comunicados"
         buildingFex.spa.apiClientComp -> buildingFex.api.documentController "carpetas y documentos"
         buildingFex.spa.apiClientComp -> buildingFex.api.teamMod "equipo"
-        buildingFex.spa.apiClientComp -> buildingFex.api.supportMod "Resident Care + hub"
+        buildingFex.spa.apiClientComp -> buildingFex.api.residentCareMod "Resident Care + hub"
 
         buildingFex.api.authMod -> buildingFex.api.sharedKernel "Db / Result"
         buildingFex.api.usersMod -> buildingFex.api.sharedKernel "Persistencia"
@@ -204,9 +204,9 @@ workspace "BuildingFlex" "Plataforma multi-tenant de gestión de condominios: co
         buildingFex.api.indexingWorker -> buildingFex.api.aiGateway "embeddings"
         buildingFex.api.indexingWorker -> buildingFex.api.ragAccess "escribe chunks"
         buildingFex.api.ragAccess -> buildingFex.api.sharedKernel "ai_context_chunks"
-        buildingFex.api.supportMod -> buildingFex.api.ragAccess "recupera contexto"
-        buildingFex.api.supportMod -> buildingFex.api.aiGateway "generateContent"
-        buildingFex.api.supportMod -> buildingFex.api.sharedKernel "chats"
+        buildingFex.api.residentCareMod -> buildingFex.api.ragAccess "recupera contexto"
+        buildingFex.api.residentCareMod -> buildingFex.api.aiGateway "generateContent"
+        buildingFex.api.residentCareMod -> buildingFex.api.sharedKernel "chats"
         buildingFex.api.fileStorage -> buildingFex.api.sharedKernel "estado upload"
         buildingFex.api.teamMod -> buildingFex.api.sharedKernel "Persistencia"
         buildingFex.api.billingMod -> buildingFex.api.sharedKernel "Users + planes"
@@ -333,13 +333,13 @@ workspace "BuildingFlex" "Plataforma multi-tenant de gestión de condominios: co
         }
 
         component buildingFex.spa "SpaDomain" {
-            include buildingFex.spa.shellUi buildingFex.spa.dashboardUi buildingFex.spa.residentsUi buildingFex.spa.financesUi buildingFex.spa.spacesUi buildingFex.spa.guestInviteUi buildingFex.spa.incidentsUi buildingFex.spa.informationUi buildingFex.spa.settingsUi buildingFex.spa.teamUi buildingFex.spa.apiClientComp buildingFex.spa.mpClientComp guest
+            include buildingFex.spa.shellUi buildingFex.spa.dashboardUi buildingFex.spa.residentsUi buildingFex.spa.financesUi buildingFex.spa.spacesUi buildingFex.spa.guestInviteUi buildingFex.spa.incidentsUi buildingFex.spa.announcementsUi buildingFex.spa.settingsUi buildingFex.spa.teamUi buildingFex.spa.apiClientComp buildingFex.spa.mpClientComp guest
             autoLayout lr 500 380
             description "C3 SPA — Finances, Billing (settings/suscripción), Spaces, Incidents, Communications (anuncios), Team."
         }
 
-        component buildingFex.spa "SpaImportSupport" {
-            include buildingFex.spa.shellUi buildingFex.spa.importUi buildingFex.spa.supportUi buildingFex.spa.apiClientComp firebaseStorage
+        component buildingFex.spa "SpaCommunicationsResidentCare" {
+            include buildingFex.spa.shellUi buildingFex.spa.documentsUi buildingFex.spa.residentCareUi buildingFex.spa.apiClientComp firebaseStorage
             autoLayout lr 480 360
             description "C3 SPA — Communications (vista Documentos) + Resident Care."
         }
@@ -351,7 +351,7 @@ workspace "BuildingFlex" "Plataforma multi-tenant de gestión de condominios: co
         }
 
         component buildingFex.api "NineContexts" {
-            include buildingFex.api.authMod buildingFex.api.usersMod buildingFex.api.profilesMod buildingFex.api.financesMod buildingFex.api.paymentsMod buildingFex.api.billingMod buildingFex.api.spacesMod buildingFex.api.incidentsMod buildingFex.api.announcementsMod buildingFex.api.documentController buildingFex.api.documentService buildingFex.api.supportMod buildingFex.api.indexingWorker buildingFex.api.ragAccess buildingFex.api.teamMod
+            include buildingFex.api.authMod buildingFex.api.usersMod buildingFex.api.profilesMod buildingFex.api.financesMod buildingFex.api.paymentsMod buildingFex.api.billingMod buildingFex.api.spacesMod buildingFex.api.incidentsMod buildingFex.api.announcementsMod buildingFex.api.documentController buildingFex.api.documentService buildingFex.api.residentCareMod buildingFex.api.indexingWorker buildingFex.api.ragAccess buildingFex.api.teamMod
             autoLayout tb 480 360
             description "Los 9 contextos del monolito (sin Shared Kernel ni infra). Incluye Billing separado de Finances."
         }

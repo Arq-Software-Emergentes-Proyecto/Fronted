@@ -1,4 +1,4 @@
-workspace "BuildingFex — Support (corregido)" "MySQL = verdad. Gemini solo en API. AuthZ por tenant. Escalado = 2da fila ligada. SignalR para tiempo real." {
+workspace "BuildingFex — Resident Care (corregido)" "MySQL = verdad. Gemini solo en API. AuthZ por tenant. Escalado = 2da fila ligada. SignalR para tiempo real." {
 
     !identifiers hierarchical
 
@@ -21,7 +21,7 @@ workspace "BuildingFex — Support (corregido)" "MySQL = verdad. Gemini solo en 
                 tags "API"
             }
 
-            supportMod = container "Support module" "support_chats + support_messages. Escalado: NO cambia kind; crea 2da fila kind=admin y linked_chat_id bidireccional." "BC Support"
+            residentCareMod = container "Resident Care module" "support_chats + support_messages. Escalado: NO cambia kind; crea 2da fila kind=admin y linked_chat_id bidireccional." "BC Resident Care"
 
             db = container "MySQL" "support_chats (cabecera) + support_messages (filas, FK chat_id)." "MySQL" {
                 tags "Database"
@@ -33,16 +33,16 @@ workspace "BuildingFex — Support (corregido)" "MySQL = verdad. Gemini solo en 
 
         buildingFex.spa -> buildingFex.api "REST /api/v1/support/* + SignalR" "HTTPS + Bearer"
         buildingFex.api -> firebaseAuth "Valida idToken (JWKS)" "HTTPS"
-        buildingFex.api -> buildingFex.supportMod "AuthZ + CRUD chats/messages + escalate TX"
+        buildingFex.api -> buildingFex.residentCareMod "AuthZ + CRUD chats/messages + escalate TX"
         buildingFex.api -> gemini "generateContent (solo si chat AI no escalado)" "HTTPS"
-        buildingFex.supportMod -> buildingFex.db "SQL" "SQL"
+        buildingFex.residentCareMod -> buildingFex.db "SQL" "SQL"
     }
 
     views {
-        container buildingFex "SupportCorrecto" {
+        container buildingFex "ResidentCareCorrecto" {
             include *
             autoLayout tb
-            description "Support: (1) Gemini sale de la API, no de la tabla. (2) Firebase Auth valida Bearer. (3) Dos tablas chats+messages. (4) Escalado = nueva fila admin ligada, kind del AI no cambia. (5) SignalR reemplaza polling ciego. Layout tb para legibilidad."
+            description "Resident Care: (1) Gemini sale de la API, no de la tabla. (2) Firebase Auth valida Bearer. (3) Dos tablas chats+messages. (4) Escalado = nueva fila admin ligada, kind del AI no cambia. (5) SignalR reemplaza polling ciego. Layout tb para legibilidad."
         }
 
         styles {

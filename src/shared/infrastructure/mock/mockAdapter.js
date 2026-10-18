@@ -1,7 +1,7 @@
 import { AxiosError } from 'axios'
 import { createPreviewAccessToken } from '@/iam/application/localPreviewAuth.js'
 import { SessionRoles } from '@/iam/domain/sessionRoles.js'
-import { maxResidentsForSubscriptionPlan, SubscriptionPlanId } from '@/shared/domain/subscriptionPlans.js'
+import { maxResidentsForSubscriptionPlan, SubscriptionPlanId } from '@/billing/domain/subscriptionPlans.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
 import {
   computeKpi,

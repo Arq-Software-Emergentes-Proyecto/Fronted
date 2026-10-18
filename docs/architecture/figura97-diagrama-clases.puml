@@ -127,7 +127,10 @@ package "IAM" {
     isActive: boolean
     createdAt: DateTime
   }
+}
 
+' ─── Billing ───
+package "Billing" {
   class Subscription {
     id: UUID
     plan: Plan
@@ -148,7 +151,7 @@ package "Profiles" {
   }
 }
 
-' ─── Team (+ Support chat en la figura original) ───
+' ─── Team (+ chat de Resident Care en la figura original) ───
 package "Team" {
   class Employee {
     id: UUID
@@ -230,8 +233,8 @@ package "Finances" {
   }
 }
 
-' ─── Information ───
-package "Information" {
+' ─── Communications (comunicados + documentos oficiales) ───
+package "Communications" {
   class Announcement {
     id: UUID
     ownerAdminId: UUID
@@ -240,10 +243,7 @@ package "Information" {
     publishDate: DateTime
     status: AnnouncementStatus
   }
-}
 
-' ─── Import (documentos; en informe = Communications) ───
-package "Import" {
   class Folder {
     id: UUID
     ownerAdminId: UUID

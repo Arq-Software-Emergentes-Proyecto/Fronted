@@ -2,7 +2,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSession } from '@/iam/application/sessionStore.js'
-import { announcementsApi } from '@/information/infrastructure/announcementsApi.js'
+import { announcementsApi } from '@/communications/infrastructure/announcementsApi.js'
 import AnnouncementForm from '../components/AnnouncementForm.vue'
 import AnnouncementsList from '../components/AnnouncementsList.vue'
 

@@ -1,7 +1,8 @@
 # BuildingFlex — Diagramas C4 (Structurizr DSL)
 
 Archivo principal: [`workspace.dsl`](./workspace.dsl)  
-Módulo documentos: [`import-workspace.dsl`](./import-workspace.dsl) (vista Communications)
+Módulo documentos: [`communications-workspace.dsl`](./communications-workspace.dsl) (vista Communications)  
+Resident Care: [`resident-care-workspace.dsl`](./resident-care-workspace.dsl)
 
 ## 9 contextos (todos los diagramas C4 los referencian)
 
@@ -22,7 +23,8 @@ Módulo documentos: [`import-workspace.dsl`](./import-workspace.dsl) (vista Comm
 | Diagramas: 9 contextos | `SystemLandscape`, `SystemContext`, `Containers`, `NineContexts`, `ApiComponents` | `workspace.dsl` |
 | 4.3.3 Billing | `ApiComponents` / `NineContexts` — grupo **4. Billing** | `workspace.dsl` |
 | 4.3.4 Deployment | `DeploymentProduction` — nota S/ 450 = tope | `workspace.dsl` |
-| Communications (docs) | `CommunicationsContainerView` | `import-workspace.dsl` |
+| Communications (docs) | `CommunicationsContainerView` | `communications-workspace.dsl` |
+| Resident Care | `ResidentCareCorrecto` | `resident-care-workspace.dsl` |
 
 ## Cómo usarlo
 

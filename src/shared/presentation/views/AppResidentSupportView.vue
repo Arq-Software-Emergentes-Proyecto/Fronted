@@ -3,13 +3,13 @@ import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useSession, getActiveDataOwnerId } from '@/iam/application/sessionStore.js'
-import { supportApi } from '@/support/infrastructure/supportApi.js'
+import { supportApi } from '@/residentCare/infrastructure/supportApi.js'
 import {
   isDocumentVisible,
   joinSupportChat,
   joinSupportOwner,
   onSupportChatUpdated,
-} from '@/support/infrastructure/supportRealtime.js'
+} from '@/residentCare/infrastructure/supportRealtime.js'
 
 const { t, locale } = useI18n()
 const { state: sessionState } = useSession()
