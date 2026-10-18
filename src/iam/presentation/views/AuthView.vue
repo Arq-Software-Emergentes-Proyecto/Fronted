@@ -10,6 +10,7 @@ import { residentsApi } from '@/residents/infrastructure/residentsApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
 import { OPEN_WIREFRAME_ACCESS } from '@/iam/application/localPreviewAuth.js'
 import { signInWithGoogle, refreshFirebaseIdToken } from '@/iam/infrastructure/googleIdentity.js'
+import { createResidentPasswordAccount } from '@/iam/infrastructure/firebaseAuth.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -43,7 +44,7 @@ const inviteToken = computed(() =>
   String(route.query.token ?? route.query.code ?? '').trim(),
 )
 
-const inviteStep = ref('welcome') // 'welcome' | 'google'
+const inviteStep = ref('welcome') // 'welcome' | 'google' (Google or email + password)
 const inviteResident = ref(null)
 const inviteFetchError = ref('')
 const inviteLoading = ref(false)
@@ -90,6 +91,9 @@ function googleAuthMessage(error) {
   if (error?.code === 'RESIDENT_ONLY') return t('auth.residentGoogleAdminBlocked')
   if (error?.code === 'RESIDENT_GOOGLE_REQUIRED') return t('auth.residentGoogleRequired')
   if (error?.code === 'RESIDENT_USE_GOOGLE') return t('auth.residentUseGoogle')
+  if (error?.code === 'PASSWORD_TOO_SHORT') return t('auth.passwordTooShort')
+  if (error?.code === 'INVALID_PASSWORD') return t('auth.passwordInvalid')
+  if (error?.code === 'TOO_MANY_REQUESTS') return t('auth.tooManyRequests')
   return t('auth.inviteGoogleError')
 }
 
@@ -139,6 +143,53 @@ async function onResidentGoogleSignUp() {
       idToken: googleProfile.idToken,
     })
     const sessionToken = await resolveResidentToken(authResult)
+    await applyResidentSession(authResult.user, sessionToken)
+  } catch (error) {
+    residentError.value = googleAuthMessage(error)
+  } finally {
+    residentLoading.value = false
+  }
+}
+
+/** Invite completion with email + password instead of Google (US014: residents may use both). */
+const invitePwEmail = ref('')
+const invitePwPassword = ref('')
+const invitePwConfirm = ref('')
+
+async function onResidentPasswordSignUp() {
+  if (residentLoading.value) return
+  residentError.value = ''
+  const email = invitePwEmail.value.trim()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    residentError.value = t('auth.emailInvalid')
+    return
+  }
+  if (String(invitePwPassword.value).length < 6) {
+    residentError.value = t('auth.passwordTooShort')
+    return
+  }
+  if (invitePwPassword.value !== invitePwConfirm.value) {
+    residentError.value = t('auth.passwordMismatch')
+    return
+  }
+  residentLoading.value = true
+  try {
+    const account = OPEN_WIREFRAME_ACCESS
+      ? { email, token: 'preview-password' }
+      : await createResidentPasswordAccount({
+          email,
+          password: invitePwPassword.value,
+          name: inviteName.value,
+        })
+    const authResult = await residentsApi.completeInviteWithPassword({
+      token: inviteToken.value,
+      email: account.email,
+      name: inviteName.value,
+      idToken: account.token,
+    })
+    const sessionToken = OPEN_WIREFRAME_ACCESS
+      ? authResult.token
+      : await resolveResidentToken({ token: null })
     await applyResidentSession(authResult.user, sessionToken)
   } catch (error) {
     residentError.value = googleAuthMessage(error)
@@ -279,8 +330,9 @@ async function onLoginSubmit() {
       password: loginPassword.value,
     })
 
+    // US014: one form, routed by the role the API reports.
     if (user.role === 'resident') {
-      loginEmailError.value = t('auth.residentUseGoogle')
+      await applyResidentSession(user, token)
       return
     }
 
@@ -321,6 +373,21 @@ async function onLoginSubmit() {
   } finally {
     loginLoading.value = false
   }
+}
+
+/** Resident tab: email + password in a single step (Google stays available above). */
+async function onResidentPasswordLogin() {
+  if (loginLoading.value) return
+  loginEmailError.value = ''
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail.value.trim())) {
+    loginEmailError.value = t('auth.emailInvalid')
+    return
+  }
+  if (!loginPassword.value) {
+    loginEmailError.value = t('auth.passwordInvalid')
+    return
+  }
+  await onLoginSubmit()
 }
 
 async function onCompleteProfileSubmit() {
@@ -507,6 +574,66 @@ watch(loginEmail, () => {
               </span>
               <span>{{ residentLoading ? t('auth.inviteGoogleLoading') : t('auth.inviteGoogleButton') }}</span>
             </button>
+
+            <p class="auth-divider" role="separator">{{ t('auth.orPasswordDivider') }}</p>
+
+            <form
+              class="auth-form auth-form--nested"
+              :aria-label="t('auth.invitePasswordAria')"
+              @submit.prevent="onResidentPasswordSignUp"
+            >
+              <p class="auth-subtitle auth-subtitle--compact">{{ t('auth.invitePasswordHint') }}</p>
+              <div class="auth-field">
+                <input
+                  v-model="invitePwEmail"
+                  class="auth-input"
+                  type="email"
+                  name="email"
+                  autocomplete="email"
+                  :disabled="residentLoading"
+                  required
+                  :aria-label="t('auth.emailPlaceholder')"
+                  :placeholder="t('auth.emailPlaceholder')"
+                />
+              </div>
+              <div class="auth-field">
+                <input
+                  v-model="invitePwPassword"
+                  class="auth-input"
+                  type="password"
+                  name="new-password"
+                  autocomplete="new-password"
+                  minlength="6"
+                  :disabled="residentLoading"
+                  required
+                  :aria-label="t('auth.passwordPlaceholder')"
+                  :placeholder="t('auth.passwordPlaceholder')"
+                />
+              </div>
+              <div class="auth-field">
+                <input
+                  v-model="invitePwConfirm"
+                  class="auth-input"
+                  type="password"
+                  name="confirm-password"
+                  autocomplete="new-password"
+                  minlength="6"
+                  :disabled="residentLoading"
+                  required
+                  :aria-label="t('auth.passwordConfirmPlaceholder')"
+                  :placeholder="t('auth.passwordConfirmPlaceholder')"
+                />
+              </div>
+              <Button
+                type="submit"
+                class="auth-submit"
+                rounded
+                severity="info"
+                :label="t('auth.invitePasswordSubmit')"
+                :loading="residentLoading"
+                :disabled="residentLoading"
+              />
+            </form>
           </div>
         </div>
       </div>
@@ -737,6 +864,50 @@ watch(loginEmail, () => {
               </span>
               <span>{{ loginLoading ? t('auth.inviteGoogleLoading') : t('auth.inviteGoogleButton') }}</span>
             </button>
+
+            <p class="auth-divider" role="separator">{{ t('auth.orPasswordDivider') }}</p>
+
+            <form
+              class="auth-form auth-form--nested"
+              :aria-label="t('auth.residentPasswordLoginAria')"
+              @submit.prevent="onResidentPasswordLogin"
+            >
+              <div class="auth-field">
+                <input
+                  v-model="loginEmail"
+                  class="auth-input"
+                  type="email"
+                  name="email"
+                  autocomplete="email"
+                  :disabled="loginLoading"
+                  required
+                  :aria-label="t('auth.emailPlaceholder')"
+                  :placeholder="t('auth.emailPlaceholder')"
+                />
+              </div>
+              <div class="auth-field">
+                <input
+                  v-model="loginPassword"
+                  class="auth-input"
+                  type="password"
+                  name="password"
+                  autocomplete="current-password"
+                  :disabled="loginLoading"
+                  required
+                  :aria-label="t('auth.passwordPlaceholder')"
+                  :placeholder="t('auth.passwordPlaceholder')"
+                />
+              </div>
+              <Button
+                type="submit"
+                class="auth-submit"
+                rounded
+                severity="info"
+                :label="t('auth.signIn')"
+                :loading="loginLoading"
+                :disabled="loginLoading"
+              />
+            </form>
           </div>
         </div>
 
@@ -1030,6 +1201,32 @@ watch(loginEmail, () => {
   max-width: 100%;
   margin: 0 auto;
   width: 100%;
+}
+
+.auth-form--nested {
+  gap: 0.75rem;
+}
+
+.auth-subtitle--compact {
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.25rem 0;
+  font-size: 0.8125rem;
+  color: #6e6e73;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #d2d2d7;
 }
 
 .auth-field {

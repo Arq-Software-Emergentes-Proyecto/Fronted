@@ -191,6 +191,11 @@ router.beforeEach((to) => {
     return { name: AppRouteNames.APP_RESIDENT_DASHBOARD }
   }
 
+  // Reverse guard: an admin session never renders the resident surface (/app/resident/*).
+  if (role === SessionRoles.ADMIN && wantsResidentSurface(to)) {
+    return { name: AppRouteNames.APP_DASHBOARD }
+  }
+
   return true
 })
 

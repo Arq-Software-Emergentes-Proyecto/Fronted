@@ -359,7 +359,11 @@ function handleV1(config, method, parts) {
     })
   }
 
-  if (route === 'authentication/residents/complete-google' && method === 'POST') {
+  if (
+    (route === 'authentication/residents/complete-google' ||
+      route === 'authentication/residents/complete-invite') &&
+    method === 'POST'
+  ) {
     const inviteToken = String(body.token ?? body.code ?? '').trim()
     const email = String(body.email ?? '').trim().toLowerCase()
     const googleSub = String(body.googleSub ?? '').trim()

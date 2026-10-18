@@ -1,6 +1,7 @@
 import { apiClient } from '@/shared/infrastructure/api/apiClient.js'
 import { withOwnerParams } from '@/shared/infrastructure/api/ownerQuery.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
+import { OPEN_WIREFRAME_ACCESS } from '@/iam/application/localPreviewAuth.js'
 import { Receipt } from '../domain/receipt.js'
 import { normalizeSettings, settingsToPayload } from '../domain/billingCycle.js'
 
@@ -112,8 +113,9 @@ export const financesApi = {
     // 4. Combine both
     const combined = [...mappedReceipts, ...mappedFees];
 
-    // 5. Fallback if totally empty
-    if (combined.length === 0) {
+    // 5. Wireframe/mock mode only: placeholder row so screenshots are not empty.
+    // With the real API an empty list means "no debt" — never invent a pending fee.
+    if (combined.length === 0 && OPEN_WIREFRAME_ACCESS) {
       return [
         {
           id: `mock-1-${residentId}`,
@@ -128,22 +130,7 @@ export const financesApi = {
     }
     
     // Sort by due date descending
-    return combined.sort((a, b) => b.dueDate.localeCompare(a.dueDate));
-  },
-
-  async addFee(feeData) {
-    const ownerId = getActiveDataOwnerId()
-    const receiptData = {
-      residentId: feeData.residentId,
-      issueDate: new Date().toISOString().split('T')[0],
-      dueDate: feeData.dueDate,
-      amount: feeData.amount,
-      status: feeData.status === 'Pagado' ? 'Paid' : 'Pending',
-      lateFee: 0,
-      ...(ownerId ? { ownerAdminId: ownerId } : {})
-    };
-    const { data } = await apiClient.post('/receipts', receiptData);
-    return data;
+    return combined.sort((a, b) => String(b.dueDate ?? '').localeCompare(String(a.dueDate ?? '')));
   },
 
   async getPayments(residentId) {
@@ -154,33 +141,6 @@ export const financesApi = {
   async getAllPayments() {
     const { data } = await apiClient.get('/payments', { params: withOwnerParams() })
     return Array.isArray(data) ? data : []
-  },
-
-  async addPayment(paymentData) {
-    const ownerId = getActiveDataOwnerId()
-    const payload = {
-      ...paymentData,
-      ...(ownerId ? { ownerAdminId: ownerId } : {}),
-    }
-    const { data } = await apiClient.post('/payments', payload);
-    return data;
-  },
-
-  async updateFeeStatus(feeId, status) {
-    const idStr = String(feeId);
-    if (idStr.startsWith('receipt-')) {
-      const realId = idStr.replace('receipt-', '');
-      const statusEn = status === 'Pagado' ? 'Paid' : 'Pending';
-      const { data } = await apiClient.patch(`/receipts/${realId}`, { status: statusEn });
-      return data;
-    } else if (idStr.startsWith('fee-')) {
-      const realId = idStr.replace('fee-', '');
-      const statusEs = status === 'Pagado' ? 'Pagado' : 'Pendiente';
-      const { data } = await apiClient.patch(`/fees/${realId}`, { status: statusEs });
-      return data;
-    }
-    // Fallback for non-prefixed or mock
-    return { id: feeId, status };
   },
 
   async getDashboardKpis() {

@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useSession } from '@/iam/application/sessionStore.js'
 import { authApi } from '@/iam/infrastructure/authApi.js'
+import { setPasswordForCurrentUser } from '@/iam/infrastructure/firebaseAuth.js'
+import { OPEN_WIREFRAME_ACCESS } from '@/iam/application/localPreviewAuth.js'
 import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import {
   SubscriptionPlanId,
@@ -41,6 +43,50 @@ const display = computed(() => ({
   ...sessionProfile.value,
   ...(serverProfile.value ?? {}),
 }))
+
+/** Resident: add (or change) an email + password credential next to Google sign-in (US014). */
+const residentPassword = ref('')
+const residentPasswordConfirm = ref('')
+const residentPasswordSaving = ref(false)
+const residentPasswordNotice = ref('')
+const residentPasswordError = ref('')
+
+async function onSaveResidentPassword() {
+  if (residentPasswordSaving.value) return
+  residentPasswordNotice.value = ''
+  residentPasswordError.value = ''
+  if (String(residentPassword.value).length < 6) {
+    residentPasswordError.value = t('auth.passwordTooShort')
+    return
+  }
+  if (residentPassword.value !== residentPasswordConfirm.value) {
+    residentPasswordError.value = t('auth.passwordMismatch')
+    return
+  }
+  residentPasswordSaving.value = true
+  try {
+    if (!OPEN_WIREFRAME_ACCESS) {
+      await setPasswordForCurrentUser(residentPassword.value)
+    }
+    residentPassword.value = ''
+    residentPasswordConfirm.value = ''
+    residentPasswordNotice.value = t('app.settingsResidentPasswordSaved')
+  } catch (error) {
+    if (error?.code === 'REAUTH_REQUIRED') {
+      residentPasswordError.value = t('app.settingsResidentPasswordReauth')
+    } else if (error?.code === 'PASSWORD_TOO_SHORT') {
+      residentPasswordError.value = t('auth.passwordTooShort')
+    } else if (error?.code === 'EMAIL_ALREADY_EXISTS') {
+      residentPasswordError.value = t('auth.emailAlreadyExists')
+    } else if (error?.code === 'TOO_MANY_REQUESTS') {
+      residentPasswordError.value = t('auth.tooManyRequests')
+    } else {
+      residentPasswordError.value = t('app.settingsResidentPasswordError')
+    }
+  } finally {
+    residentPasswordSaving.value = false
+  }
+}
 
 async function loadServerProfile() {
   const id = sessionProfile.value?.id
@@ -911,6 +957,62 @@ watch(admissionRuleNotice, (msg) => {
         </li>
       </ul>
     </section>
+
+    <section
+      v-if="isResident"
+      class="settings-card"
+      aria-labelledby="settings-resident-password-heading"
+    >
+      <h2 id="settings-resident-password-heading" class="settings-card__title">
+        {{ t('app.settingsResidentPasswordTitle') }}
+      </h2>
+      <p class="settings-card__hint">{{ t('app.settingsResidentPasswordHint') }}</p>
+      <form class="settings-resident-password" @submit.prevent="onSaveResidentPassword">
+        <input
+          type="email"
+          name="username"
+          autocomplete="username"
+          class="visually-hidden"
+          :value="display.email || ''"
+          readonly
+          tabindex="-1"
+          aria-hidden="true"
+        />
+        <label class="settings-card__field" for="settingsResidentPassword">
+          <span>{{ t('auth.passwordPlaceholder') }}</span>
+          <input
+            id="settingsResidentPassword"
+            v-model="residentPassword"
+            type="password"
+            autocomplete="new-password"
+            minlength="6"
+            class="settings-card__input"
+            :disabled="residentPasswordSaving"
+          />
+        </label>
+        <label class="settings-card__field" for="settingsResidentPasswordConfirm">
+          <span>{{ t('auth.passwordConfirmPlaceholder') }}</span>
+          <input
+            id="settingsResidentPasswordConfirm"
+            v-model="residentPasswordConfirm"
+            type="password"
+            autocomplete="new-password"
+            minlength="6"
+            class="settings-card__input"
+            :disabled="residentPasswordSaving"
+          />
+        </label>
+        <p v-if="residentPasswordNotice" class="settings-card__notice" role="status">
+          {{ residentPasswordNotice }}
+        </p>
+        <p v-if="residentPasswordError" class="settings-card__error" role="alert">
+          {{ residentPasswordError }}
+        </p>
+        <button type="submit" class="settings-card__save" :disabled="residentPasswordSaving">
+          {{ t('app.settingsResidentPasswordSave') }}
+        </button>
+      </form>
+    </section>
       </div>
     </div>
   </div>
@@ -1116,6 +1218,15 @@ watch(admissionRuleNotice, (msg) => {
   margin: 0.65rem 0 0;
   font-size: 0.8125rem;
   color: #b42318;
+}
+
+.settings-resident-password .visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .settings-card__save {

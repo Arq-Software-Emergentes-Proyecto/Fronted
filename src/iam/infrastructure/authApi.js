@@ -9,12 +9,14 @@ import {
   OPEN_WIREFRAME_ACCESS,
   previewAdminAuthResult,
   previewResidentAuthResult,
+  resolvePreviewRole,
 } from '@/iam/application/localPreviewAuth.js'
 import {
   isFirebaseEmailRegistered,
-  loginAdminWithFirebase,
   registerAdminWithFirebase,
+  signInWithPasswordFirebase,
 } from './firebaseAuth.js'
+import { refreshFirebaseIdToken } from './googleIdentity.js'
 
 function isCredentialLoginError(error) {
   const code = String(error?.code ?? '')
@@ -85,6 +87,22 @@ async function upsertProfile(token, draft) {
     { headers: authHeaders(token) },
   )
   return profileFromApi(data, draft)
+}
+
+/**
+ * Role + tenant of the Firebase user as stored by the API (source of truth for routing).
+ * Returns null when the uid is not provisioned yet (admin who has not completed the profile).
+ */
+async function fetchAuthenticatedUser(token) {
+  try {
+    const { data } = await apiClient.get('/api/v1/authentication/me', {
+      headers: authHeaders(token),
+    })
+    return parseAuthResponse(data).user
+  } catch (error) {
+    if (error?.status === 404 || error?.code === 'USER_NOT_PROVISIONED') return null
+    throw error
+  }
 }
 
 async function fetchMyProfile(token) {
@@ -180,13 +198,28 @@ export const authApi = {
 
   async login({ email, password }) {
     if (OPEN_WIREFRAME_ACCESS) {
-      return {
-        ...previewAdminAuthResult({ email }),
-        profileIncomplete: false,
-      }
+      const preview =
+        resolvePreviewRole(email) === 'resident'
+          ? previewResidentAuthResult({ email })
+          : previewAdminAuthResult({ email })
+      return { ...preview, profileIncomplete: false }
     }
     try {
-      const { identity, token } = await loginAdminWithFirebase({ email, password })
+      const { identity, token } = await signInWithPasswordFirebase({ email, password })
+
+      // US014 multirole: same email/password form for admins and residents.
+      const account = await fetchAuthenticatedUser(token)
+      if (account?.role === 'resident') {
+        let residentToken = token
+        try {
+          // Pick up custom claims (role/ownerAdminId) written by the Admin SDK.
+          residentToken = await refreshFirebaseIdToken()
+        } catch {
+          residentToken = token
+        }
+        return { user: account, token: residentToken, profileIncomplete: false }
+      }
+
       try {
         const profile = await fetchMyProfile(token)
         if (!profile) {

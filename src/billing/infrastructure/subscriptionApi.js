@@ -6,6 +6,7 @@ import {
   startMercadoPagoCheckout,
 } from '@/shared/infrastructure/mercadoPagoCheckoutClient.js'
 import { AppPaths } from '@/shared/domain/appRoutes.js'
+import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
 
 function parseSubscription(data) {
   if (!data || typeof data !== 'object') return null
@@ -54,7 +55,8 @@ export const subscriptionApi = {
       kind: 'subscription',
       planId,
       title: `BuildingFex ${planId}`,
-      externalReference: `subscription:${planId}`,
+      // Same format the API verifies on confirm: SUBSCRIPTION:{adminId}:{planId}
+      externalReference: `subscription:${getActiveDataOwnerId() || ''}:${planId}`,
       successUrl: checkoutReturnUrl(AppPaths.APP_SETTINGS),
       failureUrl: checkoutReturnUrl(AppPaths.APP_SETTINGS, { subscription: 'failure' }),
       pendingUrl: checkoutReturnUrl(AppPaths.APP_SETTINGS, { subscription: 'pending' }),

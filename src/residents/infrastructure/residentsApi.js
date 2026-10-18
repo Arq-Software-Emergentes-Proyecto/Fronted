@@ -174,6 +174,40 @@ export const residentsApi = {
     return { id: cleanId, summary, errors }
   },
 
+  /**
+   * Accept the invite with email + password (Firebase email/password account) instead of Google.
+   * The API binds the Firebase uid to the resident exactly like complete-google.
+   */
+  async completeInviteWithPassword({ token, email, name, idToken }) {
+    const inviteToken = String(token ?? '').trim()
+    const cleanEmail = normalizeEmail(email)
+    if (!inviteToken || !cleanEmail || !idToken) {
+      throw apiError('RESIDENT_FIELDS_REQUIRED')
+    }
+    try {
+      const { data } = await apiClient.post('/api/v1/authentication/residents/complete-invite', {
+        token: inviteToken,
+        email: cleanEmail,
+        name: String(name ?? '').trim(),
+        idToken: String(idToken),
+        provider: 'password',
+      })
+      return parseAuthResponse(data)
+    } catch (error) {
+      if (error?.code === 'RESIDENT_NOT_FOUND') throw apiError('RESIDENT_NOT_FOUND')
+      if (error?.code === 'EMAIL_ALREADY_EXISTS') throw apiError('EMAIL_ALREADY_EXISTS')
+      if (
+        error?.code === 'INVALID_ID_TOKEN' ||
+        error?.code === 'INVITE_EXPIRED' ||
+        error?.code === 'INVITE_ALREADY_USED' ||
+        error?.code === 'INVITE_EMAIL_MISMATCH'
+      ) {
+        throw apiError(error.code, error.payload?.message)
+      }
+      throw error
+    }
+  },
+
   async completeInviteWithGoogle({ token, code, email, name, googleSub, idToken }) {
     const inviteToken = String(token ?? code ?? '').trim()
     const cleanEmail = normalizeEmail(email)
