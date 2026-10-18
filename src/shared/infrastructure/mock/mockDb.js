@@ -22,6 +22,8 @@ const COLLECTIONS = [
   'sharedUtilityServices',
   'fixedPayoutRecipients',
   'teamWorkers',
+  'maintenanceTasks',
+  'shifts',
   'serviceProviders',
   'importUploads',
   'importFolders',

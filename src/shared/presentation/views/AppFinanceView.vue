@@ -1250,7 +1250,7 @@ const residentsStatusMonthLabel = computed(() =>
 .finance-panel__title-month {
   display: inline-block;
   margin-left: 0.35rem;
-  text-transform: capitalize;
+  text-transform: none;
   color: #86868b;
   font-weight: 500;
 }

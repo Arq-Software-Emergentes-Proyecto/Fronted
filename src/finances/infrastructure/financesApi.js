@@ -76,7 +76,11 @@ export const financesApi = {
     // 2. Map receipts to unified format
     const mappedReceipts = receiptsData.map(receipt => {
       let monthName = '';
-      if (receipt.dueDate) {
+      // Billed month (yyyy-MM, from the API) wins: the due date falls in the following month
+      // (e.g. October maintenance is due 7 Nov) and labelling by it shows the wrong month.
+      if (/^\d{4}-\d{2}$/.test(String(receipt.billingMonth ?? ''))) {
+        monthName = String(receipt.billingMonth)
+      } else if (receipt.dueDate) {
         const [year, month, day] = receipt.dueDate.split('-');
         const dateObj = new Date(year, parseInt(month) - 1, day);
         const name = dateObj.toLocaleString('es-PE', { month: 'long', year: 'numeric' });

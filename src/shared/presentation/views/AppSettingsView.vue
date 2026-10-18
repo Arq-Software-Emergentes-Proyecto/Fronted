@@ -93,7 +93,8 @@ async function onSaveResidentPassword() {
 
 async function loadServerProfile() {
   const id = sessionProfile.value?.id
-  if (!id) {
+  // Profiles (DNI, company, RUC…) only exist for admins; a resident's data comes from the session.
+  if (!id || !isAdmin.value) {
     serverProfile.value = null
     return
   }

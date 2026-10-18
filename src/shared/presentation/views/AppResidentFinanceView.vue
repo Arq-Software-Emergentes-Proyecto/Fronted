@@ -29,6 +29,17 @@ const profile = computed(() => state.profile ?? {})
 const todayIso = new Date().toISOString().slice(0, 10)
 const isProcessing = ref(false)
 
+/** Mercado Pago not configured / gateway down: friendly copy instead of the raw server text. */
+function isPaymentGatewayUnavailable(err) {
+  const code = String(err?.code ?? '')
+  return (
+    code.startsWith('MP_') ||
+    code === 'NETWORK_ERROR' ||
+    code === 'TIMEOUT' ||
+    ['HTTP_404', 'HTTP_405', 'HTTP_502', 'HTTP_503', 'HTTP_504'].includes(code)
+  )
+}
+
 const fees = computed(() => paymentState.fees || [])
 const paymentHistory = computed(() =>
   [...(paymentState.paymentHistory || [])].sort((a, b) =>
@@ -200,7 +211,9 @@ async function startMaintenanceCheckout() {
     toast.add({
       severity: 'error',
       summary: t('residentFinance.paymentErrorTitle'),
-      detail: err?.payload?.message || err?.message || t('residentFinance.paymentErrorDetail'),
+      detail: isPaymentGatewayUnavailable(err)
+        ? t('residentFinance.paymentUnavailableDetail')
+        : err?.payload?.message || err?.message || t('residentFinance.paymentErrorDetail'),
       life: 5000,
     })
   } finally {

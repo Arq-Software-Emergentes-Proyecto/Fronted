@@ -5,7 +5,7 @@ import Button from 'primevue/button'
 import Column from 'primevue/column'
 import DataTable from 'primevue/datatable'
 import Dialog from 'primevue/dialog'
-import Dropdown from 'primevue/dropdown'
+import Select from 'primevue/select'
 import InputNumber from 'primevue/inputnumber'
 import InputText from 'primevue/inputtext'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
@@ -878,7 +878,7 @@ onMounted(async () => {
             <div class="collections-form">
               <div class="collections-form__field">
                 <label for="shared-service-type">{{ t('sharedServices.typeLabel') }}</label>
-                <Dropdown
+                <Select
                   id="shared-service-type"
                   v-model="serviceForm.type"
                   :options="serviceTypeOptions"
@@ -1752,6 +1752,7 @@ onMounted(async () => {
 .collections-cost-dialog :deep(.p-inputnumber),
 .collections-service-dialog :deep(.p-inputnumber),
 .collections-service-dialog :deep(.p-dropdown),
+.collections-service-dialog :deep(.p-select),
 .collections-fixed-dialog :deep(.p-inputnumber) {
   width: 100%;
 }
