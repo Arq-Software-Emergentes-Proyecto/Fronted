@@ -131,8 +131,9 @@ const router = createRouter({
   },
 })
 
+// Resident surface = /app/resident or /app/resident/*; admin pages like /app/resident-help share the prefix but not the segment.
 function wantsResidentSurface(to) {
-  return to.path.startsWith('/app/resident')
+  return to.path === '/app/resident' || to.path.startsWith('/app/resident/')
 }
 
 router.beforeEach((to) => {
