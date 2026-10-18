@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.js'
 import { spacesApi } from '@/socialSpaces/infrastructure/spacesApi.js'
+import { reservationInviteExpiresAtMs } from '@/shared/infrastructure/api/utils.js'
 
 const { t, locale } = useI18n()
 
@@ -12,6 +13,15 @@ const loading = ref(false)
 const loadError = ref(false)
 const savingKey = ref('')
 const rangeFilter = ref('all')
+const actionError = ref('')
+
+// Concierge QR validation (US027): VALID / EXPIRED ("Invitación Expirada") / CANCELLED.
+const passInput = ref('')
+const passToken = ref('')
+const pass = ref(null)
+const passLoading = ref(false)
+const passError = ref('')
+const passSavingKey = ref('')
 
 const todayYmd = computed(() => {
   const d = new Date()
@@ -66,6 +76,70 @@ function enteredCount(r) {
   return guestList(r).filter((g) => g.checkedIn).length
 }
 
+/** Guest pass of a reservation is expired once the event ended more than 2 h ago (server value). */
+function passExpired(r) {
+  const exp = reservationInviteExpiresAtMs(r)
+  return exp != null && Date.now() >= exp
+}
+
+function checkInRefusalMessage(error) {
+  if (error?.code === 'GUEST_PASS_EXPIRED') return t('socialSpaces.checkInRefusedExpired')
+  if (error?.code === 'GUEST_PASS_CANCELLED') return t('socialSpaces.checkInRefusedCancelled')
+  return t('socialSpaces.checkInError')
+}
+
+/** Accepts a pasted invite URL (…/invite/<token>) or the bare token. */
+function extractToken(raw) {
+  const value = String(raw ?? '').trim()
+  const match = value.match(/\/invite\/([^/?#\s]+)/)
+  const token = match ? match[1] : value
+  try {
+    return decodeURIComponent(token)
+  } catch {
+    return token
+  }
+}
+
+async function validatePass() {
+  const token = extractToken(passInput.value)
+  if (!token || passLoading.value) return
+  passLoading.value = true
+  passError.value = ''
+  pass.value = null
+  passToken.value = token
+  try {
+    pass.value = await reservationsApi.getGuestPass(token)
+  } catch {
+    passError.value = t('socialSpaces.passNotFound')
+  } finally {
+    passLoading.value = false
+  }
+}
+
+async function onPassCheckIn(guestId, checkedIn = true) {
+  if (!passToken.value || passSavingKey.value) return
+  passSavingKey.value = guestId || '*'
+  passError.value = ''
+  try {
+    pass.value = await reservationsApi.checkInGuestPass(passToken.value, guestId, checkedIn)
+    void load()
+  } catch (error) {
+    passError.value = checkInRefusalMessage(error)
+    if (error?.status === 410 && pass.value) {
+      pass.value = { ...pass.value, valid: false, status: error?.payload?.status ?? 'EXPIRED' }
+    }
+  } finally {
+    passSavingKey.value = ''
+  }
+}
+
+const passStatusLabel = computed(() => {
+  const status = pass.value?.status
+  if (status === 'VALID') return t('socialSpaces.passValid')
+  if (status === 'CANCELLED') return t('socialSpaces.passCancelled')
+  return t('socialSpaces.passExpired')
+})
+
 async function load() {
   loading.value = true
   loadError.value = false
@@ -85,13 +159,17 @@ async function onGuestCheckedIn(r, guest, checkedIn) {
   const key = `${r.id}:${guest.id}`
   if (savingKey.value) return
   savingKey.value = key
+  actionError.value = ''
   try {
     const updated = await reservationsApi.setGuestCheckedIn(r.id, guest.id, checkedIn)
     const idx = reservations.value.findIndex((x) => x.id === updated.id)
     if (idx !== -1) {
       reservations.value[idx] = updated
     }
-  } catch {
+  } catch (error) {
+    if (error?.status === 410 || error?.code === 'GUEST_PASS_EXPIRED') {
+      actionError.value = checkInRefusalMessage(error)
+    }
     await load()
   } finally {
     savingKey.value = ''
@@ -106,6 +184,75 @@ onMounted(load)
     <h1 class="visually-hidden">{{ t('app.pageGeneration') }}</h1>
 
     <p v-if="loadError" class="gen-alert" role="alert">{{ t('app.generationAdminLoadError') }}</p>
+    <p v-if="actionError" class="gen-alert" role="alert">{{ actionError }}</p>
+
+    <section class="gen-card gen-validator" :aria-label="t('socialSpaces.validatorTitle')">
+      <h2 class="gen-card__title">
+        <i class="pi pi-qrcode" aria-hidden="true" />
+        {{ t('socialSpaces.validatorTitle') }}
+      </h2>
+      <p class="gen-card__meta">{{ t('socialSpaces.validatorHint') }}</p>
+      <form class="gen-validator__row" @submit.prevent="validatePass">
+        <input
+          v-model="passInput"
+          type="text"
+          class="gen-validator__input"
+          :placeholder="t('socialSpaces.validatorPlaceholder')"
+          :aria-label="t('socialSpaces.validatorPlaceholder')"
+        />
+        <button type="submit" class="gen-validator__btn" :disabled="passLoading || !passInput.trim()">
+          {{ t('socialSpaces.validatorAction') }}
+        </button>
+      </form>
+      <p v-if="passError" class="gen-alert" role="alert">{{ passError }}</p>
+
+      <div v-if="pass" class="gen-validator__result" aria-live="polite">
+        <span
+          class="gen-pass-status"
+          :class="`gen-pass-status--${String(pass.status || 'EXPIRED').toLowerCase()}`"
+        >
+          <i
+            :class="pass.status === 'VALID' ? 'pi pi-check-circle' : 'pi pi-ban'"
+            aria-hidden="true"
+          />
+          {{ passStatusLabel }}
+        </span>
+        <p class="gen-card__meta">
+          <strong>{{ pass.reservation?.spaceName || t('app.spaceFallbackName') }}</strong>
+          · {{ formatDate(pass.reservation?.date) }} · {{ pass.reservation?.startTime }} –
+          {{ pass.reservation?.endTime }}
+          <template v-if="pass.reservation?.hostName">
+            · {{ t('socialSpaces.validatorHost') }}: {{ pass.reservation.hostName }}
+          </template>
+        </p>
+        <ul v-if="pass.guests?.length" class="gen-guests" role="list">
+          <li v-for="g in pass.guests" :key="g.id" class="gen-guest">
+            <span class="gen-guest__name">{{ g.name }}</span>
+            <button
+              type="button"
+              class="gen-pass"
+              :class="{ 'is-in': g.checkedIn }"
+              :disabled="pass.status !== 'VALID' || passSavingKey === g.id"
+              :aria-pressed="Boolean(g.checkedIn)"
+              :aria-label="t('app.generationAdminCheckInAria')"
+              @click="onPassCheckIn(g.id, !g.checkedIn)"
+            >
+              <i :class="g.checkedIn ? 'pi pi-check-circle' : 'pi pi-circle'" aria-hidden="true" />
+              {{ g.checkedIn ? t('app.generationAdminEntered') : t('app.generationAdminNotEntered') }}
+            </button>
+          </li>
+        </ul>
+        <button
+          v-if="pass.status === 'VALID' && pass.guests?.some((g) => !g.checkedIn)"
+          type="button"
+          class="gen-validator__btn"
+          :disabled="Boolean(passSavingKey)"
+          @click="onPassCheckIn(null, true)"
+        >
+          {{ t('socialSpaces.validatorCheckInAll') }}
+        </button>
+      </div>
+    </section>
 
     <div
       v-if="sortedReservations.length"
@@ -143,6 +290,10 @@ onMounted(load)
                 · {{ slotLabel(r) }}
               </p>
             </div>
+            <span v-if="guestList(r).length && passExpired(r)" class="gen-pass-status gen-pass-status--expired">
+              <i class="pi pi-ban" aria-hidden="true" />
+              {{ t('socialSpaces.passExpired') }}
+            </span>
             <span v-if="guestList(r).length" class="gen-badge">
               {{
                 t('app.generationAdminEnteredSummary', {
@@ -163,7 +314,7 @@ onMounted(load)
                 type="button"
                 class="gen-pass"
                 :class="{ 'is-in': g.checkedIn }"
-                :disabled="savingKey === `${r.id}:${g.id}`"
+                :disabled="savingKey === `${r.id}:${g.id}` || (!g.checkedIn && passExpired(r))"
                 :aria-pressed="Boolean(g.checkedIn)"
                 :aria-label="t('app.generationAdminCheckInAria')"
                 @click="onGuestCheckedIn(r, g, !g.checkedIn)"
@@ -313,6 +464,80 @@ onMounted(load)
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.02em;
+}
+
+.gen-pass-status {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 0.3rem;
+  padding: 0.22rem 0.6rem;
+  border-radius: 980px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.gen-pass-status--valid {
+  background: #e8f5e9;
+  color: #1b7a3d;
+}
+
+.gen-pass-status--expired,
+.gen-pass-status--cancelled {
+  background: #fdecea;
+  color: #b42318;
+}
+
+.gen-validator .gen-card__title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.gen-validator__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.gen-validator__input {
+  flex: 1 1 14rem;
+  min-width: 0;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.gen-validator__input:focus-visible {
+  outline: 2px solid #0071e3;
+  outline-offset: 1px;
+}
+
+.gen-validator__btn {
+  align-self: flex-start;
+  padding: 0.55rem 0.95rem;
+  border: none;
+  border-radius: 8px;
+  background: #0071e3;
+  color: #fff;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gen-validator__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.gen-validator__result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
 }
 
 .gen-empty {

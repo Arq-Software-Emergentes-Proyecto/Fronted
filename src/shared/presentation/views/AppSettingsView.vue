@@ -26,6 +26,9 @@ import {
   applySubscriptionSnapshot,
   refreshSubscriptionFromApi,
 } from '@/billing/infrastructure/subscriptionPlanStorage.js'
+import SubscriptionPlansSection from '@/billing/presentation/components/SubscriptionPlansSection.vue'
+import BuildingForm from '@/profiles/presentation/components/BuildingForm.vue'
+import { buildingsApi } from '@/profiles/infrastructure/buildingsApi.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -109,13 +112,78 @@ async function loadServerProfile() {
 }
 
 const selectedPlanId = ref(SubscriptionPlanId.FREE)
+/** Full subscription snapshot (status, trial, billable departments) for the plans section. */
+const subscription = ref(null)
+/** US015: plan suggested after registering the building (?suggestedPlan=…). */
+const suggestedPlanId = computed(() => {
+  const raw = route.query.suggestedPlan
+  return typeof raw === 'string' && raw.length ? raw : null
+})
 const residentsCount = ref(0)
 const residentLimit = ref(maxResidentsForSubscriptionPlan(SubscriptionPlanId.FREE))
 const planSaveNotice = ref('')
 const planError = ref('')
 const planLoading = ref(false)
 const planCheckoutPlanId = ref(null)
-const activeTab = ref('profile')
+const activeTab = ref(
+  ['profile', 'plans', 'finance', 'admission', 'providers'].includes(String(route.query.tab ?? ''))
+    ? String(route.query.tab)
+    : 'profile',
+)
+
+watch(
+  () => route.query.tab,
+  (tab) => {
+    if (typeof tab === 'string' && settingsTabs.value.some((item) => item.id === tab)) activeTab.value = tab
+  },
+)
+
+/** RF015: building (condominium) of the admin; existing admins without one get the form here. */
+const buildings = ref([])
+const buildingLoading = ref(false)
+const buildingLoadError = ref(false)
+const isEditingBuilding = ref(false)
+const buildingNotice = ref('')
+const primaryBuilding = computed(() => buildings.value[0] ?? null)
+
+async function loadBuildings() {
+  if (!isAdmin.value) return
+  buildingLoading.value = true
+  buildingLoadError.value = false
+  try {
+    buildings.value = await buildingsApi.mine()
+  } catch {
+    buildingLoadError.value = true
+  } finally {
+    buildingLoading.value = false
+  }
+}
+
+async function onBuildingSaved(building) {
+  isEditingBuilding.value = false
+  buildingNotice.value = t('buildings.saved')
+  await loadBuildings()
+  await loadSubscription()
+  if (building?.suggestedPlanId && !subscription.value?.isPaid) {
+    router.replace({ name: AppRouteNames.APP_SETTINGS, query: { tab: 'plans', suggestedPlan: building.suggestedPlanId } })
+  }
+}
+
+const trialBanner = computed(() => {
+  const sub = subscription.value
+  if (!sub) return null
+  if (sub.trialExpired) return { tone: 'error', text: t('billing.trialExpiredBanner') }
+  if (sub.status === 'SUSPENDED' || sub.status === 'CANCELLED') return { tone: 'error', text: t('billing.inactiveBanner') }
+  if (sub.requiresPlanSelection && sub.isPaid) return { tone: 'warn', text: t('billing.renewBanner') }
+  if (sub.status === 'PAYMENT_FAILED') return { tone: 'warn', text: t('billing.paymentFailedBanner') }
+  if (sub.status === 'TRIAL' && sub.trialDaysLeft != null) {
+    return {
+      tone: sub.trialDaysLeft <= 7 ? 'warn' : 'info',
+      text: t('billing.trialBanner', { days: sub.trialDaysLeft }),
+    }
+  }
+  return null
+})
 
 const settingsTabs = computed(() => [
   { id: 'profile', label: t('app.settingsTabProfile'), icon: 'pi pi-user' },
@@ -233,6 +301,7 @@ const activeResidentLimit = computed(() => residentLimit.value)
 
 function syncFromSubscription(sub) {
   if (!sub) return
+  subscription.value = sub
   selectedPlanId.value = sub.planId
   residentsCount.value = sub.residentsCount
   residentLimit.value = sub.residentLimit
@@ -400,6 +469,7 @@ async function onToggleBillFromNextMonth(resident) {
 async function initSettings() {
   await loadServerProfile()
   await loadSubscription()
+  await loadBuildings()
   await loadLateFee()
   await handleSubscriptionReturnFromRoute()
   await loadServiceProviders()
@@ -440,7 +510,13 @@ async function selectPlan(planId) {
     }
     planError.value = t('app.settingsPlanCheckoutError')
   } catch (error) {
-    planError.value = error?.payload?.message || error?.message || t('app.settingsPlanCheckoutError')
+    planError.value =
+      error?.code === 'PLAN_DOWNGRADE_RESIDENTS_EXCEEDED'
+        ? t('billing.planTooSmall', {
+            count: error.payload?.residentsCount ?? residentsCount.value,
+            max: error.payload?.residentLimit ?? '',
+          })
+        : error?.payload?.message || error?.message || t('app.settingsPlanCheckoutError')
   } finally {
     if (!checkout?.initPoint) planCheckoutPlanId.value = null
   }
@@ -459,6 +535,13 @@ watch(
     await loadLateFee()
   },
 )
+
+watch(buildingNotice, (msg) => {
+  if (!msg) return
+  window.setTimeout(() => {
+    buildingNotice.value = ''
+  }, 4000)
+})
 
 watch(planSaveNotice, (msg) => {
   if (!msg) return
@@ -537,6 +620,58 @@ watch(admissionRuleNotice, (msg) => {
           <strong>{{ t('app.settingsAdminRucLabel') }}:</strong> {{ display.ruc }}
         </li>
       </ul>
+    </section>
+
+    <p
+      v-if="isAdmin && activeTab !== 'plans' && trialBanner && trialBanner.tone === 'error'"
+      class="billing-banner billing-banner--error"
+      role="alert"
+    >
+      <i class="pi pi-exclamation-triangle" aria-hidden="true" />
+      {{ trialBanner.text }}
+      <button type="button" class="billing-banner__action" @click="activeTab = 'plans'">
+        {{ t('billing.choosePlanCta') }}
+      </button>
+    </p>
+
+    <section
+      v-if="isAdmin && activeTab === 'profile'"
+      class="settings-card"
+      aria-labelledby="settings-building-heading"
+    >
+      <h2 id="settings-building-heading" class="settings-card__title">
+        <i class="pi pi-building" aria-hidden="true" />
+        {{ t('buildings.cardTitle') }}
+      </h2>
+      <p v-if="buildingLoading" class="settings-card__status">{{ t('buildings.loading') }}</p>
+      <p v-else-if="buildingLoadError" class="settings-card__error" role="alert">
+        {{ t('buildings.loadError') }}
+        <button type="button" class="billing-banner__action" @click="loadBuildings">{{ t('billing.plans.retry') }}</button>
+      </p>
+      <template v-else-if="primaryBuilding && !isEditingBuilding">
+        <ul class="settings-card__list" role="list">
+          <li><strong>{{ t('buildings.form.name') }}:</strong> {{ primaryBuilding.name }}</li>
+          <li><strong>{{ t('buildings.form.address') }}:</strong> {{ primaryBuilding.address }}</li>
+          <li><strong>{{ t('buildings.form.departmentCount') }}:</strong> {{ primaryBuilding.departmentCount }}</li>
+        </ul>
+        <p v-if="buildings.length > 1" class="settings-card__hint">
+          {{ t('buildings.moreBuildings', { count: buildings.length - 1 }) }}
+        </p>
+        <p v-if="buildingNotice" class="settings-card__notice" role="status">{{ buildingNotice }}</p>
+        <button type="button" class="settings-card__save" @click="isEditingBuilding = true">
+          {{ t('buildings.edit') }}
+        </button>
+      </template>
+      <template v-else>
+        <p v-if="!primaryBuilding" class="settings-card__hint">{{ t('buildings.missingHint') }}</p>
+        <BuildingForm
+          :building="primaryBuilding"
+          :submit-label="primaryBuilding ? t('buildings.saveChanges') : t('buildings.form.submit')"
+          :show-skip="Boolean(primaryBuilding)"
+          @saved="onBuildingSaved"
+          @skip="isEditingBuilding = false"
+        />
+      </template>
     </section>
 
     <section
@@ -789,7 +924,16 @@ watch(admissionRuleNotice, (msg) => {
       <h2 id="settings-plans-heading" class="plans-section__title">
         {{ t('app.settingsPlansTitle') }}
       </h2>
-      <p class="plans-section__subtitle">{{ t('app.settingsPlansSubtitle') }}</p>
+      <p class="plans-section__subtitle">{{ t('billing.plans.subtitle') }}</p>
+      <p
+        v-if="trialBanner"
+        class="billing-banner"
+        :class="`billing-banner--${trialBanner.tone}`"
+        :role="trialBanner.tone === 'error' ? 'alert' : 'status'"
+      >
+        <i class="pi" :class="trialBanner.tone === 'info' ? 'pi-clock' : 'pi-exclamation-triangle'" aria-hidden="true" />
+        {{ trialBanner.text }}
+      </p>
       <p class="plans-section__usage">
         {{ t('app.settingsPlanUsageLine', { current: residentsCount, max: activeResidentLimit }) }}
       </p>
@@ -801,133 +945,14 @@ watch(admissionRuleNotice, (msg) => {
       </p>
       <p v-if="planLoading" class="plans-section__loading">{{ t('app.settingsPlanLoading') }}</p>
 
-      <div class="plans-grid">
-
-        <!-- Free -->
-        <div
-          class="plan-card plan-card--free"
-          :class="{ 'plan-card--selected': selectedPlanId === SubscriptionPlanId.FREE }"
-        >
-          <div class="plan-card__header">
-            <span class="plan-card__name">Free</span>
-          </div>
-          <div class="plan-card__price">
-            <span class="plan-card__amount">S/ 0</span>
-            <span class="plan-card__period">/ mes</span>
-          </div>
-          <p class="plan-card__range">Hasta 9 departamentos</p>
-          <p class="plan-card__billing">Empieza sin costo.</p>
-          <ul class="plan-card__features">
-            <li><i class="pi pi-check" aria-hidden="true"></i> Dashboard y directorio de residentes.</li>
-            <li><i class="pi pi-check" aria-hidden="true"></i> Anuncios y registro de visitas.</li>
-            <li><i class="pi pi-check" aria-hidden="true"></i> Una cuenta de administrador.</li>
-            <li><i class="pi pi-check" aria-hidden="true"></i> Soporte comunitario.</li>
-          </ul>
-          <button
-            type="button"
-            class="plan-card__btn plan-card__btn--ghost"
-            :disabled="isPlanBusy(SubscriptionPlanId.FREE)"
-            @click="selectPlan(SubscriptionPlanId.FREE)"
-          >
-            {{ t('app.settingsPlanSelectFree') }}
-          </button>
-        </div>
-
-        <!-- Essential -->
-        <div
-          class="plan-card"
-          :class="{ 'plan-card--selected': selectedPlanId === SubscriptionPlanId.ESSENTIAL }"
-        >
-          <div class="plan-card__header">
-            <span class="plan-card__name">Essential</span>
-          </div>
-          <div class="plan-card__price">
-            <span class="plan-card__amount">S/ 40</span>
-            <span class="plan-card__period">/ mes (PEN)</span>
-          </div>
-          <p class="plan-card__range">10–15 departamentos</p>
-          <p class="plan-card__billing">Facturación mensual en soles peruanos (PEN).</p>
-          <ul class="plan-card__features">
-            <li><i class="pi pi-check" aria-hidden="true"></i> Para edificios pequeños y condominios.</li>
-            <li><i class="pi pi-check" aria-hidden="true"></i> Áreas comunes, cobranzas y anuncios.</li>
-            <li><i class="pi pi-check" aria-hidden="true"></i> Documentos y registro de visitas.</li>
-            <li><i class="pi pi-check" aria-hidden="true"></i> Consola web para administradores.</li>
-            <li><i class="pi pi-check" aria-hidden="true"></i> Soporte por email en días hábiles.</li>
-          </ul>
-          <button
-            type="button"
-            class="plan-card__btn plan-card__btn--ghost"
-            :disabled="isPlanBusy(SubscriptionPlanId.ESSENTIAL)"
-            @click="selectPlan(SubscriptionPlanId.ESSENTIAL)"
-          >
-            {{ t('app.settingsPlanSelectEssential') }}
-          </button>
-        </div>
-
-        <!-- Standard — destacado -->
-        <div
-          class="plan-card plan-card--highlighted"
-          :class="{ 'plan-card--selected': selectedPlanId === SubscriptionPlanId.STANDARD }"
-        >
-          <div class="plan-card__header">
-            <span class="plan-card__name">Standard</span>
-            <span class="plan-card__badge">Más popular</span>
-          </div>
-          <div class="plan-card__price">
-            <span class="plan-card__amount">S/ 80</span>
-            <span class="plan-card__period">/ mes (PEN)</span>
-          </div>
-          <p class="plan-card__range">16–40 departamentos</p>
-          <p class="plan-card__billing">Facturación mensual en PEN. Hasta 40 unidades.</p>
-          <ul class="plan-card__features">
-            <li><i class="pi pi-check" aria-hidden="true"></i> Para torres medianas y comunidades activas.</li>
-            <li><i class="pi pi-check" aria-hidden="true"></i> Mismas funciones que Essential, mayor capacidad.</li>
-            <li><i class="pi pi-check" aria-hidden="true"></i> Visibilidad de cuotas y morosidad.</li>
-            <li><i class="pi pi-check" aria-hidden="true"></i> Difusión a residentes y comités.</li>
-            <li><i class="pi pi-check" aria-hidden="true"></i> Soporte operativo prioritario.</li>
-          </ul>
-          <button
-            type="button"
-            class="plan-card__btn plan-card__btn--primary"
-            :disabled="isPlanBusy(SubscriptionPlanId.STANDARD)"
-            @click="selectPlan(SubscriptionPlanId.STANDARD)"
-          >
-            {{ t('app.settingsPlanSelectStandard') }}
-          </button>
-        </div>
-
-        <!-- Scale -->
-        <div
-          class="plan-card"
-          :class="{ 'plan-card--selected': selectedPlanId === SubscriptionPlanId.SCALE }"
-        >
-          <div class="plan-card__header">
-            <span class="plan-card__name">Scale</span>
-          </div>
-          <div class="plan-card__price">
-            <span class="plan-card__amount">S/ 120</span>
-            <span class="plan-card__period">/ mes (PEN)</span>
-          </div>
-          <p class="plan-card__range">41–80 departamentos</p>
-          <p class="plan-card__billing">Facturación mensual en PEN. Nivel para no solapar con 16–40.</p>
-          <ul class="plan-card__features">
-            <li><i class="pi pi-check" aria-hidden="true"></i> Grandes conjuntos y edificios en altura.</li>
-            <li><i class="pi pi-check" aria-hidden="true"></i> Rendimiento acorde al tamaño del edificio.</li>
-            <li><i class="pi pi-check" aria-hidden="true"></i> Reportes para juntas y comités grandes.</li>
-            <li><i class="pi pi-check" aria-hidden="true"></i> Asistencia en despliegue y onboarding.</li>
-            <li><i class="pi pi-check" aria-hidden="true"></i> Canal de soporte con tiempos de respuesta.</li>
-          </ul>
-          <button
-            type="button"
-            class="plan-card__btn plan-card__btn--ghost"
-            :disabled="isPlanBusy(SubscriptionPlanId.SCALE)"
-            @click="selectPlan(SubscriptionPlanId.SCALE)"
-          >
-            {{ t('app.settingsPlanSelectScale') }}
-          </button>
-        </div>
-
-      </div>
+      <SubscriptionPlansSection
+        :current-plan-id="selectedPlanId"
+        :subscription="subscription"
+        :busy-plan-id="planCheckoutPlanId"
+        :disabled="planLoading"
+        :suggested-plan-id="suggestedPlanId"
+        @select="selectPlan"
+      />
     </section>
 
     <section
@@ -1378,182 +1403,45 @@ watch(admissionRuleNotice, (msg) => {
   color: var(--apple-text-secondary, #6e6e73);
 }
 
-/* ── Grid de planes ── */
-.plans-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1rem;
-  align-items: stretch;
-}
-
-/* ── Tarjeta de plan ── */
-.plan-card {
-  display: flex;
-  flex-direction: column;
-  padding: 1.35rem 1.25rem 1.25rem;
-  border-radius: 16px;
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
-}
-
-.plan-card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-  transform: translateY(-2px);
-}
-
-/* Plan destacado */
-.plan-card--highlighted {
-  border-color: #0a84ff;
-  box-shadow: 0 0 0 1px #0a84ff, 0 4px 16px rgba(10, 132, 255, 0.12);
-}
-
-.plan-card--highlighted:hover {
-  box-shadow: 0 0 0 1px #0a84ff, 0 8px 24px rgba(10, 132, 255, 0.18);
-}
-
-/* Plan free — borde verde */
-.plan-card--free {
-  border-color: rgba(52, 199, 89, 0.4);
-}
-
-.plan-card--selected {
-  box-shadow: 0 0 0 2px #0a84ff, 0 4px 16px rgba(10, 132, 255, 0.12);
-}
-
-.plan-card--highlighted.plan-card--selected {
-  box-shadow: 0 0 0 2px #0a84ff, 0 0 0 1px #0a84ff, 0 8px 24px rgba(10, 132, 255, 0.18);
-}
-
-/* ── Header del plan ── */
-.plan-card__header {
+/* ── Billing: trial / subscription banner (plan cards live in SubscriptionPlansSection) ── */
+.billing-banner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 0.5rem;
-  margin-bottom: 0.85rem;
+  margin: 0 0 0.85rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 12px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.4;
 }
 
-.plan-card__name {
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--apple-text, #1d1d1f);
+.billing-banner--info {
+  background: rgba(10, 132, 255, 0.08);
+  color: #0060c0;
 }
 
-.plan-card__badge {
-  display: inline-block;
-  padding: 0.2rem 0.6rem;
+.billing-banner--warn {
+  background: #fff8e6;
+  color: #8a5300;
+}
+
+.billing-banner--error {
+  background: #fff4f2;
+  color: #b42318;
+  border: 1px solid rgba(180, 35, 24, 0.2);
+}
+
+.billing-banner__action {
+  margin-left: auto;
+  padding: 0.35rem 0.8rem;
   border-radius: 980px;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  border: none;
   background: #0a84ff;
   color: #fff;
-}
-
-/* ── Precio ── */
-.plan-card__price {
-  display: flex;
-  align-items: baseline;
-  gap: 0.25rem;
-  margin-bottom: 0.4rem;
-}
-
-.plan-card__amount {
-  font-size: 2rem;
-  font-weight: 700;
-  letter-spacing: -0.04em;
-  font-variant-numeric: tabular-nums;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.plan-card--highlighted .plan-card__amount {
-  color: #0a84ff;
-}
-
-.plan-card__period {
-  font-size: 0.8125rem;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-/* ── Rango de apartamentos ── */
-.plan-card__range {
-  margin: 0 0 0.2rem;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--apple-text, #1d1d1f);
-}
-
-/* ── Texto de facturación ── */
-.plan-card__billing {
-  margin: 0 0 1rem;
   font-size: 0.75rem;
-  color: var(--apple-text-secondary, #6e6e73);
-  line-height: 1.4;
-}
-
-/* ── Lista de features ── */
-.plan-card__features {
-  flex: 1;
-  list-style: none;
-  margin: 0 0 1.25rem;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  font-size: 0.8125rem;
-  color: var(--apple-text, #1d1d1f);
-  line-height: 1.4;
-}
-
-.plan-card__features li {
-  display: flex;
-  gap: 0.5rem;
-  align-items: flex-start;
-}
-
-.plan-card__features .pi-check {
-  color: #34c759;
-  font-size: 0.75rem;
-  margin-top: 0.1rem;
-  flex-shrink: 0;
-}
-
-/* ── Botones ── */
-.plan-card__btn {
-  width: 100%;
-  padding: 0.6rem 1rem;
-  border-radius: 980px;
-  font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
-  border: none;
-  transition: background 0.15s ease, opacity 0.15s ease;
-  margin-top: auto;
-}
-
-.plan-card__btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.plan-card__btn--primary {
-  background: #0a84ff;
-  color: #fff;
-}
-
-.plan-card__btn--primary:hover {
-  background: #0071e3;
-}
-
-.plan-card__btn--ghost {
-  background: rgba(0, 0, 0, 0.05);
-  color: var(--apple-text, #1d1d1f);
-}
-
-.plan-card__btn--ghost:hover {
-  background: rgba(0, 0, 0, 0.09);
 }
 </style>

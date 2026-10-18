@@ -1,7 +1,18 @@
+// Must match BuildingFex.Api Billing/Domain/Model/SubscriptionPlans.cs (informe TP1, 1.2).
 const PLAN_PRICES_PEN = {
-  essential: 40,
-  standard: 80,
-  scale: 120,
+  essential: 60,
+  standard: 120,
+  scale: 200,
+}
+const PORTAFOLIO_PRICE_PER_DEPARTMENT_PEN = 3
+const PORTAFOLIO_MINIMUM_PEN = 450
+
+function subscriptionPrice(planId, departmentCount) {
+  if (planId === 'portafolio') {
+    const n = Math.max(0, Math.floor(Number(departmentCount) || 0))
+    return Math.max(PORTAFOLIO_MINIMUM_PEN, PORTAFOLIO_PRICE_PER_DEPARTMENT_PEN * n)
+  }
+  return PLAN_PRICES_PEN[planId]
 }
 
 export function mercadoPagoAccessToken() {
@@ -44,7 +55,7 @@ export async function createMercadoPagoPreference(payload) {
 
   if (kind === 'subscription') {
     const planId = String(payload?.planId ?? '').trim()
-    unitPrice = money(PLAN_PRICES_PEN[planId])
+    unitPrice = money(subscriptionPrice(planId, payload?.departmentCount))
     if (!unitPrice) throw jsonError('INVALID_PLAN', 'That plan cannot be purchased', 400)
     title = title || `BuildingFex ${planId}`
   } else {

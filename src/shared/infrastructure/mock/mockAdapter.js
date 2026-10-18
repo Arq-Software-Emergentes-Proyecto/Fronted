@@ -2,6 +2,7 @@ import { AxiosError } from 'axios'
 import { createPreviewAccessToken } from '@/iam/application/localPreviewAuth.js'
 import { SessionRoles } from '@/iam/domain/sessionRoles.js'
 import { maxResidentsForSubscriptionPlan, SubscriptionPlanId } from '@/billing/domain/subscriptionPlans.js'
+import { buildLocalPlanCatalog, suggestPlanForDepartments } from '@/billing/domain/planCatalog.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
 import {
   computeKpi,
@@ -112,6 +113,8 @@ function publicSupportChat(row) {
     title: row.title ?? row.topic ?? '',
     titleSummarized: Boolean(row.titleSummarized),
     status: row.status ?? 'open',
+    pending: !row.status || row.status === 'open',
+    closedAt: row.closedAt ?? '',
     kind: row.kind ?? '',
     source: row.source ?? 'resident',
     linkedChatId: row.linkedChatId ?? row.escalatedChatId ?? '',
@@ -220,6 +223,12 @@ function ownerFromParams(params) {
 function handleCollection(config, method, collection, id) {
   const params = readParams(config)
   const body = readBody(config)
+
+  // Query flags of the real API that are not row fields (Social Spaces history / purge).
+  if (collection === 'reservations') {
+    delete params.includeCancelled
+    delete params.purge
+  }
 
   if (collection === 'kpi' && method === 'GET' && !id) {
     return ok(config, [computeKpi(ownerFromParams(params))])
@@ -418,6 +427,90 @@ function handleV1(config, method, parts) {
         : {}),
     })
     return ok(config, authPayload(updated))
+  }
+
+  // Billing — public plan catalog + plan caps (mirror BuildingFex.Api PlansController / SubscriptionController)
+  if (route === 'plans' && method === 'GET') {
+    return ok(config, buildLocalPlanCatalog())
+  }
+
+  if (route === 'plans/suggest' && method === 'GET') {
+    const departments = Number(params.departments ?? 0)
+    return ok(config, { departments, planId: suggestPlanForDepartments(departments) })
+  }
+
+  if (route === 'subscription/limits' && method === 'GET') {
+    const snapshot = subscriptionSnapshot(ownerFromParams(params))
+    return ok(config, {
+      planId: snapshot.planId,
+      status: snapshot.status,
+      maxDepartments: snapshot.residentLimit,
+      departmentsUsed: snapshot.residentsCount,
+      departmentsAvailable: Math.max(0, snapshot.residentLimit - snapshot.residentsCount),
+      monthlyAiQueries: snapshot.monthlyAiQueries,
+      aiQueriesUsed: null,
+      canAddResidents: snapshot.canAddResidents,
+    })
+  }
+
+  // Profiles — buildings (RF015 / TS001 / TS002)
+  if (route === 'buildings' || route.startsWith('buildings/')) {
+    const ownerId = ownerFromParams(params)
+    const rest = route === 'buildings' ? '' : route.slice('buildings/'.length)
+    const toResource = (row) => ({
+      ...row,
+      suggestedPlanId: suggestPlanForDepartments(row.departmentCount),
+    })
+    const validate = () => {
+      const errors = {}
+      if (!String(body.name ?? '').trim()) errors.name = ['El nombre del edificio es obligatorio.']
+      if (!String(body.address ?? '').trim()) errors.address = ['La dirección es obligatoria.']
+      const count = Number(body.departmentCount)
+      if (!Number.isInteger(count) || count < 1 || count > 5000) {
+        errors.departmentCount = ['La cantidad de departamentos debe estar entre 1 y 5000.']
+      }
+      if (Object.keys(errors).length) fail(config, 400, 'BUILDING_VALIDATION_FAILED', 'Datos del edificio inválidos.', { errors })
+    }
+    const mine = () => queryCollection('buildings', { ownerAdminId: ownerId })
+    if (!rest && method === 'POST') {
+      validate()
+      if (mine().length) fail(config, 409, 'BUILDING_ALREADY_REGISTERED', 'Building already registered', { id: mine()[0].id })
+      const created = insertRow('buildings', {
+        id: Date.now(),
+        name: String(body.name).trim(),
+        address: String(body.address).trim(),
+        departmentCount: Number(body.departmentCount),
+        ownerAdminId: ownerId,
+        createdAt: new Date().toISOString(),
+      })
+      return ok(config, toResource(created), 201)
+    }
+    if (rest === 'mine' && method === 'GET') return ok(config, mine().map(toResource))
+    const [id, sub] = rest.split('/')
+    const row = mine().find((item) => String(item.id) === String(id))
+    if (!row) fail(config, 404, 'BUILDING_NOT_FOUND', 'Building not found')
+    if (!sub && method === 'GET') return ok(config, toResource(row))
+    if (!sub && method === 'PUT') {
+      validate()
+      return ok(
+        config,
+        toResource(
+          patchRow('buildings', row.id, {
+            name: String(body.name).trim(),
+            address: String(body.address).trim(),
+            departmentCount: Number(body.departmentCount),
+          }),
+        ),
+      )
+    }
+    if (sub === 'residents' && method === 'GET') {
+      return ok(config, queryCollection('users', { role: 'resident', ownerAdminId: ownerId }))
+    }
+  }
+
+  // Excel import needs the real API (server-side parsing); the panel falls back to a local CSV template.
+  if (route.startsWith('residents/import')) {
+    fail(config, 501, 'IMPORT_PREVIEW_UNSUPPORTED', 'Excel import requires the BuildingFex API')
   }
 
   if (route === 'subscription' && method === 'GET') {
@@ -722,6 +815,11 @@ function handleV1(config, method, parts) {
         }
       }
 
+      // Estados (Resident Care): admin responde → answered; residente escribe → open; IA derivada → derived.
+      let status = chat.status || 'open'
+      if (chat.kind === 'ai') status = escalatedChatId ? 'derived' : 'answered'
+      else status = isAdminActor ? 'answered' : 'open'
+
       const updated = patchRow('supportChats', chatId, {
         messages,
         topic,
@@ -729,6 +827,22 @@ function handleV1(config, method, parts) {
         titleSummarized: true,
         escalatedChatId,
         linkedChatId,
+        status,
+        updatedAt: now(),
+      })
+      return ok(config, publicSupportChat(updated))
+    }
+
+    const statusMatch = rest.match(/^([^/]+)\/(status|close)$/)
+    if (statusMatch && method === 'PATCH') {
+      const chat = findById('supportChats', statusMatch[1])
+      if (!chat) fail(config, 404, 'CHAT_NOT_FOUND', 'Chat not found')
+      const raw = statusMatch[2] === 'close' ? 'closed' : String(body.status ?? '').trim().toLowerCase()
+      const status = { pending: 'open', attended: 'answered' }[raw] || raw
+      if (!['open', 'answered', 'closed'].includes(status)) fail(config, 400, 'INVALID_STATUS', 'Invalid status')
+      const updated = patchRow('supportChats', chat.id, {
+        status,
+        closedAt: status === 'closed' ? now() : '',
         updatedAt: now(),
       })
       return ok(config, publicSupportChat(updated))
@@ -924,6 +1038,159 @@ function handleV1(config, method, parts) {
   fail(config, 404, 'HTTP_404', `No mock for /api/v1/${route}`)
 }
 
+const ANNOUNCEMENT_RANK = { urgent: 3, important: 2, normal: 1 }
+
+function mockIncidentEvent(type, status, comment, actor) {
+  return {
+    id: Date.now() + Math.floor(Math.random() * 1000),
+    type,
+    status,
+    comment: comment || null,
+    authorId: actor?.id ?? null,
+    authorName: null,
+    authorRole: actor?.role ?? null,
+    createdAt: new Date().toISOString(),
+  }
+}
+
+/**
+ * Preview mock de Incidents / Communications: replica las reglas del backend
+ * (asunto obligatorio, comentario de resolución, historial, vigencia y orden de comunicados).
+ * Devuelve null si la ruta no aplica (sigue el CRUD genérico).
+ */
+function handleIncidentsAndAnnouncements(config, method, parts) {
+  const [collection, id, action] = parts
+  const actor = resolveActor(config)
+  const body = readBody(config)
+
+  if (collection === 'announcements' && !id) {
+    if (method === 'GET') {
+      const params = readParams(config)
+      const now = new Date()
+      const onlyActive =
+        actor.role === SessionRoles.RESIDENT || String(params.activeOnly) === 'true'
+      const rows = queryCollection('announcements', { ownerAdminId: ownerFromParams(params) })
+        .filter((a) => !onlyActive || (a.expiresAt && now < new Date(a.expiresAt)))
+        .map((a) => ({
+          ...a,
+          status: a.expiresAt && now >= new Date(a.expiresAt) ? 'expired' : 'published',
+          isActive: !!a.expiresAt && now < new Date(a.expiresAt),
+        }))
+        .sort((a, b) => {
+          const diff = (ANNOUNCEMENT_RANK[b.priority] ?? 1) - (ANNOUNCEMENT_RANK[a.priority] ?? 1)
+          return diff || String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
+        })
+      return ok(config, rows)
+    }
+    if (method === 'POST') {
+      const createdAt = new Date()
+      const duration = Number(body.duration) > 0 ? Number(body.duration) : 7
+      const expires = new Date(createdAt)
+      expires.setDate(expires.getDate() + duration)
+      return ok(
+        config,
+        insertRow('announcements', {
+          ...body,
+          duration,
+          createdAt: createdAt.toISOString(),
+          publishedAt: createdAt.toISOString(),
+          expiresAt: expires.toISOString(),
+          status: 'published',
+        }),
+        201,
+      )
+    }
+  }
+
+  if (collection !== 'incidents') return null
+
+  if (!id && method === 'POST') {
+    if (!String(body.title ?? body.subject ?? '').trim()) {
+      fail(config, 400, 'TITLE_REQUIRED', 'El asunto es obligatorio.')
+    }
+    if (!String(body.description ?? '').trim()) {
+      fail(config, 400, 'DESCRIPTION_REQUIRED', 'La descripción es obligatoria.')
+    }
+    const row = {
+      ...body,
+      title: String(body.title ?? body.subject).trim(),
+      status: 'open',
+      events: [mockIncidentEvent('reported', 'open', null, actor)],
+    }
+    return ok(config, insertRow('incidents', row), 201)
+  }
+
+  if (!id) return null
+  const current = findById('incidents', id)
+  if (!current) return null
+  const events = Array.isArray(current.events) ? [...current.events] : []
+
+  if (!action && method === 'PUT') {
+    const next = { ...current, ...body, events }
+    if (body.status === 'resolved' && current.status !== 'resolved') {
+      if (!String(body.resolutionComment ?? '').trim()) {
+        fail(config, 400, 'RESOLUTION_COMMENT_REQUIRED', 'Documenta la solución antes de resolver.')
+      }
+      next.resolvedAt = new Date().toISOString()
+      events.push(mockIncidentEvent('resolved', 'resolved', body.resolutionComment, actor))
+    } else if (body.status && body.status !== current.status) {
+      if (current.status === 'resolved') {
+        next.resolvedAt = null
+        next.resolutionComment = null
+      }
+      events.push(mockIncidentEvent('status_changed', body.status, null, actor))
+    }
+    return ok(config, replaceRow('incidents', id, next))
+  }
+
+  if (action === 'assign' && method === 'PATCH') {
+    const providerId = String(body.providerId ?? '').trim()
+    const provider = providerId ? findById('serviceProviders', providerId) : null
+    if (providerId && !provider) fail(config, 400, 'PROVIDER_NOT_FOUND', 'Proveedor no encontrado.')
+    const status = provider && current.status === 'open' ? 'in-progress' : current.status
+    events.push(
+      mockIncidentEvent(provider ? 'assigned' : 'unassigned', status, provider?.name ?? null, actor),
+    )
+    return ok(
+      config,
+      patchRow('incidents', id, {
+        providerId: provider?.id ?? null,
+        provider: provider?.name ?? '',
+        providerPhone: provider?.phone ?? null,
+        providerSpecialty: provider?.specialty ?? null,
+        status,
+        events,
+      }),
+    )
+  }
+
+  if (action === 'resolve' && method === 'PATCH') {
+    const comment = String(body.resolutionComment ?? body.comment ?? '').trim()
+    if (!comment) {
+      fail(config, 400, 'RESOLUTION_COMMENT_REQUIRED', 'Documenta la solución antes de resolver.')
+    }
+    events.push(mockIncidentEvent('resolved', 'resolved', comment, actor))
+    return ok(
+      config,
+      patchRow('incidents', id, {
+        status: 'resolved',
+        resolutionComment: comment,
+        resolvedAt: new Date().toISOString(),
+        events,
+      }),
+    )
+  }
+
+  if (action === 'comments' && method === 'POST') {
+    const comment = String(body.comment ?? '').trim()
+    if (!comment) fail(config, 400, 'COMMENT_REQUIRED', 'El comentario es obligatorio.')
+    events.push(mockIncidentEvent('comment', current.status, comment, actor))
+    return ok(config, patchRow('incidents', id, { events }))
+  }
+
+  return null
+}
+
 export async function localMockAdapter(config) {
   const method = String(config.method ?? 'get').toUpperCase()
   const parts = pathParts(config)
@@ -934,6 +1201,8 @@ export async function localMockAdapter(config) {
     }
 
     const [collection, id] = parts
+    const domainResponse = handleIncidentsAndAnnouncements(config, method, parts)
+    if (domainResponse) return domainResponse
     if (isKnownCollection(collection)) {
       return handleCollection(config, method, collection, id)
     }

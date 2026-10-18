@@ -90,3 +90,21 @@ export function onSupportChatUpdated(handler) {
 export function isDocumentVisible() {
   return typeof document === 'undefined' ? true : document.visibilityState === 'visible'
 }
+
+/**
+ * Suscripción genérica a un evento del hub de soporte (lo reutiliza Incidents:
+ * "incidentCreated" / "incidentUpdated") para no abrir otra conexión SignalR.
+ * Requiere haber llamado antes a joinSupportOwner(); devuelve la función para desuscribirse.
+ */
+export function onSupportHubEvent(eventName, handler) {
+  if (!connection || !eventName) return () => {}
+  const conn = connection
+  conn.on(eventName, handler)
+  return () => {
+    try {
+      conn.off(eventName, handler)
+    } catch {
+      // ignore
+    }
+  }
+}

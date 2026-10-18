@@ -13,6 +13,9 @@ import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.j
 import { useFinancesStore } from '@/finances/application/financesStore.js'
 import { formatDayMonth } from '@/finances/domain/billingCycle.js'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
+import { RouterLink } from 'vue-router'
+import { AppRouteNames } from '@/shared/domain/appRoutes.js'
+import ResidentImportPanel from '@/residents/presentation/components/ResidentImportPanel.vue'
 
 const { t, locale } = useI18n()
 const financesStore = useFinancesStore()
@@ -73,8 +76,14 @@ onMounted(async () => {
   await loadResidents()
 })
 
+/** RF028 / US028: plan limit (or expired trial) blocks saving → suggest an upgrade. */
+const modalNeedsUpgrade = ref(false)
+const upgradePlanRoute = { name: AppRouteNames.APP_SETTINGS, query: { tab: 'plans' } }
+const isAtPlanLimit = computed(() => totalResidents.value >= residentPlanLimitCap.value)
+
 function openAddResidentModal() {
   modalError.value = ''
+  modalNeedsUpgrade.value = false
   residentForm.name = ''
   residentForm.department = ''
   isAddResidentModalOpen.value = true
@@ -102,6 +111,7 @@ async function onAddResidentSubmit() {
 
   isSubmitting.value = true
   modalError.value = ''
+  modalNeedsUpgrade.value = false
   try {
     const newResident = await residentsApi.add({
       name,
@@ -125,9 +135,16 @@ async function onAddResidentSubmit() {
       return
     }
     if (error?.code === 'RESIDENT_PLAN_LIMIT_REACHED') {
-      modalError.value = t('app.addResidentPlanLimit', {
+      modalError.value = t('billing.limitReached', {
+        current: totalResidents.value,
         max: getResidentLimitForActiveOwner(),
       })
+      modalNeedsUpgrade.value = true
+      return
+    }
+    if (error?.code === 'SUBSCRIPTION_TRIAL_EXPIRED' || error?.code === 'SUBSCRIPTION_INACTIVE') {
+      modalError.value = t(error.code === 'SUBSCRIPTION_TRIAL_EXPIRED' ? 'billing.trialExpiredBlocked' : 'billing.inactiveBlocked')
+      modalNeedsUpgrade.value = true
       return
     }
     modalError.value = t('auth.genericError')
@@ -208,10 +225,26 @@ const isBulkResidentsModalOpen = ref(false)
 const bulkResidentsText = ref('')
 const isSubmittingBulk = ref(false)
 const bulkResults = ref([])
+/** US016: 'file' = Excel/CSV upload (server validates all rows); 'text' = paste lines (legacy). */
+const bulkMode = ref('file')
+
+async function onRosterImported(createdResidents) {
+  if (!Array.isArray(createdResidents) || !createdResidents.length) return
+  residents.value = [...createdResidents, ...residents.value]
+  await refreshPlanLimit()
+  for (const resident of createdResidents) {
+    try {
+      await financesStore.generateInitialReceipt(resident)
+    } catch (error) {
+      console.warn('Initial receipt failed for imported resident', resident.id, error)
+    }
+  }
+}
 
 function openBulkResidentsModal() {
   bulkResidentsText.value = ''
   bulkResults.value = []
+  bulkMode.value = 'file'
   isAddResidentModalOpen.value = false
   isBulkResidentsModalOpen.value = true
 }
@@ -284,6 +317,8 @@ async function onBulkResidentsSubmit() {
         message = t('app.addResidentPlanLimit', {
           max: getResidentLimitForActiveOwner(),
         })
+      } else if (error?.code === 'SUBSCRIPTION_TRIAL_EXPIRED') {
+        message = t('billing.trialExpiredBlocked')
       }
       results.push({ line: i + 1, raw, status: 'error', message })
     }
@@ -306,7 +341,14 @@ const isLoadingSpaces = ref(false)
 const spacesLoadError = ref('')
 
 const isAddSpaceModalOpen = ref(false)
-const spaceForm = reactive({ name: '', description: '', capacity: '', imageUrl: '' })
+const spaceForm = reactive({
+  name: '',
+  description: '',
+  capacity: '',
+  imageUrl: '',
+  rules: '',
+  maxReservationsPerDay: '',
+})
 const spaceModalError = ref('')
 const isSubmittingSpace = ref(false)
 const isProcessingAddImage = ref(false)
@@ -318,6 +360,9 @@ const editSpaceForm = reactive({
   description: '',
   capacity: '',
   imageUrl: '',
+  rules: '',
+  status: 'AVAILABLE',
+  maxReservationsPerDay: '',
 })
 const editSpaceModalError = ref('')
 const isSubmittingEditSpace = ref(false)
@@ -397,6 +442,8 @@ function openAddSpaceModal() {
   spaceForm.description = ''
   spaceForm.capacity = ''
   spaceForm.imageUrl = ''
+  spaceForm.rules = ''
+  spaceForm.maxReservationsPerDay = ''
   isAddSpaceModalOpen.value = true
 }
 
@@ -445,6 +492,8 @@ async function onAddSpaceSubmit() {
       description: spaceForm.description,
       capacity: spaceForm.capacity,
       imageUrl: spaceForm.imageUrl,
+      rules: spaceForm.rules,
+      maxReservationsPerDay: spaceForm.maxReservationsPerDay,
     })
     spaces.value = [newSpace, ...spaces.value]
     isAddSpaceModalOpen.value = false
@@ -466,6 +515,9 @@ function openEditSpaceModal(space) {
   editSpaceForm.description = space.description ?? ''
   editSpaceForm.capacity = space.capacity ?? ''
   editSpaceForm.imageUrl = space.imageUrl ?? ''
+  editSpaceForm.rules = space.rules ?? ''
+  editSpaceForm.status = space.status === 'MAINTENANCE' ? 'MAINTENANCE' : 'AVAILABLE'
+  editSpaceForm.maxReservationsPerDay = space.maxReservationsPerDay ?? ''
   isEditSpaceModalOpen.value = true
 }
 
@@ -515,6 +567,9 @@ async function onEditSpaceSubmit() {
       description: editSpaceForm.description,
       capacity: editSpaceForm.capacity,
       imageUrl: editSpaceForm.imageUrl,
+      rules: editSpaceForm.rules,
+      status: editSpaceForm.status,
+      maxReservationsPerDay: editSpaceForm.maxReservationsPerDay,
     })
     spaces.value = spaces.value.map((space) =>
       space.id === updated.id ? updated : space,
@@ -779,7 +834,12 @@ const groupedReservations = computed(() => {
               </div>
             </div>
             <div class="s-card__info">
-              <p class="s-card__name">{{ space.name }}</p>
+              <p class="s-card__name">
+                {{ space.name }}
+                <span v-if="space.status === 'MAINTENANCE'" class="s-card__badge">
+                  {{ t('socialSpaces.maintenanceBadge') }}
+                </span>
+              </p>
               <p class="s-card__meta">
                 <template v-if="space.capacity">
                   <i class="pi pi-users" aria-hidden="true" />
@@ -815,6 +875,9 @@ const groupedReservations = computed(() => {
 
       <p class="mgmt-view-footer" role="note">
         {{ t('app.residentPlanUsageHint', { current: totalResidents, max: residentPlanLimitCap }) }}
+        <RouterLink v-if="isAtPlanLimit" class="mgmt-view-footer__upgrade" :to="upgradePlanRoute">
+          {{ t('billing.upgradeCta') }}
+        </RouterLink>
       </p>
     </div>
 
@@ -865,6 +928,15 @@ const groupedReservations = computed(() => {
           </label>
 
           <p v-if="modalError" class="resident-modal__error">{{ modalError }}</p>
+          <RouterLink
+            v-if="modalNeedsUpgrade"
+            class="resident-modal__upgrade"
+            :to="upgradePlanRoute"
+            @click="isAddResidentModalOpen = false"
+          >
+            <i class="pi pi-arrow-up-right" aria-hidden="true" />
+            {{ t('billing.upgradeCta') }}
+          </RouterLink>
 
           <ConfirmActions
             :cancel-label="t('app.cancelAction')"
@@ -892,6 +964,43 @@ const groupedReservations = computed(() => {
         :aria-label="t('app.bulkResidentsModalTitle')"
       >
         <h3 class="resident-modal__title">{{ t('app.bulkResidentsModalTitle') }}</h3>
+        <div class="bulk-mode" role="tablist" :aria-label="t('rosterImport.modeLabel')">
+          <button
+            type="button"
+            role="tab"
+            class="bulk-mode__tab"
+            :class="{ 'is-active': bulkMode === 'file' }"
+            :aria-selected="bulkMode === 'file'"
+            :disabled="isSubmittingBulk"
+            @click="bulkMode = 'file'"
+          >
+            <i class="pi pi-file-excel" aria-hidden="true" />
+            {{ t('rosterImport.modeFile') }}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="bulk-mode__tab"
+            :class="{ 'is-active': bulkMode === 'text' }"
+            :aria-selected="bulkMode === 'text'"
+            @click="bulkMode = 'text'"
+          >
+            <i class="pi pi-list" aria-hidden="true" />
+            {{ t('rosterImport.modeText') }}
+          </button>
+        </div>
+
+        <template v-if="bulkMode === 'file'">
+          <ResidentImportPanel @imported="onRosterImported" />
+          <ConfirmActions
+            :cancel-label="t('app.closeAction')"
+            :show-confirm="false"
+            :stagger="false"
+            @cancel="closeBulkResidentsModal"
+          />
+        </template>
+
+        <template v-else>
         <p class="resident-modal__hint">{{ t('app.bulkResidentsHint') }}</p>
         <p class="resident-modal__example">{{ t('app.bulkResidentsExample') }}</p>
 
@@ -931,6 +1040,7 @@ const groupedReservations = computed(() => {
             @cancel="closeBulkResidentsModal"
           />
         </form>
+        </template>
       </section>
     </div>
 
@@ -957,6 +1067,26 @@ const groupedReservations = computed(() => {
           <label class="resident-modal__field">
             <span>{{ t('app.spaceCapacityLabel') }}</span>
             <input v-model="spaceForm.capacity" type="number" min="1" />
+          </label>
+
+          <label class="resident-modal__field">
+            <span>{{ t('socialSpaces.maxPerDayLabel') }}</span>
+            <input
+              v-model="spaceForm.maxReservationsPerDay"
+              type="number"
+              min="1"
+              :placeholder="t('socialSpaces.maxPerDayHint')"
+            />
+          </label>
+
+          <label class="resident-modal__field">
+            <span>{{ t('socialSpaces.rulesLabel') }}</span>
+            <textarea
+              v-model="spaceForm.rules"
+              rows="3"
+              maxlength="2000"
+              :placeholder="t('socialSpaces.rulesPlaceholder')"
+            />
           </label>
 
           <div class="resident-modal__field space-image-field">
@@ -1043,6 +1173,34 @@ const groupedReservations = computed(() => {
               <label class="resident-modal__field">
                 <span>{{ t('app.spaceCapacityLabel') }}</span>
                 <input v-model="editSpaceForm.capacity" type="number" min="1" />
+              </label>
+
+              <label class="resident-modal__field">
+                <span>{{ t('socialSpaces.maxPerDayLabel') }}</span>
+                <input
+                  v-model="editSpaceForm.maxReservationsPerDay"
+                  type="number"
+                  min="1"
+                  :placeholder="t('socialSpaces.maxPerDayHint')"
+                />
+              </label>
+
+              <label class="resident-modal__field">
+                <span>{{ t('socialSpaces.statusFieldLabel') }}</span>
+                <select v-model="editSpaceForm.status">
+                  <option value="AVAILABLE">{{ t('socialSpaces.statusAvailable') }}</option>
+                  <option value="MAINTENANCE">{{ t('socialSpaces.statusMaintenance') }}</option>
+                </select>
+              </label>
+
+              <label class="resident-modal__field">
+                <span>{{ t('socialSpaces.rulesLabel') }}</span>
+                <textarea
+                  v-model="editSpaceForm.rules"
+                  rows="3"
+                  maxlength="2000"
+                  :placeholder="t('socialSpaces.rulesPlaceholder')"
+                />
               </label>
             </div>
 
@@ -2012,6 +2170,58 @@ const groupedReservations = computed(() => {
   border-color: #0a84ff;
 }
 
+.bulk-mode {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  margin: 0.25rem 0 0.75rem;
+  border-radius: 980px;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.bulk-mode__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.85rem;
+  border: none;
+  border-radius: 980px;
+  background: transparent;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--apple-text-secondary, #6e6e73);
+  cursor: pointer;
+}
+
+.bulk-mode__tab.is-active {
+  background: #fff;
+  color: var(--apple-text, #1d1d1f);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.resident-modal__upgrade,
+.mgmt-view-footer__upgrade {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 600;
+  color: #0a84ff;
+  text-decoration: none;
+}
+
+.resident-modal__upgrade {
+  align-self: flex-start;
+  padding: 0.45rem 0.9rem;
+  border-radius: 980px;
+  background: #0a84ff;
+  color: #fff;
+  font-size: 0.8125rem;
+}
+
+.mgmt-view-footer__upgrade {
+  margin-left: 0.5rem;
+}
+
 .bulk-results {
   list-style: none;
   margin: 0;
@@ -2079,6 +2289,36 @@ const groupedReservations = computed(() => {
 .resident-modal__field input:focus {
   outline: none;
   border-color: #0a84ff;
+}
+
+.resident-modal__field textarea,
+.resident-modal__field select {
+  border: 1px solid #d2d2d7;
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+  color: #1d1d1f;
+  font-weight: 400;
+  background: #fff;
+  resize: vertical;
+}
+
+.resident-modal__field textarea:focus,
+.resident-modal__field select:focus {
+  outline: none;
+  border-color: #0a84ff;
+}
+
+.s-card__badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 980px;
+  background: #fff3e0;
+  color: #b54708;
+  font-size: 0.68rem;
+  font-weight: 700;
+  vertical-align: middle;
 }
 
 .resident-modal__field-preview {

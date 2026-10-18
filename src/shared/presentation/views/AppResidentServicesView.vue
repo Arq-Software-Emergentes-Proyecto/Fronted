@@ -1,12 +1,15 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
+import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import { spacesApi } from '@/socialSpaces/infrastructure/spacesApi.js'
 import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 
 const { t, locale } = useI18n()
+const router = useRouter()
 const { state } = useSession()
 const profile = computed(() => state.profile ?? {})
 
@@ -31,6 +34,26 @@ const calendarMonth = ref(startOfMonth(new Date()))
 
 const isBusyHoursModalOpen = ref(false)
 const busyHoursDate = ref('')
+
+/** Booking just confirmed by the server (US026 "envía la confirmación"). */
+const confirmation = ref(null)
+
+/**
+ * Daily window used to paint a day as "full" when no free gap of at least
+ * MIN_FREE_GAP_MINUTES remains (the server is still the authority: 409 on overlap).
+ */
+const DAY_WINDOW_START_MIN = 7 * 60
+const DAY_WINDOW_END_MIN = 23 * 60
+const MIN_FREE_GAP_MINUTES = 60
+
+function toMinutes(value) {
+  const [h, m] = String(value ?? '').split(':').map(Number)
+  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : Number.NaN
+}
+
+function isUnderMaintenance(space) {
+  return String(space?.status ?? '').toUpperCase() === 'MAINTENANCE'
+}
 
 function startOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth(), 1)
@@ -58,12 +81,35 @@ function nextMonth() {
 
 const todayKey = computed(() => formatDateKey(new Date()))
 
-const busyDateKeys = computed(() => {
-  const set = new Set()
+/** dateKey → 'partial' | 'full' (days without reservations are free). */
+const dayStatusByDate = computed(() => {
+  const byDate = new Map()
   for (const reservation of allSpaceReservations.value) {
-    if (reservation?.date) set.add(reservation.date)
+    if (!reservation?.date || reservation.status === 'CANCELLED') continue
+    if (!byDate.has(reservation.date)) byDate.set(reservation.date, [])
+    byDate.get(reservation.date).push(reservation)
   }
-  return set
+  const maxPerDay = Number(selectedSpace.value?.maxReservationsPerDay) || 0
+  const result = new Map()
+  for (const [date, list] of byDate) {
+    const intervals = list
+      .map((r) => [
+        Math.max(DAY_WINDOW_START_MIN, toMinutes(r.startTime)),
+        Math.min(DAY_WINDOW_END_MIN, toMinutes(r.endTime)),
+      ])
+      .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b) && a < b)
+      .sort((x, y) => x[0] - y[0])
+    let cursor = DAY_WINDOW_START_MIN
+    let longestGap = 0
+    for (const [a, b] of intervals) {
+      longestGap = Math.max(longestGap, a - cursor)
+      cursor = Math.max(cursor, b)
+    }
+    longestGap = Math.max(longestGap, DAY_WINDOW_END_MIN - cursor)
+    const full = (maxPerDay > 0 && list.length >= maxPerDay) || longestGap < MIN_FREE_GAP_MINUTES
+    result.set(date, full ? 'full' : 'partial')
+  }
+  return result
 })
 
 const calendarDays = computed(() => {
@@ -96,7 +142,7 @@ const calendarDays = computed(() => {
       isCurrentMonth: date.getMonth() === month.getMonth(),
       isToday: key === todayKey.value,
       isPast: key < todayKey.value,
-      isBusy: busyDateKeys.value.has(key),
+      status: dayStatusByDate.value.get(key) ?? 'free',
       isSelected: key === reservationForm.date,
     }
   })
@@ -190,6 +236,7 @@ async function loadSpaceReservations() {
 }
 
 function openReserveModal(space) {
+  if (isUnderMaintenance(space)) return
   selectedSpace.value = space
   reservationForm.date = ''
   reservationForm.startTime = ''
@@ -208,9 +255,18 @@ function closeReserveModal() {
   isBusyHoursModalOpen.value = false
 }
 
+const busyHoursDayStatus = computed(() => dayStatusByDate.value.get(busyHoursDate.value) ?? 'free')
+
 function selectCalendarDate(dateKey) {
-  reservationForm.date = dateKey
+  reservationError.value = ''
+  if (dateKey < todayKey.value) {
+    reservationError.value = t('socialSpaces.pastDayHint')
+    return
+  }
   busyHoursDate.value = dateKey
+  if ((dayStatusByDate.value.get(dateKey) ?? 'free') !== 'full') {
+    reservationForm.date = dateKey
+  }
   isBusyHoursModalOpen.value = true
 }
 
@@ -233,7 +289,7 @@ async function onReserveSubmit() {
   reservationError.value = ''
   isSubmittingReservation.value = true
   try {
-    await reservationsApi.add({
+    const created = await reservationsApi.add({
       spaceId: selectedSpace.value.id,
       residentId: profile.value.id,
       residentName: profile.value.name,
@@ -242,6 +298,12 @@ async function onReserveSubmit() {
       startTime: reservationForm.startTime,
       endTime: reservationForm.endTime,
     })
+    confirmation.value = {
+      space: selectedSpace.value.name,
+      date: formatFriendlyDate(created?.date ?? reservationForm.date),
+      start: formatTimeDisplay(created?.startTime ?? reservationForm.startTime),
+      end: formatTimeDisplay(created?.endTime ?? reservationForm.endTime),
+    }
     isReserveModalOpen.value = false
     selectedSpace.value = null
   } catch (error) {
@@ -253,15 +315,32 @@ async function onReserveSubmit() {
       reservationError.value = t('app.reservationTimeInvalid')
       return
     }
-    if (error?.code === 'RESERVATION_OVERLAP') {
-      reservationError.value = t('app.reservationOverlap')
+    const conflictMessages = {
+      RESERVATION_OVERLAP: 'socialSpaces.errOverlap',
+      RESERVATION_CAPACITY_EXCEEDED: 'socialSpaces.errCapacity',
+      RESERVATION_DAY_FULL: 'socialSpaces.errDayFull',
+      SPACE_UNDER_MAINTENANCE: 'socialSpaces.errMaintenance',
+      RESERVATION_TOO_MANY_GUESTS: 'socialSpaces.errTooManyGuests',
+    }
+    if (conflictMessages[error?.code] || error?.status === 409) {
+      reservationError.value = t(conflictMessages[error?.code] ?? 'socialSpaces.errOverlap')
       await loadSpaceReservations()
+      if (error?.code === 'SPACE_UNDER_MAINTENANCE') void loadSpaces()
       return
     }
     reservationError.value = t('auth.genericError')
   } finally {
     isSubmittingReservation.value = false
   }
+}
+
+function closeConfirmation() {
+  confirmation.value = null
+}
+
+function goToGuests() {
+  confirmation.value = null
+  router.push({ name: AppRouteNames.APP_RESIDENT_GENERATION })
 }
 </script>
 
@@ -289,8 +368,10 @@ async function onReserveSubmit() {
             v-for="space in spaces"
             :key="space.id"
             class="resident-space"
+            :class="{ 'resident-space--maintenance': isUnderMaintenance(space) }"
             tabindex="0"
             role="button"
+            :aria-disabled="isUnderMaintenance(space)"
             @click="openReserveModal(space)"
             @keyup.enter="openReserveModal(space)"
             @keyup.space.prevent="openReserveModal(space)"
@@ -312,7 +393,18 @@ async function onReserveSubmit() {
             <p v-if="space.capacity" class="resident-space__capacity">
               {{ t('app.spaceCapacityLabel') }}: {{ space.capacity }}
             </p>
-            <span class="resident-space__cta">{{ t('app.reserveAction') }}</span>
+            <p v-if="space.rules" class="resident-space__rules">
+              <strong>{{ t('socialSpaces.rulesLabel') }}:</strong> {{ space.rules }}
+            </p>
+            <span
+              v-if="isUnderMaintenance(space)"
+              class="resident-space__cta resident-space__cta--maintenance"
+              :title="t('socialSpaces.maintenanceBlocked')"
+            >
+              <i class="pi pi-wrench" aria-hidden="true" />
+              {{ t('socialSpaces.maintenanceBadge') }}
+            </span>
+            <span v-else class="resident-space__cta">{{ t('app.reserveAction') }}</span>
           </li>
         </ul>
       </section>
@@ -379,20 +471,22 @@ async function onReserveSubmit() {
                 class="calendar__day"
                 :class="{
                   'calendar__day--out': !day.isCurrentMonth,
-                  'calendar__day--busy': day.isBusy,
+                  'calendar__day--partial': day.status === 'partial',
+                  'calendar__day--full': day.status === 'full',
                   'calendar__day--selected': day.isSelected,
                   'calendar__day--today': day.isToday,
                   'calendar__day--past': day.isPast,
                 }"
-                :aria-label="day.key"
+                :aria-label="`${day.key} · ${t(day.status === 'full' ? 'socialSpaces.legendFull' : day.status === 'partial' ? 'socialSpaces.legendPartial' : 'socialSpaces.legendFree')}`"
                 :aria-pressed="day.isSelected"
+                :disabled="day.isPast"
                 @click="selectCalendarDate(day.key)"
               >
                 <span class="calendar__day-number">{{ day.label }}</span>
                 <span
-                  v-if="day.isBusy"
+                  v-if="day.status !== 'free'"
                   class="calendar__day-dot"
-                  :title="t('app.calendarBusyLegend')"
+                  :title="t(day.status === 'full' ? 'socialSpaces.legendFull' : 'socialSpaces.legendPartial')"
                   aria-hidden="true"
                 />
               </button>
@@ -400,8 +494,16 @@ async function onReserveSubmit() {
 
             <div class="calendar__legend">
               <span class="calendar__legend-item">
+                <span class="calendar__legend-dot calendar__legend-dot--free" />
+                {{ t('socialSpaces.legendFree') }}
+              </span>
+              <span class="calendar__legend-item">
                 <span class="calendar__legend-dot calendar__legend-dot--busy" />
-                {{ t('app.calendarBusyLegend') }}
+                {{ t('socialSpaces.legendPartial') }}
+              </span>
+              <span class="calendar__legend-item">
+                <span class="calendar__legend-dot calendar__legend-dot--full" />
+                {{ t('socialSpaces.legendFull') }}
               </span>
               <span class="calendar__legend-item">
                 <span class="calendar__legend-dot calendar__legend-dot--today" />
@@ -409,6 +511,9 @@ async function onReserveSubmit() {
               </span>
             </div>
 
+            <p v-if="selectedSpace?.rules" class="calendar__hint">
+              <strong>{{ t('socialSpaces.rulesLabel') }}:</strong> {{ selectedSpace.rules }}
+            </p>
             <p v-if="!reservationForm.date" class="calendar__hint">
               {{ t('app.calendarSelectDateHint') }}
             </p>
@@ -500,6 +605,9 @@ async function onReserveSubmit() {
           {{ busyHoursDateLabel }}
         </p>
 
+        <p v-if="busyHoursDayStatus === 'full'" class="resident-modal__error" role="alert">
+          {{ t('socialSpaces.dayFullHint') }}
+        </p>
         <p
           v-if="!busyHoursForDate.length"
           class="resident-modal__day-empty resident-modal__day-empty--happy"
@@ -524,6 +632,36 @@ async function onReserveSubmit() {
           :confirm-label="t('app.busyHoursContinueAction')"
           align="center"
           @confirm="confirmDateFromBusyModal"
+        />
+      </section>
+    </div>
+
+    <div
+      v-if="confirmation"
+      class="resident-modal-backdrop resident-modal-backdrop--top bf-modal-backdrop"
+      role="presentation"
+      @click.self="closeConfirmation"
+    >
+      <section
+        class="resident-modal resident-modal--small bf-modal-panel"
+        role="alertdialog"
+        aria-modal="true"
+        :aria-label="t('socialSpaces.confirmTitle')"
+      >
+        <h3 class="resident-modal__title resident-modal__title--success">
+          <i class="pi pi-check-circle" aria-hidden="true" />
+          {{ t('socialSpaces.confirmTitle') }}
+        </h3>
+        <p class="resident-modal__confirm-body" aria-live="polite">
+          {{ t('socialSpaces.confirmBody', confirmation) }}
+        </p>
+        <p class="calendar__hint">{{ t('socialSpaces.confirmGuestsHint') }}</p>
+        <ConfirmActions
+          :cancel-label="t('socialSpaces.confirmClose')"
+          :confirm-label="t('socialSpaces.confirmGoToGuests')"
+          align="center"
+          @cancel="closeConfirmation"
+          @confirm="goToGuests"
         />
       </section>
     </div>
@@ -988,14 +1126,32 @@ async function onReserveSubmit() {
   font-weight: 600;
 }
 
-.calendar__day--busy:not(.calendar__day--selected) {
+.calendar__day--partial:not(.calendar__day--selected) {
   background: #fff3e0;
   color: #e65100;
 }
 
-.calendar__day--busy:hover:not(.calendar__day--selected) {
+.calendar__day--partial:hover:not(.calendar__day--selected) {
   background: #ffe8cc;
   color: #e65100;
+}
+
+.calendar__day--full:not(.calendar__day--selected) {
+  background: #fdecea;
+  color: #b42318;
+}
+
+.calendar__day--full:hover:not(.calendar__day--selected) {
+  background: #fad4cf;
+  color: #b42318;
+}
+
+.calendar__day--full .calendar__day-dot {
+  background: #b42318;
+}
+
+.calendar__day:disabled {
+  cursor: not-allowed;
 }
 
 .calendar__day--selected {
@@ -1048,6 +1204,53 @@ async function onReserveSubmit() {
 
 .calendar__legend-dot--busy {
   background: #e65100;
+}
+
+.calendar__legend-dot--free {
+  background: #ffffff;
+  border: 1.5px solid #c7c7cc;
+}
+
+.calendar__legend-dot--full {
+  background: #b42318;
+}
+
+.resident-space__rules {
+  margin: 0;
+  color: #6e6e73;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.resident-space--maintenance {
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
+.resident-space__cta--maintenance,
+.resident-space:hover .resident-space__cta--maintenance {
+  background: #fff3e0;
+  color: #b54708;
+  gap: 0.35rem;
+}
+
+.resident-modal__title--success {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #1b7a3d;
+}
+
+.resident-modal__confirm-body {
+  margin: 0.25rem 0 0.25rem;
+  font-size: 0.95rem;
+  color: #1d1d1f;
+  text-transform: none;
 }
 
 .calendar__legend-dot--today {

@@ -15,6 +15,16 @@ import { parseDepartmentNumber } from '@/shared/domain/departmentNumber.js'
 import { todayYmd } from '@/finances/domain/billingCycle.js'
 
 const USERS_BASE = '/api/v1/users'
+const RESIDENTS_IMPORT_BASE = '/api/v1/residents/import'
+
+/** Invite link the admin shares with the resident (no email provider is integrated). */
+export function residentInviteLink(resident) {
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : ''
+  const params = new URLSearchParams({ invite: '1' })
+  if (resident?.inviteToken) params.set('token', resident.inviteToken)
+  else params.set('code', resident?.code || '')
+  return `${baseUrl}/login?${params.toString()}`
+}
 
 /**
  * Residents bounded-context API.
@@ -86,6 +96,38 @@ export const residentsApi = {
     const { data: created } = await apiClient.post(USERS_BASE, newResident)
     await refreshSubscriptionFromApi().catch(() => {})
     return publicResident(created)
+  },
+
+  /**
+   * US016: upload an .xlsx/.csv roster. The API validates every row first and rejects the whole file
+   * with a per-row report (error.payload.errors) when any required cell is invalid.
+   * @param {File} file
+   * @returns {Promise<{ created: number, totalRows: number, residents: ReturnType<typeof publicResident>[] }>}
+   */
+  async importFile(file) {
+    if (!file) throw apiError('FILE_REQUIRED')
+    const form = new FormData()
+    form.append('file', file, file.name)
+    const { data } = await apiClient.post(`${RESIDENTS_IMPORT_BASE}`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000,
+    })
+    await refreshSubscriptionFromApi().catch(() => {})
+    const residents = Array.isArray(data?.residents) ? data.residents.map(publicResident) : []
+    return {
+      created: Number(data?.created ?? residents.length),
+      totalRows: Number(data?.totalRows ?? residents.length),
+      residents,
+    }
+  },
+
+  /** Template download (authenticated) → Blob. @param {'xlsx' | 'csv'} format */
+  async downloadImportTemplate(format = 'xlsx') {
+    const response = await apiClient.get(`${RESIDENTS_IMPORT_BASE}/template`, {
+      params: { format },
+      responseType: 'blob',
+    })
+    return response.data
   },
 
   async setBillFromNextMonth(id, billFromNextMonth) {

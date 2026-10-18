@@ -3,7 +3,8 @@
  * Represents an official announcement (comunicado) published by an admin.
  *
  * duration  – number of days the announcement stays active (7 | 15 | 30)
- * expiresAt – ISO date-string computed from createdAt + duration days
+ * expiresAt – ISO date-string = createdAt + duration days (calculado por el servidor, RF019;
+ *             el cálculo local es solo un fallback para datos antiguos)
  */
 export class Announcement {
   constructor({

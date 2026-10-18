@@ -8,6 +8,8 @@ import Column from 'primevue/column'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 import { residentExtraChargesApi } from '../../../finances/infrastructure/residentExtraChargesApi.js'
 import { useFinancesStore } from '../../../finances/application/financesStore.js'
+import { financesApi } from '../../../finances/infrastructure/financesApi.js'
+import DebtTrafficLightGrid from '../../../finances/presentation/components/DebtTrafficLightGrid.vue'
 import {
   applyLateFeeToReceipt,
   computeChargeDates,
@@ -126,7 +128,101 @@ onMounted(async () => {
   resetChargeForm()
   extraCharges.value = await residentExtraChargesApi.list().catch(() => [])
   uiState.value.isLoaded = true
+  await Promise.all([loadBillingAlerts(), loadCalendar()])
 })
+
+// --- RF021 / US021: alertas de facturación + generación manual (TS003) ---
+const billingAlerts = ref([])
+const isGeneratingReceipts = ref(false)
+const generateMessage = ref('')
+const generateTone = ref('ok')
+
+async function loadBillingAlerts() {
+  billingAlerts.value = await financesApi.getBillingAlerts().catch(() => [])
+}
+
+function billingAlertMonthLabel(alert) {
+  return chargeMonthLabel(alert?.month) || String(alert?.month ?? '')
+}
+
+function focusChargeSettings(alert) {
+  if (alert?.month) resetChargeForm(alert.month)
+  document.getElementById('finance-settings-heading')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  setTimeout(() => document.getElementById('chargeAmount')?.querySelector('input')?.focus(), 350)
+}
+
+async function onGenerateReceipts() {
+  if (isGeneratingReceipts.value) return
+  isGeneratingReceipts.value = true
+  generateMessage.value = ''
+  const month = store.currentBillingMonthKey.value
+  try {
+    const result = await store.generateMonthlyReceipts()
+    const label = chargeMonthLabel(result?.month || month)
+    generateTone.value = 'ok'
+    generateMessage.value = Number(result?.created) > 0
+      ? t('financeOps.generateDone', {
+          created: result.created,
+          month: label,
+          already: Number(result.alreadyBilled) || 0,
+        })
+      : t('financeOps.generateNone', { month: label })
+    await loadCalendar()
+  } catch (e) {
+    generateTone.value = 'error'
+    generateMessage.value = e?.code === 'MISSING_MONTHLY_CHARGE'
+      ? t('financeOps.generateMissing', { month: chargeMonthLabel(month) })
+      : t('financeOps.generateError')
+  } finally {
+    isGeneratingReceipts.value = false
+    await loadBillingAlerts()
+  }
+}
+
+// --- RF029 / US029: semáforo residente × mes ---
+const calendar = ref({ months: [], residents: [], dueSoonDays: 5 })
+const calendarLoading = ref(false)
+const calendarError = ref('')
+
+async function loadCalendar() {
+  calendarLoading.value = true
+  calendarError.value = ''
+  try {
+    calendar.value = await financesApi.getPaymentCalendar({ months: 6 })
+  } catch {
+    calendarError.value = t('financeOps.trafficLoadError')
+  } finally {
+    calendarLoading.value = false
+  }
+}
+
+const filteredCalendarRows = computed(() => {
+  const rows = calendar.value.residents || []
+  const query = residentsSearch.value.trim().toLowerCase()
+  if (!query) return rows
+  return rows.filter((row) => residentSearchText(row).includes(query))
+})
+
+const calendarOverdueCount = computed(
+  () => (calendar.value.residents || []).filter((row) => row.hasOverdue).length,
+)
+
+// --- RF022: recibo descargable de meses pagados ---
+const downloadingReceiptId = ref('')
+const downloadError = ref('')
+
+async function downloadPaidReceipt(receipt) {
+  if (!receipt?.id || downloadingReceiptId.value) return
+  downloadingReceiptId.value = String(receipt.id)
+  downloadError.value = ''
+  try {
+    await financesApi.downloadReceiptPdf(receipt.id)
+  } catch {
+    downloadError.value = t('financeOps.downloadError')
+  } finally {
+    downloadingReceiptId.value = ''
+  }
+}
 
 function receiptPayable(receipt) {
   return (
@@ -260,6 +356,7 @@ async function onSaveCharge() {
     })
     await persistCharges([nextCharge, ...editSettings.value.monthlyCharges])
     resetChargeForm(month)
+    await loadBillingAlerts()
     alert(t('financeAdmin.chargeSaved'))
   } catch (e) {
     chargeError.value = e.message
@@ -384,6 +481,25 @@ const residentsStatusMonthLabel = computed(() =>
 <template>
   <div v-if="uiState.isLoaded" class="app-view">
     <div class="finance-page">
+      <div
+        v-for="alertItem in billingAlerts"
+        :key="`${alertItem.code}-${alertItem.month}`"
+        class="billing-alert"
+        role="alert"
+      >
+        <i class="pi pi-exclamation-triangle billing-alert__icon" aria-hidden="true" />
+        <div class="billing-alert__text">
+          <strong>{{ t('financeOps.billingAlertTitle') }}</strong>
+          <span>{{ t('financeOps.billingAlertBody', { month: billingAlertMonthLabel(alertItem) }) }}</span>
+        </div>
+        <Button
+          type="button"
+          class="billing-alert__btn"
+          :label="t('financeOps.billingAlertAction')"
+          @click="focusChargeSettings(alertItem)"
+        />
+      </div>
+
       <section class="finance-panel import-panel" aria-labelledby="finance-settings-heading">
         <div class="mgmt-panel-toolbar">
           <h2 id="finance-settings-heading" class="finance-panel__section-title finance-panel__section-title--plain">
@@ -455,6 +571,25 @@ const residentsStatusMonthLabel = computed(() =>
           />
         </div>
 
+        <div class="settings-billing">
+          <p class="settings-billing__hint">{{ t('financeOps.generateHint') }}</p>
+          <p
+            v-if="generateMessage"
+            class="settings-billing__msg"
+            :class="{ 'settings-billing__msg--error': generateTone === 'error' }"
+            role="status"
+          >
+            {{ generateMessage }}
+          </p>
+          <Button
+            type="button"
+            class="import-dropzone__btn"
+            icon="pi pi-file-plus"
+            :label="t('financeOps.generateNow', { month: residentsStatusMonthLabel })"
+            :loading="isGeneratingReceipts"
+            @click="onGenerateReceipts"
+          />
+        </div>
       </section>
 
       <section
@@ -526,6 +661,26 @@ const residentsStatusMonthLabel = computed(() =>
               </template>
             </Column>
           </DataTable>
+      </section>
+
+      <section class="finance-panel import-panel" aria-labelledby="finance-traffic-heading">
+        <div class="mgmt-panel-toolbar">
+          <h2 id="finance-traffic-heading" class="finance-panel__section-title">
+            <i class="pi pi-circle-fill traffic-title-icon" aria-hidden="true" />
+            {{ t('financeOps.trafficTitle') }}
+            <span v-if="calendarOverdueCount" class="finance-panel__title-month traffic-title-count">
+              {{ t('financeOps.trafficOverdueCount', { n: calendarOverdueCount }) }}
+            </span>
+          </h2>
+        </div>
+        <p class="traffic-hint">{{ t('financeOps.trafficHint') }}</p>
+        <DebtTrafficLightGrid
+          :months="calendar.months"
+          :residents="filteredCalendarRows"
+          :due-soon-days="calendar.dueSoonDays"
+          :loading="calendarLoading"
+          :error="calendarError"
+        />
       </section>
 
       <div class="finance-split">
@@ -688,7 +843,23 @@ const residentsStatusMonthLabel = computed(() =>
                 <span>{{ rc.monthLabel }}</span>
                 <strong>{{ nfPen(receiptPayable(rc)) }}</strong>
               </div>
-              <span class="small-badge status-paid">{{ t('financeAdmin.statusPaid') }}</span>
+              <div class="rc-actions">
+                <span class="small-badge status-paid">{{ t('financeAdmin.statusPaid') }}</span>
+                <button
+                  type="button"
+                  class="rc-download"
+                  :disabled="downloadingReceiptId === String(rc.id)"
+                  :aria-label="`${t('financeOps.downloadReceipt')} · ${rc.monthLabel}`"
+                  @click="downloadPaidReceipt(rc)"
+                >
+                  <i class="pi pi-download" aria-hidden="true" />
+                  {{
+                    downloadingReceiptId === String(rc.id)
+                      ? t('financeOps.downloading')
+                      : t('financeOps.downloadReceipt')
+                  }}
+                </button>
+              </div>
             </li>
             <li v-for="item in historyExtraCharges" :key="item.id">
               <div class="rc-info">
@@ -703,6 +874,7 @@ const residentsStatusMonthLabel = computed(() =>
             <i class="pi pi-inbox" aria-hidden="true" />
             <span>{{ t('financeAdmin.historyEmptyPaid') }}</span>
           </div>
+          <p v-if="downloadError" class="settings-error" role="alert">{{ downloadError }}</p>
         </div>
       </section>
       </div>
@@ -799,6 +971,112 @@ const residentsStatusMonthLabel = computed(() =>
 </template>
 
 <style scoped>
+.billing-alert {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+  padding: 0.9rem 1.1rem;
+  border-radius: 14px;
+  background: #fff4e5;
+  border: 1px solid #ffd8a8;
+  color: #7a3e00;
+}
+
+.billing-alert__icon {
+  font-size: 1.15rem;
+  color: #e65100;
+}
+
+.billing-alert__text {
+  flex: 1;
+  min-width: 14rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.billing-alert__btn {
+  flex-shrink: 0;
+}
+
+.settings-billing {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.settings-billing__hint {
+  flex: 1;
+  min-width: 14rem;
+  margin: 0;
+  font-size: 0.78rem;
+  color: #6e6e73;
+}
+
+.settings-billing__msg {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #1b7a3d;
+}
+
+.settings-billing__msg--error {
+  color: #b42318;
+}
+
+.traffic-hint {
+  margin: -0.35rem 0 0.85rem;
+  font-size: 0.8125rem;
+  color: #6e6e73;
+}
+
+.traffic-title-icon {
+  color: #ff3b30;
+  font-size: 0.8rem;
+}
+
+.traffic-title-count {
+  color: #b42318;
+}
+
+.rc-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.rc-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+  color: #1d1d1f;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.rc-download:hover:not(:disabled) {
+  background: #f5f5f7;
+}
+
+.rc-download:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
 .app-view {
   padding: 1.75rem 1.5rem 1.25rem;
   width: 100%;

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Button from 'primevue/button'
 import Column from 'primevue/column'
@@ -18,6 +18,7 @@ import {
 import { adminManagementExpensesApi } from '@/finances/infrastructure/adminManagementExpensesApi.js'
 import { sharedUtilityServicesApi } from '@/finances/infrastructure/sharedUtilityServicesApi.js'
 import { useFinancesStore } from '@/finances/application/financesStore.js'
+import { financesApi } from '@/finances/infrastructure/financesApi.js'
 
 const { t, locale } = useI18n()
 const { state, loadData } = useFinancesStore()
@@ -53,6 +54,71 @@ const form = reactive({
   amount: null,
   purchaseDate: '',
   invoicePhotoUrl: '',
+})
+
+// US030 "Registro con monto inválido": campo en rojo + mensaje bajo el campo.
+const fieldErrors = reactive({ name: '', amount: '', purchaseDate: '' })
+
+function clearFieldErrors() {
+  fieldErrors.name = ''
+  fieldErrors.amount = ''
+  fieldErrors.purchaseDate = ''
+}
+
+watch(() => form.name, () => { fieldErrors.name = '' })
+watch(() => form.amount, () => { fieldErrors.amount = '' })
+watch(() => form.purchaseDate, () => { fieldErrors.purchaseDate = '' })
+
+// RF030: balance neto del mes seleccionado (ingresos − egresos), calculado en el servidor.
+function currentMonthInput() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+const balanceMonth = ref(currentMonthInput())
+const monthBalance = ref({ month: '', income: 0, expenses: 0, net: 0 })
+const balanceLoading = ref(false)
+const balanceError = ref('')
+
+function monthKeyOf(value) {
+  const raw = String(value ?? '').trim()
+  return raw.length >= 7 ? raw.slice(0, 7) : ''
+}
+
+/** Respaldo local (modo demo sin backend): mismo criterio que el gráfico Ingresos vs Egresos. */
+function localMonthBalance(month) {
+  const income = state.receipts
+    .filter((r) => r.status === 'Paid' && monthKeyOf(r.issueDate) === month)
+    .reduce((sum, r) => sum + receiptTotalPaid(r), 0)
+  const spent = expenses.value
+    .filter((e) => monthKeyOf(e.purchaseDate) === month)
+    .reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
+  return { month, income, expenses: spent, net: income - spent }
+}
+
+async function loadMonthBalance() {
+  const month = monthKeyOf(balanceMonth.value) || currentMonthInput()
+  balanceLoading.value = true
+  balanceError.value = ''
+  try {
+    monthBalance.value = await financesApi.getMonthlyBalance(month)
+  } catch {
+    monthBalance.value = localMonthBalance(month)
+  } finally {
+    balanceLoading.value = false
+  }
+}
+
+watch(balanceMonth, () => loadMonthBalance())
+
+const balanceMonthLabel = computed(() => {
+  const [y, m] = monthKeyOf(balanceMonth.value).split('-').map(Number)
+  if (!y || !m) return ''
+  const label = new Date(y, m - 1, 1).toLocaleDateString(locale.value === 'es' ? 'es-PE' : 'en-US', {
+    month: 'long',
+    year: 'numeric',
+  })
+  return label.charAt(0).toUpperCase() + label.slice(1)
 })
 
 const serviceForm = reactive({
@@ -246,6 +312,7 @@ function resetForm() {
   form.purchaseDate = ''
   form.invoicePhotoUrl = ''
   submitError.value = ''
+  clearFieldErrors()
 }
 
 function openModal() {
@@ -336,7 +403,11 @@ async function submitCost() {
       ? Number.NaN
       : Number(form.amount)
 
-  if (!form.name.trim() || !Number.isFinite(amt) || !String(form.purchaseDate).trim()) {
+  clearFieldErrors()
+  if (!form.name.trim()) fieldErrors.name = t('financeOps.expenseNameRequired')
+  if (!Number.isFinite(amt) || amt <= 0) fieldErrors.amount = t('financeOps.expenseAmountInvalid')
+  if (!String(form.purchaseDate).trim()) fieldErrors.purchaseDate = t('financeOps.expenseDateRequired')
+  if (fieldErrors.name || fieldErrors.amount || fieldErrors.purchaseDate) {
     submitError.value = t('collectionsMgmt.requiredCostFields')
     return
   }
@@ -351,8 +422,19 @@ async function submitCost() {
     })
     closeModal()
     await loadCosts()
+    await loadMonthBalance()
   } catch (err) {
-    if (err?.code === 'ADMIN_EXPENSE_FIELDS_REQUIRED') {
+    const field = err?.field || err?.payload?.field
+    if (err?.code === 'ADMIN_EXPENSE_AMOUNT_INVALID' || field === 'amount') {
+      fieldErrors.amount = t('financeOps.expenseAmountInvalid')
+      submitError.value = t('collectionsMgmt.requiredCostFields')
+    } else if (err?.code === 'ADMIN_EXPENSE_NAME_REQUIRED' || field === 'name') {
+      fieldErrors.name = t('financeOps.expenseNameRequired')
+      submitError.value = t('collectionsMgmt.requiredCostFields')
+    } else if (err?.code === 'ADMIN_EXPENSE_DATE_INVALID' || field === 'purchaseDate') {
+      fieldErrors.purchaseDate = t('financeOps.expenseDateRequired')
+      submitError.value = t('collectionsMgmt.requiredCostFields')
+    } else if (err?.code === 'ADMIN_EXPENSE_FIELDS_REQUIRED') {
       submitError.value = t('collectionsMgmt.requiredCostFields')
     } else {
       submitError.value = t('collectionsMgmt.saveCostError')
@@ -472,6 +554,7 @@ async function confirmDelete() {
     if (current.kind === 'expense') {
       await adminManagementExpensesApi.remove(current.row.id)
       await loadCosts()
+      await loadMonthBalance()
     } else if (current.kind === 'service') {
       await sharedUtilityServicesApi.remove(current.row.id)
       await Promise.all([loadSharedServices(), loadData()])
@@ -489,11 +572,12 @@ async function confirmDelete() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   loadData()
-  loadCosts()
   loadSharedServices()
   loadFixedRecipients()
+  await loadCosts()
+  await loadMonthBalance()
 })
 </script>
 
@@ -551,6 +635,39 @@ onMounted(() => {
           <p class="collections-hero__hint">{{ t('collectionsMgmt.amountHint') }}</p>
         </section>
 
+        <section class="collections-net" aria-labelledby="collections-net-heading">
+          <header class="collections-net__head">
+            <h2 id="collections-net-heading" class="collections-hero__title">
+              {{ t('financeOps.netBalanceTitle') }}
+            </h2>
+            <label class="collections-net__month">
+              <span>{{ t('financeOps.netBalanceMonth') }}</span>
+              <input v-model="balanceMonth" type="month" class="collections-net__input" />
+            </label>
+          </header>
+          <p
+            class="collections-hero__amount"
+            :class="{ 'collections-net__amount--negative': monthBalance.net < 0 }"
+            aria-live="polite"
+          >
+            {{ balanceLoading ? '…' : nfCurrency(monthBalance.net) }}
+          </p>
+          <ul class="collections-hero__rows">
+            <li class="collections-hero__row">
+              <span class="collections-hero__row-label">{{ t('financeOps.netIncome') }}</span>
+              <span class="collections-hero__row-value">{{ nfCurrency(monthBalance.income) }}</span>
+            </li>
+            <li class="collections-hero__row">
+              <span class="collections-hero__row-label">{{ t('financeOps.netExpenses') }}</span>
+              <span class="collections-hero__row-value">− {{ nfCurrency(monthBalance.expenses) }}</span>
+            </li>
+          </ul>
+          <p class="collections-hero__hint">
+            {{ t('financeOps.netBalanceHint', { month: balanceMonthLabel }) }}
+          </p>
+          <p v-if="balanceError" class="collections-form__error" role="alert">{{ balanceError }}</p>
+        </section>
+
         <section class="collections-panel" aria-labelledby="collections-costs-heading">
           <header class="collections-panel__head">
             <h2 id="collections-costs-heading" class="collections-panel__title">
@@ -581,8 +698,14 @@ onMounted(() => {
                 v-model="form.name"
                 class="collections-form__input"
                 autocomplete="off"
+                :invalid="Boolean(fieldErrors.name)"
+                :aria-invalid="Boolean(fieldErrors.name)"
+                aria-describedby="collections-cost-name-error"
                 fluid
               />
+              <small v-if="fieldErrors.name" id="collections-cost-name-error" class="collections-form__field-error">
+                {{ fieldErrors.name }}
+              </small>
             </div>
             <div class="collections-form__field">
               <label for="collections-cost-amount">{{ t('collectionsMgmt.priceLabel') }}</label>
@@ -593,8 +716,14 @@ onMounted(() => {
                 :min="0"
                 mode="decimal"
                 :maxFractionDigits="2"
+                :invalid="Boolean(fieldErrors.amount)"
+                :aria-invalid="Boolean(fieldErrors.amount)"
+                aria-describedby="collections-cost-amount-error"
                 fluid
               />
+              <small v-if="fieldErrors.amount" id="collections-cost-amount-error" class="collections-form__field-error">
+                {{ fieldErrors.amount }}
+              </small>
             </div>
             <div class="collections-form__field">
               <label for="collections-cost-date">{{ t('collectionsMgmt.purchaseDateLabel') }}</label>
@@ -603,8 +732,13 @@ onMounted(() => {
                 v-model="form.purchaseDate"
                 class="collections-form__input collections-form__input--date"
                 type="date"
+                :invalid="Boolean(fieldErrors.purchaseDate)"
+                :aria-invalid="Boolean(fieldErrors.purchaseDate)"
                 fluid
               />
+              <small v-if="fieldErrors.purchaseDate" class="collections-form__field-error">
+                {{ fieldErrors.purchaseDate }}
+              </small>
             </div>
             <div class="collections-form__field collections-form__field--photo">
               <span class="collections-form__photo-label">{{ t('collectionsMgmt.invoiceLabel') }}</span>
@@ -1427,6 +1561,51 @@ onMounted(() => {
 .collections-form__error {
   margin: 0;
   font-size: 0.8125rem;
+  color: #b42318;
+}
+
+.collections-form__field-error {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.75rem;
+  color: #b42318;
+}
+
+.collections-net {
+  max-width: 26rem;
+  padding: 1.35rem 1.4rem 1.3rem;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.collections-net__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.collections-net__month {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.72rem;
+  color: #6e6e73;
+}
+
+.collections-net__input {
+  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  font: inherit;
+  font-size: 0.8125rem;
+  color: #1d1d1f;
+  background: #fff;
+}
+
+.collections-net__amount--negative {
   color: #b42318;
 }
 

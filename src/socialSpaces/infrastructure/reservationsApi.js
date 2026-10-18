@@ -4,6 +4,7 @@ import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js
 import {
   apiError,
   publicReservation,
+  reservationInviteExpiresAtMs,
   reservationsOverlap,
   timeToMinutes,
 } from '@/shared/infrastructure/api/utils.js'
@@ -13,29 +14,63 @@ import {
  *
  * Owns: time-bounded reservations residents make against published spaces.
  * Errors expose `error.code`: 'RESERVATION_FIELDS_REQUIRED',
- * 'RESERVATION_TIME_INVALID', 'RESERVATION_OVERLAP', 'RESERVATION_NOT_FOUND', 'GUEST_NOT_FOUND'.
+ * 'RESERVATION_TIME_INVALID', 'RESERVATION_OVERLAP' (HTTP 409), 'RESERVATION_CAPACITY_EXCEEDED' (409),
+ * 'RESERVATION_DAY_FULL' (409), 'SPACE_UNDER_MAINTENANCE' (409), 'RESERVATION_CANCELLED' (409),
+ * 'RESERVATION_TOO_MANY_GUESTS', 'RESERVATION_NOT_FOUND', 'GUEST_NOT_FOUND',
+ * 'GUEST_PASS_EXPIRED' / 'GUEST_PASS_CANCELLED' (HTTP 410), 'GUEST_PASS_NOT_FOUND'.
+ *
+ * Reservations carry `status` ('CONFIRMED' | 'CANCELLED'); cancelled ones no longer block the slot.
  */
 const MAX_RESERVATION_GUESTS = 5
 
+const isActive = (r) => String(r?.status ?? 'CONFIRMED').toUpperCase() !== 'CANCELLED'
+
+/** Server-side pass status, recomputed locally for the offline mock (no guest-passes endpoint). */
+function localPassStatus(r) {
+  if (!isActive(r)) return 'CANCELLED'
+  const exp = reservationInviteExpiresAtMs(r)
+  if (exp == null || Date.now() >= exp) return 'EXPIRED'
+  return 'VALID'
+}
+
 export const reservationsApi = {
+  /** Active (non-cancelled) reservations of a space — used for availability. */
   async listBySpace(spaceId) {
     const { data } = await apiClient.get('/reservations', {
       params: withOwnerParams({ spaceId }),
     })
-    return Array.isArray(data) ? data.map((r) => publicReservation(r, { omitInviteToken: true })) : []
+    return Array.isArray(data)
+      ? data.filter(isActive).map((r) => publicReservation(r, { omitInviteToken: true }))
+      : []
   },
 
-  async listByResident(residentId) {
+  /**
+   * @param {string} residentId
+   * @param {{ includeCancelled?: boolean }} [options] includeCancelled → full history (US018).
+   */
+  async listByResident(residentId, options = {}) {
+    const includeCancelled = Boolean(options.includeCancelled)
     const { data } = await apiClient.get('/reservations', {
-      params: withOwnerParams({ residentId }),
+      params: withOwnerParams({ residentId, ...(includeCancelled ? { includeCancelled: true } : {}) }),
     })
-    return Array.isArray(data) ? data.map(publicReservation) : []
+    const rows = Array.isArray(data) ? data : []
+    return (includeCancelled ? rows : rows.filter(isActive)).map(publicReservation)
   },
 
-  /** All reservations for the active admin (Generation / oversight). */
+  /** All active reservations for the active admin (Generation / oversight). */
   async listAllForAdmin() {
     const { data } = await apiClient.get('/reservations', { params: withOwnerParams() })
-    return Array.isArray(data) ? data.map((r) => publicReservation(r, { omitInviteToken: true })) : []
+    return Array.isArray(data)
+      ? data.filter(isActive).map((r) => publicReservation(r, { omitInviteToken: true }))
+      : []
+  },
+
+  /** Cancels (soft) a reservation: it stays in the history and frees the slot. */
+  async cancel(reservationId) {
+    const cleanId = String(reservationId ?? '').trim()
+    if (!cleanId) throw apiError('RESERVATION_NOT_FOUND')
+    await apiClient.delete(`/reservations/${encodeURIComponent(cleanId)}`)
+    return { id: cleanId }
   },
 
   async removeBySpace(spaceId) {
@@ -47,7 +82,9 @@ export const reservationsApi = {
     const items = Array.isArray(data) ? data : []
     await Promise.all(
       items.map((reservation) =>
-        apiClient.delete(`/reservations/${encodeURIComponent(reservation.id)}`),
+        apiClient.delete(`/reservations/${encodeURIComponent(reservation.id)}`, {
+          params: { purge: true },
+        }),
       ),
     )
     return { removed: items.length }
@@ -62,7 +99,9 @@ export const reservationsApi = {
     const items = Array.isArray(data) ? data : []
     await Promise.all(
       items.map((reservation) =>
-        apiClient.delete(`/reservations/${encodeURIComponent(reservation.id)}`),
+        apiClient.delete(`/reservations/${encodeURIComponent(reservation.id)}`, {
+          params: { purge: true },
+        }),
       ),
     )
     return { removed: items.length }
@@ -90,7 +129,7 @@ export const reservationsApi = {
     })
 
     const candidate = { date: cleanDate, startTime: cleanStart, endTime: cleanEnd }
-    const overlapping = (existing ?? []).some((reservation) =>
+    const overlapping = (existing ?? []).filter(isActive).some((reservation) =>
       reservationsOverlap(reservation, candidate),
     )
 
@@ -110,6 +149,7 @@ export const reservationsApi = {
       endTime: cleanEnd,
       guests: [],
       guestInviteToken: null,
+      status: 'CONFIRMED',
       ...(ownerId ? { ownerAdminId: ownerId } : {}),
     }
 
@@ -150,6 +190,7 @@ export const reservationsApi = {
       .filter(Boolean)
       .slice(0, MAX_RESERVATION_GUESTS)
 
+    // The real API issues the token server-side (and ignores this value); kept for the offline mock.
     let guestInviteToken = current?.guestInviteToken ?? null
     if (normalized.length > 0) {
       if (!guestInviteToken) {
@@ -211,35 +252,73 @@ export const reservationsApi = {
   },
 
   /**
-   * Public lookup by invite token (no tenant scope). Used by guest invite page.
-   * @returns {{ guests: Array<{id:string,name:string}>, date: string, startTime: string, endTime: string, spaceName: string, residentName: string }}
+   * Public guest-pass validation (US027): `{ valid, status: 'VALID'|'EXPIRED'|'CANCELLED', expiresAt,
+   * reservation: { spaceName, date, startTime, endTime, status, hostName }, guests }`.
+   * Falls back to the legacy `/reservations?guestInviteToken=` lookup when the endpoint is unavailable (mock).
    */
-  async getPublicInviteByToken(rawToken) {
+  async getGuestPass(rawToken) {
     const token = String(rawToken ?? '').trim()
-    if (!token) {
-      throw apiError('INVITE_NOT_FOUND')
+    if (!token) throw apiError('INVITE_NOT_FOUND')
+    try {
+      const { data } = await apiClient.get(`/api/v1/guest-passes/${encodeURIComponent(token)}`)
+      return data
+    } catch (error) {
+      if (error?.code === 'GUEST_PASS_NOT_FOUND') throw apiError('INVITE_NOT_FOUND')
+      if (error?.code !== 'HTTP_404') throw error
     }
     const { data } = await apiClient.get('/reservations', { params: { guestInviteToken: token } })
-    const list = Array.isArray(data) ? data : []
-    if (!list.length) {
-      throw apiError('INVITE_NOT_FOUND')
-    }
-    const r = list[0]
-    let spaceName = ''
-    try {
-      const { data: space } = await apiClient.get(`/socialSpaces/${encodeURIComponent(r.spaceId)}`)
-      spaceName = String(space?.name ?? '').trim()
-    } catch {
-      spaceName = ''
-    }
+    const r = Array.isArray(data) ? data[0] : null
+    if (!r) throw apiError('INVITE_NOT_FOUND')
     const pub = publicReservation(r, { omitInviteToken: true })
+    const status = localPassStatus(pub)
     return {
+      valid: status === 'VALID',
+      status,
+      expiresAt: new Date(reservationInviteExpiresAtMs(pub) ?? Date.now()).toISOString(),
+      reservation: {
+        id: pub.id,
+        spaceId: pub.spaceId,
+        spaceName: '',
+        date: pub.date,
+        startTime: pub.startTime,
+        endTime: pub.endTime,
+        status: pub.status,
+        hostName: String(r.residentName ?? '').trim(),
+      },
       guests: pub.guests,
-      date: pub.date,
-      startTime: pub.startTime,
-      endTime: pub.endTime,
-      spaceName: spaceName || '—',
-      residentName: String(r.residentName ?? '').trim(),
+    }
+  },
+
+  /**
+   * Concierge check-in through the guest pass (admin). Refused with 410 `GUEST_PASS_EXPIRED` once the
+   * event ended more than 2 h ago. Without guestId all guests of the pass are checked in.
+   */
+  async checkInGuestPass(rawToken, guestId, checkedIn = true) {
+    const token = String(rawToken ?? '').trim()
+    if (!token) throw apiError('INVITE_NOT_FOUND')
+    const { data } = await apiClient.post(
+      `/api/v1/guest-passes/${encodeURIComponent(token)}/check-in`,
+      { ...(guestId ? { guestId: String(guestId) } : {}), checkedIn: Boolean(checkedIn) },
+    )
+    return data
+  },
+
+  /**
+   * Public lookup by invite token (no tenant scope). Used by guest invite page.
+   * @returns {{ guests: Array<{id:string,name:string,checkedIn:boolean}>, date: string, startTime: string, endTime: string, spaceName: string, residentName: string, status: string, expiresAt: string|null }}
+   */
+  async getPublicInviteByToken(rawToken) {
+    const pass = await this.getGuestPass(rawToken)
+    const res = pass?.reservation ?? {}
+    return {
+      guests: Array.isArray(pass?.guests) ? pass.guests : [],
+      date: res.date ?? '',
+      startTime: res.startTime ?? '',
+      endTime: res.endTime ?? '',
+      spaceName: String(res.spaceName ?? '').trim() || '—',
+      residentName: String(res.hostName ?? '').trim(),
+      status: pass?.status ?? 'VALID',
+      expiresAt: pass?.expiresAt ?? null,
     }
   },
 }

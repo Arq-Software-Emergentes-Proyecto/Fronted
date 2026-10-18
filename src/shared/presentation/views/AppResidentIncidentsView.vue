@@ -1,9 +1,15 @@
 <script setup>
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
 import { authApi } from '@/iam/infrastructure/authApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
+import IncidentDetailDialog from '@/incidents/presentation/components/IncidentDetailDialog.vue'
+import {
+  onIncidentRealtime,
+  startIncidentRealtime,
+} from '@/incidents/application/incidentRealtimeStore.js'
+import { IncidentRealtimeEvent, INCIDENT_TITLE_MAX } from '@/incidents/domain/model/incidentConstants.js'
 
 const { t, locale } = useI18n()
 const { state } = useSession()
@@ -14,8 +20,23 @@ const loading = ref(false)
 const error = ref(null)
 const composing = ref(false)
 const sending = ref(false)
+const draftTitle = ref('')
 const draftDescription = ref('')
+const submitAttempted = ref(false)
+const titleTouched = ref(false)
+const descriptionTouched = ref(false)
 const statusFilter = ref('all')
+const detailId = ref('')
+const detailRefreshKey = ref(0)
+
+// US024: campos vacíos en rojo con mensaje; el botón de envío queda bloqueado.
+const titleInvalid = computed(
+  () => (submitAttempted.value || titleTouched.value) && !draftTitle.value.trim(),
+)
+const descriptionInvalid = computed(
+  () => (submitAttempted.value || descriptionTouched.value) && !draftDescription.value.trim(),
+)
+const canSubmit = computed(() => !!draftTitle.value.trim() && !!draftDescription.value.trim())
 
 const statusOptions = computed(() => [
   { label: t('incidentStatusOpen'), value: 'open' },
@@ -35,12 +56,24 @@ const visibleIncidents = computed(() => {
 
 function startCompose() {
   composing.value = true
+  draftTitle.value = ''
   draftDescription.value = ''
+  submitAttempted.value = false
+  titleTouched.value = false
+  descriptionTouched.value = false
 }
 
 function cancelCompose() {
   composing.value = false
+  draftTitle.value = ''
   draftDescription.value = ''
+  submitAttempted.value = false
+  titleTouched.value = false
+  descriptionTouched.value = false
+}
+
+function openDetail(row) {
+  detailId.value = row?.id ? String(row.id) : ''
 }
 
 function statusLabel(status) {
@@ -69,9 +102,9 @@ async function loadIncidents() {
   try {
     loading.value = true
     error.value = null
-    const all = await incidentsApi.list()
-    incidents.value = all
-      .filter((i) => i.residentId === residentId)
+    // RF018: filtrado server-side (el backend solo devuelve las del residente autenticado).
+    const own = await incidentsApi.listByResident(residentId)
+    incidents.value = own
       .slice()
       .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
   } catch {
@@ -82,10 +115,12 @@ async function loadIncidents() {
 }
 
 async function reportIncident() {
+  submitAttempted.value = true
+  const title = draftTitle.value.trim()
   const text = draftDescription.value.trim()
   const residentId = profile.value.id
   const residentName = profile.value.name || ''
-  if (!text || !residentId || sending.value) return
+  if (!title || !text || !residentId || sending.value) return
 
   sending.value = true
   try {
@@ -100,6 +135,7 @@ async function reportIncident() {
       id: `incident-${Date.now()}`,
       residentId,
       residentName,
+      title,
       description: text,
       status: 'open',
       createdAt: new Date().toISOString(),
@@ -108,14 +144,28 @@ async function reportIncident() {
     })
     cancelCompose()
     await loadIncidents()
-  } catch {
-    error.value = t('app.residentsLoadError')
+  } catch (err) {
+    error.value = err?.payload?.message || t('app.residentsLoadError')
   } finally {
     sending.value = false
   }
 }
 
-onMounted(loadIncidents)
+// Tiempo real: cuando el admin asigna / cambia estado / resuelve, se refresca la vista.
+let stopRealtime = () => {}
+
+onMounted(async () => {
+  await loadIncidents()
+  stopRealtime = onIncidentRealtime((type, payload) => {
+    if (type !== IncidentRealtimeEvent.UPDATED) return
+    if (payload?.residentId && payload.residentId !== profile.value.id) return
+    loadIncidents()
+    if (detailId.value && payload?.id === detailId.value) detailRefreshKey.value++
+  })
+  startIncidentRealtime(profile.value.ownerAdminId)
+})
+
+onBeforeUnmount(() => stopRealtime())
 </script>
 
 <template>
@@ -130,16 +180,41 @@ onMounted(loadIncidents)
       <h2 id="inc-form-heading" class="inc-form__title">
         {{ t('app.residentIncidentsFormTitle') }}
       </h2>
+      <label class="inc-form__field" for="inc-resident-title">
+        <span>{{ t('incidentFlow.titleLabel') }} *</span>
+        <input
+          id="inc-resident-title"
+          v-model="draftTitle"
+          type="text"
+          :maxlength="INCIDENT_TITLE_MAX"
+          :class="{ 'is-invalid': titleInvalid }"
+          :aria-invalid="titleInvalid"
+          aria-describedby="inc-resident-title-error"
+          :placeholder="t('incidentFlow.titlePlaceholder')"
+          :disabled="sending"
+          @blur="titleTouched = true"
+        />
+      </label>
+      <p v-if="titleInvalid" id="inc-resident-title-error" class="inc-form__error" role="alert">
+        {{ t('incidentFlow.fieldRequired') }}
+      </p>
       <label class="inc-form__field" for="inc-resident-description">
-        <span>{{ t('app.residentIncidentsDescriptionLabel') }}</span>
+        <span>{{ t('app.residentIncidentsDescriptionLabel') }} *</span>
         <textarea
           id="inc-resident-description"
           v-model="draftDescription"
           rows="5"
+          :class="{ 'is-invalid': descriptionInvalid }"
+          :aria-invalid="descriptionInvalid"
+          aria-describedby="inc-resident-description-error"
           :placeholder="t('app.residentIncidentsDescriptionPlaceholder')"
           :disabled="sending"
+          @blur="descriptionTouched = true"
         />
       </label>
+      <p v-if="descriptionInvalid" id="inc-resident-description-error" class="inc-form__error" role="alert">
+        {{ t('incidentFlow.fieldRequired') }}
+      </p>
       <div class="bf-actions">
         <button type="button" class="bf-btn bf-btn--cancel" :disabled="sending" @click="cancelCompose">
           {{ t('app.cancelAction') }}
@@ -147,7 +222,7 @@ onMounted(loadIncidents)
         <button
           type="button"
           class="bf-btn bf-btn--confirm"
-          :disabled="sending || !draftDescription.trim()"
+          :disabled="sending || !canSubmit"
           @click="reportIncident"
         >
           {{ t('app.residentIncidentsSubmit') }}
@@ -198,17 +273,39 @@ onMounted(loadIncidents)
               {{ statusLabel(row.status) }}
             </span>
           </header>
+          <h3 v-if="row.title" class="inc-card__title">{{ row.title }}</h3>
           <p class="inc-card__body">{{ row.description }}</p>
+          <p v-if="row.resolutionComment" class="inc-card__resolution">
+            <i class="pi pi-check-circle" aria-hidden="true" />
+            {{ row.resolutionComment }}
+          </p>
           <footer class="inc-card__meta">
             <span>
               <i class="pi pi-wrench" aria-hidden="true" />
               {{ row.provider || t('app.noProviderAssigned') }}
             </span>
+            <span v-if="row.provider && row.providerPhone">
+              <i class="pi pi-phone" aria-hidden="true" />
+              <a :href="`tel:${row.providerPhone}`">{{ row.providerPhone }}</a>
+            </span>
+            <span v-if="row.provider && row.providerSpecialty">{{ row.providerSpecialty }}</span>
             <time v-if="row.createdAt" :datetime="row.createdAt">{{ formatWhen(row.createdAt) }}</time>
           </footer>
+          <button type="button" class="inc-card__detail" @click="openDetail(row)">
+            {{ t('incidentFlow.viewDetail') }}
+            <i class="pi pi-angle-right" aria-hidden="true" />
+          </button>
         </article>
       </li>
     </ul>
+
+    <IncidentDetailDialog
+      :open="!!detailId"
+      :incident-id="detailId"
+      :refresh-key="detailRefreshKey"
+      @close="detailId = ''"
+      @updated="loadIncidents"
+    />
   </div>
 </template>
 
@@ -328,6 +425,76 @@ onMounted(loadIncidents)
 .inc-form__field textarea:focus {
   border-color: #0071e3;
   box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.16);
+}
+
+.inc-form__field input {
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--apple-border-hairline, #d2d2d7);
+  border-radius: 12px;
+  background: #fff;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 400;
+  color: var(--apple-text, #1d1d1f);
+  outline: none;
+}
+
+.inc-form__field input:focus {
+  border-color: #0071e3;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.16);
+}
+
+.inc-form__field input.is-invalid,
+.inc-form__field textarea.is-invalid {
+  border-color: #d92d20;
+  box-shadow: 0 0 0 3px rgba(217, 45, 32, 0.14);
+}
+
+.inc-form__error {
+  margin: -0.65rem 0 0;
+  font-size: 0.78rem;
+  color: #b42318;
+}
+
+.inc-card__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--apple-text, #1d1d1f);
+  word-break: break-word;
+}
+
+.inc-card__resolution {
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: 10px;
+  background: #f1f8f2;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: #1b5e33;
+  white-space: pre-wrap;
+}
+
+.inc-card__detail {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #0071e3;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.inc-card__detail:focus-visible {
+  outline: 2px solid #0071e3;
+  outline-offset: 2px;
 }
 
 .inc-toolbar {

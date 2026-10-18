@@ -91,7 +91,8 @@ export const financesApi = {
         amount: Number(receipt.amount) + Number(receipt.lateFee || 0) + Number(receipt.extraCharges || 0),
         dueDate: receipt.dueDate,
         status: receipt.status === 'Paid' ? 'Pagado' : 'Pendiente',
-        concept: receipt.concept || "Mantenimiento"
+        concept: receipt.concept || "Mantenimiento",
+        billingMonth: receipt.billingMonth || '',
       };
     });
 
@@ -150,6 +151,63 @@ export const financesApi = {
     return row
   },
 
+  /** TS003 / RF021: facturación idempotente del mes en el servidor (default: mes actual). */
+  async generateMonthlyReceipts(month) {
+    const { data } = await apiClient.post(
+      '/api/v1/finances/receipts/generate',
+      month ? { month } : {},
+    )
+    return data
+  },
+
+  /** US021: alertas de facturación (p. ej. MISSING_MONTHLY_CHARGE). */
+  async getBillingAlerts() {
+    const { data } = await apiClient.get('/api/v1/finances/billing-alerts')
+    return Array.isArray(data) ? data : []
+  },
+
+  /** RF029: semáforo residente × mes. Residente: solo su fila (lo fuerza el backend). */
+  async getPaymentCalendar({ residentId, months = 6 } = {}) {
+    const params = { months }
+    if (residentId) params.residentId = residentId
+    const { data } = await apiClient.get('/api/v1/finances/payment-calendar', { params })
+    return {
+      today: data?.today ?? '',
+      dueSoonDays: Number(data?.dueSoonDays) || 5,
+      months: Array.isArray(data?.months) ? data.months : [],
+      residents: Array.isArray(data?.residents) ? data.residents : [],
+    }
+  },
+
+  /** RF030: ingresos, egresos y balance neto de un mes "yyyy-MM". */
+  async getMonthlyBalance(month) {
+    const { data } = await apiClient.get('/api/v1/finances/balance', {
+      params: month ? { month } : {},
+    })
+    return {
+      month: data?.month ?? month,
+      income: Number(data?.income) || 0,
+      expenses: Number(data?.expenses) || 0,
+      net: Number(data?.net) || 0,
+    }
+  },
+
+  /** RF022: comprobante PDF de un pago aprobado. */
+  async downloadPaymentReceipt(paymentId) {
+    await downloadPdf(
+      `/api/v1/finances/payments/${encodeURIComponent(String(paymentId))}/receipt-pdf`,
+      `recibo-${paymentId}.pdf`,
+    )
+  },
+
+  /** RF022: comprobante PDF de un recibo pagado. */
+  async downloadReceiptPdf(receiptId) {
+    await downloadPdf(
+      `/api/v1/finances/receipts/${encodeURIComponent(String(receiptId))}/pdf`,
+      `recibo-${receiptId}.pdf`,
+    )
+  },
+
   async updateSettings(settings) {
     const params = withOwnerParams()
     const ownerId = getActiveDataOwnerId()
@@ -171,4 +229,24 @@ export const financesApi = {
 
     return normalizeSettings(data)
   },
+}
+
+/** Descarga autenticada (Bearer) de un PDF y dispara el guardado en el navegador. */
+async function downloadPdf(url, fallbackName) {
+  const response = await apiClient.get(url, { responseType: 'blob' })
+  const disposition = String(response.headers?.['content-disposition'] ?? '')
+  const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i)
+  const fileName = match ? decodeURIComponent(match[1]) : fallbackName
+  const blob =
+    response.data instanceof Blob
+      ? response.data
+      : new Blob([response.data], { type: 'application/pdf' })
+  const href = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = href
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(href), 1000)
 }

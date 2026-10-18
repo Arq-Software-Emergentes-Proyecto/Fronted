@@ -73,11 +73,7 @@ export async function refreshSubscriptionFromApi() {
     if (!sub) return null
 
     saveSubscriptionPlanForOwner(ownerId, sub.planId)
-    writeCache(ownerId, {
-      planId: sub.planId,
-      residentLimit: sub.residentLimit,
-      residentsCount: sub.residentsCount,
-    })
+    writeCache(ownerId, snapshotForCache(sub))
 
     return sub
   } catch {
@@ -142,9 +138,29 @@ export function applySubscriptionSnapshot(sub) {
   const ownerId = getActiveDataOwnerId()
   if (!ownerId || !sub) return
   saveSubscriptionPlanForOwner(ownerId, sub.planId)
-  writeCache(ownerId, {
+  writeCache(ownerId, snapshotForCache(sub))
+}
+
+function snapshotForCache(sub) {
+  return {
     planId: sub.planId,
     residentLimit: sub.residentLimit,
     residentsCount: sub.residentsCount,
-  })
+    status: sub.status ?? null,
+    trialExpired: Boolean(sub.trialExpired),
+    requiresPlanSelection: Boolean(sub.requiresPlanSelection),
+  }
+}
+
+/** Last known subscription status of the active admin (TRIAL / ACTIVE / SUSPENDED …), or null. */
+export function getCachedSubscriptionStatus() {
+  const oid = getActiveDataOwnerId()
+  if (!oid) return null
+  const cached = readCacheAll()[oid]
+  if (!cached) return null
+  return {
+    status: cached.status ?? null,
+    trialExpired: Boolean(cached.trialExpired),
+    requiresPlanSelection: Boolean(cached.requiresPlanSelection),
+  }
 }

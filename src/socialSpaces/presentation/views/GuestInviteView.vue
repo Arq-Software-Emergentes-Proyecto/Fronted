@@ -50,10 +50,14 @@ function formatClockTime(timeStr) {
 const expiryMs = computed(() => {
   const b = bundle.value
   if (!b) return null
-  return reservationInviteExpiresAtMs(b.date, b.startTime)
+  return reservationInviteExpiresAtMs(b)
 })
 
+const isCancelled = computed(() => bundle.value?.status === 'CANCELLED')
+
+/** Server status (VALID/EXPIRED) plus the live clock so the page flips without reloading. */
 const isExpired = computed(() => {
+  if (bundle.value?.status === 'EXPIRED') return true
   const exp = expiryMs.value
   if (exp == null) return false
   return nowMs.value >= exp
@@ -87,7 +91,7 @@ async function refreshQr() {
     return
   }
   const exp = expiryMs.value
-  if (exp == null || nowMs.value >= exp) {
+  if (isCancelled.value || exp == null || nowMs.value >= exp) {
     qrSrc.value = ''
     return
   }
@@ -128,7 +132,15 @@ onUnmounted(() => {
 const expiryClockLabel = computed(() => {
   const exp = expiryMs.value
   if (exp == null) return ''
-  return formatClockFromMs(exp)
+  const sameDay = new Date(exp).toDateString() === new Date(`${bundle.value?.date}T00:00:00`).toDateString()
+  return sameDay
+    ? formatClockFromMs(exp)
+    : new Date(exp).toLocaleString(locale.value === 'es' ? 'es-PE' : 'en-US', {
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
 })
 
 const slotSummary = computed(() => {
@@ -156,9 +168,15 @@ const slotSummary = computed(() => {
         <p class="invite-muted">{{ t('guestInvite.invalidBody') }}</p>
       </template>
 
+      <template v-else-if="isCancelled">
+        <h1 class="invite-title invite-title--warn">{{ t('socialSpaces.guestCancelledTitle') }}</h1>
+        <p class="invite-body">{{ t('socialSpaces.guestCancelledBody') }}</p>
+        <p class="invite-muted">{{ slotSummary }}</p>
+      </template>
+
       <template v-else-if="isExpired">
-        <h1 class="invite-title invite-title--warn">{{ t('guestInvite.expiredTitle') }}</h1>
-        <p class="invite-body">{{ t('guestInvite.expiredBody') }}</p>
+        <h1 class="invite-title invite-title--warn">{{ t('socialSpaces.passExpired') }}</h1>
+        <p class="invite-body">{{ t('socialSpaces.guestExpiredBody') }}</p>
         <p class="invite-muted">{{ slotSummary }}</p>
         <ul v-if="bundle.guests?.length" class="invite-names">
           <li v-for="g in bundle.guests" :key="g.id" class="invite-names__row">

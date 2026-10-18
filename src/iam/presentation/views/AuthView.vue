@@ -11,6 +11,7 @@ import { useSession } from '@/iam/application/sessionStore.js'
 import { OPEN_WIREFRAME_ACCESS } from '@/iam/application/localPreviewAuth.js'
 import { signInWithGoogle, refreshFirebaseIdToken } from '@/iam/infrastructure/googleIdentity.js'
 import { createResidentPasswordAccount } from '@/iam/infrastructure/firebaseAuth.js'
+import BuildingForm from '@/profiles/presentation/components/BuildingForm.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -232,7 +233,23 @@ function enterCompleteProfile({ token, identity, draft }) {
   completeProfileError.value = ''
 }
 
-function finishAdminSession(user, token) {
+/** US015: after a new admin registers, ask for the building, then go to plan selection. */
+const onboardingStep = ref(null) // null | 'building'
+
+function onOnboardingBuildingSaved(building) {
+  onboardingStep.value = null
+  router.push({
+    name: AppRouteNames.APP_SETTINGS,
+    query: { tab: 'plans', ...(building?.suggestedPlanId ? { suggestedPlan: building.suggestedPlanId } : {}) },
+  })
+}
+
+function onOnboardingSkip() {
+  onboardingStep.value = null
+  navigateAfterAuth({ name: AppRouteNames.APP_DASHBOARD })
+}
+
+function finishAdminSession(user, token, { onboarding = false } = {}) {
   setAdminSession(
     {
       id: user.id,
@@ -247,6 +264,10 @@ function finishAdminSession(user, token) {
   )
   completeProfileMode.value = false
   pendingAuthToken.value = null
+  if (onboarding) {
+    onboardingStep.value = 'building'
+    return
+  }
   navigateAfterAuth({ name: AppRouteNames.APP_DASHBOARD })
 }
 
@@ -403,7 +424,7 @@ async function onCompleteProfileSubmit() {
       company: regCompany.value,
       ruc: regRuc.value,
     })
-    finishAdminSession(user, token)
+    finishAdminSession(user, token, { onboarding: true })
   } catch (error) {
     if (error?.code === 'ADMIN_BOOTSTRAP_CLOSED' || error?.status === 409 || error?.code === 'HTTP_409') {
       completeProfileError.value = t('auth.adminBootstrapClosed')
@@ -437,7 +458,7 @@ async function onRegisterSubmit() {
       company: regCompany.value,
       ruc: regRuc.value,
     })
-    finishAdminSession(user, token)
+    finishAdminSession(user, token, { onboarding: true })
   } catch (error) {
     if (error?.code === 'PROFILE_INCOMPLETE_AFTER_AUTH') {
       enterCompleteProfile({
@@ -678,7 +699,31 @@ watch(loginEmail, () => {
           </div>
         </nav>
 
-        <div v-if="completeProfileMode" class="auth-card auth-card--centered">
+        <div v-if="onboardingStep === 'building'" class="auth-card auth-card--centered">
+          <div class="auth-brand">
+            <img
+              src="/logo-buildingfex.png"
+              :alt="t('brand')"
+              class="auth-logo"
+              width="200"
+              height="48"
+              decoding="async"
+            />
+          </div>
+          <p class="auth-onboarding-step">{{ t('buildings.onboarding.step') }}</p>
+          <h1 class="auth-title auth-title--center">{{ t('buildings.onboarding.title') }}</h1>
+          <p class="auth-subtitle">{{ t('buildings.onboarding.subtitle') }}</p>
+          <div class="auth-form auth-form--narrow">
+            <BuildingForm
+              :submit-label="t('buildings.onboarding.submit')"
+              show-skip
+              @saved="onOnboardingBuildingSaved"
+              @skip="onOnboardingSkip"
+            />
+          </div>
+        </div>
+
+        <div v-else-if="completeProfileMode" class="auth-card auth-card--centered">
           <div class="auth-brand">
             <img
               src="/logo-buildingfex.png"
@@ -1035,6 +1080,16 @@ watch(loginEmail, () => {
 </template>
 
 <style scoped>
+.auth-onboarding-step {
+  margin: 0 0 0.25rem;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #0a84ff;
+}
+
 .auth-page {
   min-height: 100vh;
   min-height: 100dvh;

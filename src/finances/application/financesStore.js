@@ -341,54 +341,25 @@ export function useFinancesStore() {
     }
   };
 
+  /**
+   * RF021 / TS003: la facturación del mes corre en el servidor (idempotente: índice único
+   * owner + residente + mes). Sin cuota configurada → error MISSING_MONTHLY_CHARGE.
+   * Devuelve { month, created, alreadyBilled, notDue } y recarga los recibos.
+   */
   const generateMonthlyReceipts = async (monthKey) => {
-    if (!state.settings) {
-      state.settings = await financesApi.getSettings().catch(() => normalizeSettings({}))
-    }
-    const settings = normalizeSettings(state.settings)
-    const targetMonth = monthKey || currentStatementMonthKey(new Date(), settings)
-    const charge = findCharge(settings.monthlyCharges, targetMonth)
-    if (!charge || !charge.amount || !charge.paymentDue) {
-      const error = new Error('MISSING_MONTHLY_CHARGE')
-      error.code = 'MISSING_MONTHLY_CHARGE'
-      throw error
-    }
-
+    state.isLoading = true
     try {
-      state.isLoading = true;
-      const issueDate = formatLocalIsoStringDate(new Date());
-      const newReceipts = [];
-
-      for (const resident of state.residents) {
-        if (!residentOwesMonth(resident, charge.month, settings)) continue
-        const alreadyBilled = state.receipts.some(
-          (receipt) =>
-            String(receipt.residentId) === String(resident.id) &&
-            String(receipt.billingMonth || '') === String(charge.month),
-        )
-        if (alreadyBilled) continue
-
-        const receiptData = {
-          id: Date.now() + Math.floor(Math.random() * 1000),
-          residentId: resident.id,
-          issueDate,
-          dueDate: charge.paymentDue,
-          amount: charge.amount,
-          status: 'Pending',
-          lateFee: 0,
-          billingMonth: charge.month,
-          paymentOpen: charge.paymentOpen,
-        };
-        const created = await financesApi.createReceipt(receiptData);
-        state.receipts.push(created);
-        newReceipts.push(created);
-      }
-      return newReceipts;
+      const result = await financesApi.generateMonthlyReceipts(monthKey)
+      state.receipts = await financesApi.getReceipts()
+      return result
     } catch (err) {
-      console.error(err);
-      throw new Error('Error generating monthly receipts');
+      if (err?.code === 'MISSING_MONTHLY_CHARGE') throw err
+      console.error(err)
+      const error = new Error('Error generating monthly receipts')
+      error.code = err?.code || 'GENERATE_RECEIPTS_FAILED'
+      throw error
     } finally {
-      state.isLoading = false;
+      state.isLoading = false
     }
   };
 

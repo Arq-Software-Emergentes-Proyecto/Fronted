@@ -1,15 +1,27 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import Toast from 'primevue/toast'
+import { useToast } from 'primevue/usetoast'
 import SkipLink from '../components/SkipLink.vue'
 import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import { useSession } from '@/iam/application/sessionStore.js'
+import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
+import {
+  markIncidentsSeen,
+  onIncidentRealtime,
+  startIncidentRealtime,
+  useIncidentRealtime,
+} from '@/incidents/application/incidentRealtimeStore.js'
+import { IncidentRealtimeEvent } from '@/incidents/domain/model/incidentConstants.js'
 
 const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const { isResident, clearSession } = useSession()
+const toast = useToast()
+const { state: incidentRealtime } = useIncidentRealtime()
 
 const adminNavPrimary = computed(() => [
   {
@@ -47,6 +59,8 @@ const adminNavPrimary = computed(() => [
     label: t('app.incidents'),
     icon: 'pi pi-flag',
     routeName: AppRouteNames.APP_INCIDENTS,
+    badge: incidentRealtime.unseenCount > 0 ? incidentRealtime.unseenCount : null,
+    badgeLabel: t('incidentFlow.newBadgeLabel', { count: incidentRealtime.unseenCount }),
   },
   {
     key: 'information',
@@ -130,6 +144,41 @@ const activeAppNavPrimaryIndex = computed(() =>
 
 const isAppNavPrimaryPillVisible = computed(() => activeAppNavPrimaryIndex.value >= 0)
 
+// RF024: aviso en tiempo real de nuevas incidencias al admin (SignalR /hubs/support).
+let stopIncidentToasts = () => {}
+
+async function connectIncidentRealtime() {
+  if (isResident.value) return
+  const ownerId = getActiveDataOwnerId()
+  if (!ownerId) return
+  await startIncidentRealtime(ownerId, { countUnseen: true })
+}
+
+onMounted(() => {
+  stopIncidentToasts = onIncidentRealtime((type, payload) => {
+    if (type !== IncidentRealtimeEvent.CREATED || isResident.value) return
+    if (route.name === AppRouteNames.APP_INCIDENTS) markIncidentsSeen()
+    toast.add({
+      group: 'incidents',
+      severity: 'info',
+      summary: t('incidentFlow.newIncidentToast'),
+      detail: [payload?.title, payload?.residentName].filter(Boolean).join(' · '),
+      life: 6000,
+    })
+  })
+  connectIncidentRealtime()
+})
+
+onBeforeUnmount(() => stopIncidentToasts())
+
+watch(
+  () => route.name,
+  (name) => {
+    if (name === AppRouteNames.APP_INCIDENTS) markIncidentsSeen()
+  },
+  { immediate: true },
+)
+
 function onLogout() {
   clearSession()
   router.push({ name: AppRouteNames.LOGIN })
@@ -143,6 +192,7 @@ function toggleAppLocale() {
 <template>
   <div class="app-shell" :class="{ 'app-shell--chat': lockChatPageScroll }">
     <SkipLink />
+    <Toast v-if="!isResident" group="incidents" position="top-right" />
     <aside class="app-shell__sidebar">
       <header class="app-shell__top">
         <RouterLink 
@@ -210,6 +260,12 @@ function toggleAppLocale() {
             >
               <i :class="[item.icon, 'app-shell__nav-link-icon']" aria-hidden="true" />
               <span>{{ item.label }}</span>
+              <span
+                v-if="item.badge"
+                class="app-shell__nav-badge"
+                role="status"
+                :aria-label="item.badgeLabel"
+              >{{ item.badge > 99 ? '99+' : item.badge }}</span>
             </RouterLink>
           </div>
 
@@ -810,5 +866,21 @@ function toggleAppLocale() {
     flex: 1 1 100%;
     max-width: 11.25rem;
   }
+}
+.app-shell__nav-badge {
+  position: absolute;
+  top: 50%;
+  right: 0.45rem;
+  transform: translateY(-50%);
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.35rem;
+  border-radius: 980px;
+  background: #e5484d;
+  color: #fff;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1.15rem;
+  text-align: center;
 }
 </style>

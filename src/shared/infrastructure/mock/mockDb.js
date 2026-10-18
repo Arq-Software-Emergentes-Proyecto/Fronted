@@ -1,4 +1,8 @@
-import { SUBSCRIPTION_PLAN_PRICES_PEN, SUBSCRIPTION_PLAN_RESIDENT_LIMITS } from '@/billing/domain/subscriptionPlans.js'
+import {
+  SUBSCRIPTION_PLAN_AI_QUERY_CAPS,
+  SUBSCRIPTION_PLAN_PRICES_PEN,
+  SUBSCRIPTION_PLAN_RESIDENT_LIMITS,
+} from '@/billing/domain/subscriptionPlans.js'
 import { createSeedDb, MOCK_DB_VERSION } from './seed.js'
 
 export const MOCK_DB_STORAGE_KEY = 'buildingfex.localMockDb.v2'
@@ -24,6 +28,7 @@ const COLLECTIONS = [
   'residentExtraCharges',
   'supportChats',
   'subscriptions',
+  'buildings',
   'profiles',
 ]
 
@@ -278,13 +283,32 @@ export function subscriptionSnapshot(ownerId) {
   const row = getOrCreateSubscription(ownerId)
   const residentsCount = queryCollection('users', { role: 'resident', ownerAdminId: ownerId }).length
   const planId = String(row.planId ?? 'free')
+  const residentLimit = SUBSCRIPTION_PLAN_RESIDENT_LIMITS[planId] ?? 15
+  const isPaid = Boolean(row.isPaid)
+  if (!row.trialEndsAt) {
+    row.trialEndsAt = new Date(Date.now() + 30 * 86400000).toISOString()
+    persist()
+  }
+  const trialMsLeft = new Date(row.trialEndsAt).getTime() - Date.now()
+  const trialExpired = !isPaid && trialMsLeft <= 0
   return {
     planId,
-    residentLimit: SUBSCRIPTION_PLAN_RESIDENT_LIMITS[planId] ?? 9,
+    residentLimit,
     residentsCount,
     monthlyPricePen: SUBSCRIPTION_PLAN_PRICES_PEN[planId] ?? 0,
     paidUntil: row.paidUntil ?? null,
-    isPaid: Boolean(row.isPaid),
+    isPaid,
+    status: isPaid ? 'ACTIVE' : trialExpired ? 'SUSPENDED' : 'TRIAL',
+    trialEndsAt: isPaid ? null : row.trialEndsAt,
+    trialDaysLeft: isPaid ? null : Math.max(0, Math.ceil(trialMsLeft / 86400000)),
+    trialExpired,
+    requiresPlanSelection: trialExpired,
+    canAddResidents: !trialExpired && residentsCount < residentLimit,
+    maxDepartments: residentLimit,
+    monthlyAiQueries: SUBSCRIPTION_PLAN_AI_QUERY_CAPS[planId] ?? 150,
+    billableDepartments: residentsCount,
+    buildingId: null,
+    suggestedPlanId: null,
   }
 }
 
