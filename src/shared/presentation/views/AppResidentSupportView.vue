@@ -448,7 +448,7 @@ function onAiSuggestion(kind) {
       </section>
 
       <div v-else class="ai-shell">
-        <aside class="ai-sidebar" aria-label="Chat history">
+        <aside class="ai-sidebar" :aria-label="t('common.chatHistoryAria')">
           <button type="button" class="ai-back" @click="view = 'faq'">
             <i class="pi pi-question-circle" aria-hidden="true" />
             {{ t('supportResident.aiBackToFaqs') }}

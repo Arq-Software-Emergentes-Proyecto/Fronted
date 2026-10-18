@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
+import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
 import { serviceProvidersApi } from '@/incidents/infrastructure/serviceProvidersApi.js'
 import IncidentResolveDialog from '@/incidents/presentation/components/IncidentResolveDialog.vue'
@@ -14,8 +15,47 @@ import {
   markIncidentsSeen,
   onIncidentRealtime,
 } from '@/incidents/application/incidentRealtimeStore.js'
+import { teamWorkersApi } from '@/team/infrastructure/teamWorkersApi.js'
+import { teamTasksApi } from '@/team/infrastructure/teamTasksApi.js'
 
 const { t, locale } = useI18n()
+
+/** Team: "Crear tarea de mantenimiento" desde una incidencia (MaintenanceTask.incidentId). */
+const activeWorkers = ref([])
+const taskBusyId = ref('')
+const taskNotice = ref({ id: '', text: '', error: false })
+
+async function loadActiveWorkers() {
+  try {
+    const list = await teamWorkersApi.list()
+    activeWorkers.value = list.filter((w) => w?.id && w.status !== 'INACTIVE')
+  } catch {
+    activeWorkers.value = []
+  }
+}
+
+async function createTaskFromIncident(row, event) {
+  const staffId = event.target.value
+  event.target.value = ''
+  if (!staffId || taskBusyId.value) return
+  taskBusyId.value = row.id
+  taskNotice.value = { id: '', text: '', error: false }
+  try {
+    const description = [row.title, row.description].filter(Boolean).join(' — ').slice(0, 2000)
+    await teamTasksApi.create({ staffId, incidentId: row.id, description: description || row.id })
+    taskNotice.value = { id: row.id, text: t('teamMgmt.tasks.createdFromIncident'), error: false }
+  } catch (err) {
+    const text =
+      err?.code === 'WORKLOAD_EXCEEDED'
+        ? t('teamMgmt.tasks.workloadExceeded')
+        : err?.code === 'WORKER_INACTIVE'
+          ? t('teamMgmt.tasks.workerInactive')
+          : t('teamMgmt.tasks.saveError')
+    taskNotice.value = { id: row.id, text, error: true }
+  } finally {
+    taskBusyId.value = ''
+  }
+}
 
 const LEGACY_PROVIDER = '__legacy__'
 
@@ -23,6 +63,8 @@ const incidents = ref([])
 const serviceProviders = ref([])
 const loading = ref(false)
 const error = ref(null)
+/** RNF012: the incidents list itself failed to load (retryable). */
+const loadFailed = ref(false)
 const composing = ref(false)
 const sending = ref(false)
 const savingId = ref('')
@@ -138,12 +180,14 @@ async function loadIncidents({ silent = false } = {}) {
   try {
     if (!silent) loading.value = true
     error.value = null
+    loadFailed.value = false
     const list = await incidentsApi.list()
     incidents.value = list
       .slice()
       .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
   } catch (err) {
     error.value = resolveErrorMessage(err, 'app.incidentsLoadError')
+    loadFailed.value = true
   } finally {
     loading.value = false
   }
@@ -250,7 +294,7 @@ onMounted(async () => {
       loadIncidents({ silent: true })
     }
   })
-  await Promise.all([loadIncidents(), loadServiceProviders()])
+  await Promise.all([loadIncidents(), loadServiceProviders(), loadActiveWorkers()])
 })
 
 onBeforeUnmount(() => stopRealtime())
@@ -262,7 +306,8 @@ onBeforeUnmount(() => stopRealtime())
       <h1 class="visually-hidden">{{ t('app.pageIncidents') }}</h1>
     </header>
 
-    <p v-if="error" class="inc-alert" role="alert">{{ error }}</p>
+    <LoadErrorRetry v-if="loadFailed" :message="error" :loading="loading" @retry="loadIncidents()" />
+    <p v-else-if="error" class="inc-alert" role="alert">{{ error }}</p>
 
     <section v-if="composing" class="inc-form" aria-labelledby="inc-form-heading">
       <h2 id="inc-form-heading" class="inc-form__title">{{ t('app.newIncident') }}</h2>
@@ -453,7 +498,28 @@ onBeforeUnmount(() => stopRealtime())
                 </option>
               </select>
             </label>
+            <label v-if="activeWorkers.length" class="inc-card__field">
+              <span>{{ t('teamMgmt.tasks.createFromIncident') }}</span>
+              <select
+                value=""
+                :disabled="taskBusyId === row.id"
+                @change="createTaskFromIncident(row, $event)"
+              >
+                <option value="">{{ t('teamMgmt.tasks.workerPlaceholder') }}</option>
+                <option v-for="w in activeWorkers" :key="`${row.id}-w-${w.id}`" :value="w.id">
+                  {{ w.name }}
+                </option>
+              </select>
+            </label>
           </div>
+          <p
+            v-if="taskNotice.id === row.id && taskNotice.text"
+            class="inc-card__task-notice"
+            :class="{ 'inc-card__task-notice--error': taskNotice.error }"
+            role="status"
+          >
+            {{ taskNotice.text }}
+          </p>
         </article>
       </li>
     </ul>
@@ -734,6 +800,16 @@ onBeforeUnmount(() => stopRealtime())
 .inc-card__controls {
   display: grid;
   gap: 0.55rem;
+}
+
+.inc-card__task-notice {
+  margin: 0.4rem 0 0;
+  font-size: 0.78rem;
+  color: #1a7f37;
+}
+
+.inc-card__task-notice--error {
+  color: #b42318;
 }
 
 .inc-badge {

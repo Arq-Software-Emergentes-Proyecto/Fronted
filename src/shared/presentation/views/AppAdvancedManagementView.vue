@@ -13,6 +13,7 @@ import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.j
 import { useFinancesStore } from '@/finances/application/financesStore.js'
 import { formatDayMonth } from '@/finances/domain/billingCycle.js'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
+import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import { RouterLink } from 'vue-router'
 import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import ResidentImportPanel from '@/residents/presentation/components/ResidentImportPanel.vue'
@@ -27,6 +28,8 @@ const loadError = ref('')
 
 const isAddResidentModalOpen = ref(false)
 const modalError = ref('')
+/** RNF003: inline errors (i18n keys) for the resident form fields. */
+const residentFieldErrors = reactive({ name: '', department: '' })
 const isSubmitting = ref(false)
 const residentForm = reactive({
   name: '',
@@ -84,6 +87,8 @@ const isAtPlanLimit = computed(() => totalResidents.value >= residentPlanLimitCa
 function openAddResidentModal() {
   modalError.value = ''
   modalNeedsUpgrade.value = false
+  residentFieldErrors.name = ''
+  residentFieldErrors.department = ''
   residentForm.name = ''
   residentForm.department = ''
   isAddResidentModalOpen.value = true
@@ -100,12 +105,14 @@ async function onAddResidentSubmit() {
   const name = residentForm.name.trim()
   const parsed = parseDepartmentNumber(residentForm.department)
 
-  if (!name) {
-    modalError.value = t('app.addResidentRequired')
-    return
-  }
-  if (!parsed) {
-    modalError.value = t('app.addResidentInvalidDepartment')
+  residentFieldErrors.name = name ? '' : 'common.fieldRequired'
+  residentFieldErrors.department = !String(residentForm.department ?? '').trim()
+    ? 'common.fieldRequired'
+    : parsed
+      ? ''
+      : 'app.addResidentInvalidDepartment'
+  if (residentFieldErrors.name || residentFieldErrors.department) {
+    modalError.value = ''
     return
   }
 
@@ -123,7 +130,7 @@ async function onAddResidentSubmit() {
     isAddResidentModalOpen.value = false
   } catch (error) {
     if (error?.code === 'RESIDENT_CODE_ALREADY_EXISTS') {
-      modalError.value = t('app.addResidentCodeExists')
+      residentFieldErrors.department = 'app.addResidentCodeExists'
       return
     }
     if (error?.code === 'RESIDENT_FIELDS_REQUIRED') {
@@ -131,7 +138,7 @@ async function onAddResidentSubmit() {
       return
     }
     if (error?.code === 'INVALID_DEPARTMENT_NUMBER') {
-      modalError.value = t('app.addResidentInvalidDepartment')
+      residentFieldErrors.department = 'app.addResidentInvalidDepartment'
       return
     }
     if (error?.code === 'RESIDENT_PLAN_LIMIT_REACHED') {
@@ -218,6 +225,41 @@ async function confirmDeleteResidentCascade() {
     residentDeleteError.value = t('app.deleteResidentError')
   } finally {
     isDeletingResidentCascade.value = false
+  }
+}
+
+/** IAM AccountStatus: deactivate/reactivate a resident account (reversible, keeps data). */
+const accountStatusCandidate = ref(null)
+const isChangingAccountStatus = ref(false)
+const accountStatusError = ref('')
+
+function openAccountStatusModal(resident) {
+  if (isChangingAccountStatus.value) return
+  accountStatusError.value = ''
+  accountStatusCandidate.value = resident
+}
+
+function closeAccountStatusModal() {
+  if (isChangingAccountStatus.value) return
+  accountStatusCandidate.value = null
+}
+
+async function confirmAccountStatusChange() {
+  const resident = accountStatusCandidate.value
+  if (!resident || isChangingAccountStatus.value) return
+  const activate = resident.accountStatus === 'DEACTIVATED'
+  isChangingAccountStatus.value = true
+  accountStatusError.value = ''
+  try {
+    const updated = await residentsApi.setAccountActive(resident.id, activate)
+    residents.value = residents.value.map((item) =>
+      item.id === resident.id ? { ...item, accountStatus: updated.accountStatus } : item,
+    )
+    accountStatusCandidate.value = null
+  } catch {
+    accountStatusError.value = t('app.residentAccountStatusError')
+  } finally {
+    isChangingAccountStatus.value = false
   }
 }
 
@@ -350,6 +392,9 @@ const spaceForm = reactive({
   maxReservationsPerDay: '',
 })
 const spaceModalError = ref('')
+/** RNF003: the space name is the required field of the add / edit forms. */
+const spaceNameInvalid = ref(false)
+const editSpaceNameInvalid = ref(false)
 const isSubmittingSpace = ref(false)
 const isProcessingAddImage = ref(false)
 
@@ -438,6 +483,7 @@ onMounted(loadSpaces)
 
 function openAddSpaceModal() {
   spaceModalError.value = ''
+  spaceNameInvalid.value = false
   spaceForm.name = ''
   spaceForm.description = ''
   spaceForm.capacity = ''
@@ -479,8 +525,9 @@ async function onAddSpaceSubmit() {
   if (isSubmittingSpace.value) return
 
   const name = spaceForm.name.trim()
+  spaceNameInvalid.value = !name
   if (!name) {
-    spaceModalError.value = t('app.spaceNameRequired')
+    spaceModalError.value = ''
     return
   }
 
@@ -499,7 +546,7 @@ async function onAddSpaceSubmit() {
     isAddSpaceModalOpen.value = false
   } catch (error) {
     if (error?.code === 'SPACE_NAME_REQUIRED') {
-      spaceModalError.value = t('app.spaceNameRequired')
+      spaceNameInvalid.value = true
       return
     }
     spaceModalError.value = t('auth.genericError')
@@ -510,6 +557,7 @@ async function onAddSpaceSubmit() {
 
 function openEditSpaceModal(space) {
   editSpaceModalError.value = ''
+  editSpaceNameInvalid.value = false
   editSpaceForm.id = space.id
   editSpaceForm.name = space.name ?? ''
   editSpaceForm.description = space.description ?? ''
@@ -553,8 +601,9 @@ async function onEditSpaceSubmit() {
   if (isSubmittingEditSpace.value) return
 
   const name = editSpaceForm.name.trim()
+  editSpaceNameInvalid.value = !name
   if (!name) {
-    editSpaceModalError.value = t('app.spaceNameRequired')
+    editSpaceModalError.value = ''
     return
   }
 
@@ -577,7 +626,7 @@ async function onEditSpaceSubmit() {
     isEditSpaceModalOpen.value = false
   } catch (error) {
     if (error?.code === 'SPACE_NAME_REQUIRED') {
-      editSpaceModalError.value = t('app.spaceNameRequired')
+      editSpaceNameInvalid.value = true
       return
     }
     editSpaceModalError.value = t('auth.genericError')
@@ -708,10 +757,13 @@ const groupedReservations = computed(() => {
             <i class="pi pi-spin pi-spinner" aria-hidden="true" />
             <span>{{ t('app.residentsLoading') }}</span>
           </div>
-          <div v-else-if="loadError" class="import-alert import-alert--error import-panel-state" role="alert">
-            <i class="pi pi-exclamation-circle" aria-hidden="true" />
-            <span>{{ loadError }}</span>
-          </div>
+          <LoadErrorRetry
+            v-else-if="loadError"
+            class="import-panel-state"
+            :message="loadError"
+            :loading="isLoading"
+            @retry="loadResidents"
+          />
           <div v-else-if="!residents.length" class="import-empty import-panel-state">
             <i class="pi pi-inbox" aria-hidden="true" />
             <span>{{ t('app.emptyResidents') }}</span>
@@ -736,6 +788,10 @@ const groupedReservations = computed(() => {
                   </template>
                   <template v-if="resident.email"> · {{ resident.email }}</template>
                 </p>
+                <p v-if="resident.accountStatus === 'DEACTIVATED'" class="r-card__deactivated">
+                  <i class="pi pi-ban" aria-hidden="true" />
+                  {{ t('app.residentAccountDeactivated') }}
+                </p>
               </div>
               <div class="r-card__actions">
                 <button
@@ -753,6 +809,27 @@ const groupedReservations = computed(() => {
                     <i class="pi pi-link r-card__link-icon-item r-card__link-icon-item--link" aria-hidden="true" />
                     <i class="pi pi-chevron-up r-card__link-icon-item r-card__link-icon-item--up" aria-hidden="true" />
                   </span>
+                </button>
+                <button
+                  type="button"
+                  class="r-card__icon-btn"
+                  :title="
+                    resident.accountStatus === 'DEACTIVATED'
+                      ? t('app.reactivateResidentAction')
+                      : t('app.deactivateResidentAction')
+                  "
+                  :aria-label="
+                    resident.accountStatus === 'DEACTIVATED'
+                      ? t('app.reactivateResidentAction')
+                      : t('app.deactivateResidentAction')
+                  "
+                  :disabled="isChangingAccountStatus && accountStatusCandidate?.id === resident.id"
+                  @click="openAccountStatusModal(resident)"
+                >
+                  <i
+                    :class="resident.accountStatus === 'DEACTIVATED' ? 'pi pi-unlock' : 'pi pi-ban'"
+                    aria-hidden="true"
+                  />
                 </button>
                 <button
                   type="button"
@@ -803,10 +880,13 @@ const groupedReservations = computed(() => {
             <i class="pi pi-spin pi-spinner" aria-hidden="true" />
             <span>{{ t('app.spacesLoading') }}</span>
           </div>
-          <div v-else-if="spacesLoadError" class="import-alert import-alert--error import-panel-state" role="alert">
-            <i class="pi pi-exclamation-circle" aria-hidden="true" />
-            <span>{{ spacesLoadError }}</span>
-          </div>
+          <LoadErrorRetry
+            v-else-if="spacesLoadError"
+            class="import-panel-state"
+            :message="spacesLoadError"
+            :loading="isLoadingSpaces"
+            @retry="loadSpaces"
+          />
           <div v-else-if="!spaces.length" class="import-empty import-panel-state">
             <i class="pi pi-image" aria-hidden="true" />
             <span>{{ t('app.emptySpaces') }}</span>
@@ -901,13 +981,24 @@ const groupedReservations = computed(() => {
           </button>
         </div>
 
-        <form class="resident-modal__form" @submit.prevent="onAddResidentSubmit">
-          <label class="resident-modal__field">
+        <form class="resident-modal__form" novalidate @submit.prevent="onAddResidentSubmit">
+          <label class="resident-modal__field" :class="{ 'bf-field--invalid': residentFieldErrors.name }">
             <span>{{ t('app.residentNameLabel') }}</span>
-            <input v-model="residentForm.name" type="text" autocomplete="name" />
+            <input
+              v-model="residentForm.name"
+              type="text"
+              autocomplete="name"
+              required
+              :aria-invalid="residentFieldErrors.name ? 'true' : 'false'"
+              :aria-describedby="residentFieldErrors.name ? 'resident-name-error' : undefined"
+              @input="residentFieldErrors.name = ''"
+            />
+            <small v-if="residentFieldErrors.name" id="resident-name-error" class="bf-field-error">
+              {{ t(residentFieldErrors.name) }}
+            </small>
           </label>
 
-          <label class="resident-modal__field">
+          <label class="resident-modal__field" :class="{ 'bf-field--invalid': residentFieldErrors.department }">
             <span>{{ t('app.residentDepartmentLabel') }}</span>
             <input
               v-model="residentForm.department"
@@ -915,9 +1006,16 @@ const groupedReservations = computed(() => {
               inputmode="numeric"
               pattern="[0-9]*"
               maxlength="4"
+              required
               :placeholder="t('app.residentDepartmentPlaceholder')"
               autocomplete="off"
+              :aria-invalid="residentFieldErrors.department ? 'true' : 'false'"
+              :aria-describedby="residentFieldErrors.department ? 'resident-department-error' : undefined"
+              @input="residentFieldErrors.department = ''"
             />
+            <small v-if="residentFieldErrors.department" id="resident-department-error" class="bf-field-error">
+              {{ t(residentFieldErrors.department) }}
+            </small>
             <span
               v-if="detectedFloor"
               class="resident-modal__field-preview"
@@ -927,7 +1025,7 @@ const groupedReservations = computed(() => {
             </span>
           </label>
 
-          <p v-if="modalError" class="resident-modal__error">{{ modalError }}</p>
+          <p v-if="modalError" class="resident-modal__error" role="alert">{{ modalError }}</p>
           <RouterLink
             v-if="modalNeedsUpgrade"
             class="resident-modal__upgrade"
@@ -1053,10 +1151,20 @@ const groupedReservations = computed(() => {
       <section class="resident-modal bf-modal-panel" role="dialog" aria-modal="true" :aria-label="t('app.addSpaceModalTitle')">
         <h3 class="resident-modal__title">{{ t('app.addSpaceModalTitle') }}</h3>
 
-        <form class="resident-modal__form" @submit.prevent="onAddSpaceSubmit">
-          <label class="resident-modal__field">
+        <form class="resident-modal__form" novalidate @submit.prevent="onAddSpaceSubmit">
+          <label class="resident-modal__field" :class="{ 'bf-field--invalid': spaceNameInvalid }">
             <span>{{ t('app.spaceNameLabel') }}</span>
-            <input v-model="spaceForm.name" type="text" />
+            <input
+              v-model="spaceForm.name"
+              type="text"
+              required
+              :aria-invalid="spaceNameInvalid ? 'true' : 'false'"
+              :aria-describedby="spaceNameInvalid ? 'space-name-error' : undefined"
+              @input="spaceNameInvalid = false"
+            />
+            <small v-if="spaceNameInvalid" id="space-name-error" class="bf-field-error">
+              {{ t('app.spaceNameRequired') }}
+            </small>
           </label>
 
           <label class="resident-modal__field">
@@ -1127,7 +1235,7 @@ const groupedReservations = computed(() => {
             </div>
           </div>
 
-          <p v-if="spaceModalError" class="resident-modal__error">{{ spaceModalError }}</p>
+          <p v-if="spaceModalError" class="resident-modal__error" role="alert">{{ spaceModalError }}</p>
 
           <ConfirmActions
             :cancel-label="t('app.cancelAction')"
@@ -1157,12 +1265,22 @@ const groupedReservations = computed(() => {
       >
         <h3 class="resident-modal__title">{{ t('app.editSpaceModalTitle') }}</h3>
 
-        <form class="resident-modal__form" @submit.prevent="onEditSpaceSubmit">
+        <form class="resident-modal__form" novalidate @submit.prevent="onEditSpaceSubmit">
           <div class="resident-modal__grid">
             <div class="resident-modal__fields">
-              <label class="resident-modal__field">
+              <label class="resident-modal__field" :class="{ 'bf-field--invalid': editSpaceNameInvalid }">
                 <span>{{ t('app.spaceNameLabel') }}</span>
-                <input v-model="editSpaceForm.name" type="text" />
+                <input
+                  v-model="editSpaceForm.name"
+                  type="text"
+                  required
+                  :aria-invalid="editSpaceNameInvalid ? 'true' : 'false'"
+                  :aria-describedby="editSpaceNameInvalid ? 'edit-space-name-error' : undefined"
+                  @input="editSpaceNameInvalid = false"
+                />
+                <small v-if="editSpaceNameInvalid" id="edit-space-name-error" class="bf-field-error">
+                  {{ t('app.spaceNameRequired') }}
+                </small>
               </label>
 
               <label class="resident-modal__field">
@@ -1244,7 +1362,7 @@ const groupedReservations = computed(() => {
             </div>
           </div>
 
-          <p v-if="editSpaceModalError" class="resident-modal__error">{{ editSpaceModalError }}</p>
+          <p v-if="editSpaceModalError" class="resident-modal__error" role="alert">{{ editSpaceModalError }}</p>
 
           <ConfirmActions
             :cancel-label="t('app.cancelAction')"
@@ -1380,6 +1498,66 @@ const groupedReservations = computed(() => {
                 @click="closeDeleteResidentModal"
               >
                 {{ t('app.closeAction') }}
+              </button>
+            </template>
+          </ConfirmActions>
+        </div>
+      </section>
+    </div>
+
+    <div
+      v-if="accountStatusCandidate"
+      class="resident-modal-backdrop bf-modal-backdrop"
+      role="presentation"
+      @click.self="closeAccountStatusModal"
+    >
+      <section
+        class="resident-modal bf-modal-panel"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="
+          accountStatusCandidate.accountStatus === 'DEACTIVATED'
+            ? t('app.reactivateResidentModalTitle')
+            : t('app.deactivateResidentModalTitle')
+        "
+      >
+        <h3 class="resident-modal__title">
+          {{
+            accountStatusCandidate.accountStatus === 'DEACTIVATED'
+              ? t('app.reactivateResidentModalTitle')
+              : t('app.deactivateResidentModalTitle')
+          }}
+        </h3>
+        <div class="resident-modal__form">
+          <p class="resident-modal__hint">
+            {{
+              accountStatusCandidate.accountStatus === 'DEACTIVATED'
+                ? t('app.reactivateResidentWarning', { name: accountStatusCandidate.name || '' })
+                : t('app.deactivateResidentWarning', { name: accountStatusCandidate.name || '' })
+            }}
+          </p>
+          <p v-if="accountStatusError" class="resident-modal__error">{{ accountStatusError }}</p>
+          <ConfirmActions
+            :cancel-label="t('app.cancelAction')"
+            :cancel-disabled="isChangingAccountStatus"
+            :stagger="false"
+            align="end"
+            @cancel="closeAccountStatusModal"
+          >
+            <template #confirm>
+              <button
+                type="button"
+                class="bf-btn"
+                :class="accountStatusCandidate.accountStatus === 'DEACTIVATED' ? 'bf-btn--confirm' : 'bf-btn--danger'"
+                :disabled="isChangingAccountStatus"
+                @click="confirmAccountStatusChange"
+              >
+                <span v-if="isChangingAccountStatus" class="bf-btn__spinner" aria-hidden="true" />
+                <span>{{
+                  accountStatusCandidate.accountStatus === 'DEACTIVATED'
+                    ? t('app.reactivateResidentAction')
+                    : t('app.deactivateResidentAction')
+                }}</span>
               </button>
             </template>
           </ConfirmActions>
@@ -1526,9 +1704,12 @@ const groupedReservations = computed(() => {
         <p v-if="isLoadingReservations" class="mgmt-msg">
           {{ t('app.reservationsLoading') }}
         </p>
-        <p v-else-if="reservationsLoadError" class="mgmt-msg mgmt-msg--error">
-          {{ reservationsLoadError }}
-        </p>
+        <LoadErrorRetry
+          v-else-if="reservationsLoadError"
+          compact
+          :message="reservationsLoadError"
+          @retry="openSpaceCalendar(selectedSpace)"
+        />
         <p v-else-if="!groupedReservations.length" class="mgmt-msg">
           {{ t('app.emptyReservations') }}
         </p>
@@ -1800,6 +1981,16 @@ const groupedReservations = computed(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.r-card__deactivated {
+  margin: 0.2rem 0 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #b42318;
 }
 
 .r-card__actions {

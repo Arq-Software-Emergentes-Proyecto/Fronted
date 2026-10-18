@@ -7,6 +7,7 @@ import { spacesApi } from '@/socialSpaces/infrastructure/spacesApi.js'
 import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
+import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -29,6 +30,8 @@ const isSubmittingReservation = ref(false)
 
 const allSpaceReservations = ref([])
 const isLoadingSpaceReservations = ref(false)
+/** RNF012: the calendar availability could not be loaded (do not show every day as free). */
+const spaceReservationsLoadError = ref(false)
 
 const calendarMonth = ref(startOfMonth(new Date()))
 
@@ -224,12 +227,14 @@ async function loadSpaceReservations() {
     return
   }
   isLoadingSpaceReservations.value = true
+  spaceReservationsLoadError.value = false
   try {
     allSpaceReservations.value = await reservationsApi.listBySpace(
       selectedSpace.value.id,
     )
   } catch {
     allSpaceReservations.value = []
+    spaceReservationsLoadError.value = true
   } finally {
     isLoadingSpaceReservations.value = false
   }
@@ -357,9 +362,12 @@ function goToGuests() {
         <p v-if="isLoadingSpaces" class="dash-empty">
           {{ t('app.spacesLoading') }}
         </p>
-        <p v-else-if="spacesLoadError" class="dash-empty dash-empty--error">
-          {{ spacesLoadError }}
-        </p>
+        <LoadErrorRetry
+          v-else-if="spacesLoadError"
+          :message="spacesLoadError"
+          :loading="isLoadingSpaces"
+          @retry="loadSpaces"
+        />
         <p v-else-if="!spaces.length" class="dash-empty">
           {{ t('app.emptySpacesResident') }}
         </p>
@@ -428,7 +436,7 @@ function goToGuests() {
         </h3>
 
         <form class="resident-modal__form" @submit.prevent="onReserveSubmit">
-          <div class="calendar" aria-label="Calendar">
+          <div class="calendar" :aria-label="t('common.calendarAria')">
             <div class="calendar__header">
               <button
                 type="button"
@@ -462,6 +470,12 @@ function goToGuests() {
             >
               {{ t('app.reservationsLoading') }}
             </div>
+            <LoadErrorRetry
+              v-else-if="spaceReservationsLoadError"
+              compact
+              :message="t('app.reservationsLoadError')"
+              @retry="loadSpaceReservations"
+            />
 
             <div class="calendar__grid" role="grid">
               <button

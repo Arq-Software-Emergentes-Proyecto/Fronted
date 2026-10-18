@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
+import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
 import { authApi } from '@/iam/infrastructure/authApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
@@ -18,6 +19,8 @@ const profile = computed(() => state.profile ?? {})
 const incidents = ref([])
 const loading = ref(false)
 const error = ref(null)
+/** RNF012: the incidents list itself failed to load (retryable). */
+const loadFailed = ref(false)
 const composing = ref(false)
 const sending = ref(false)
 const draftTitle = ref('')
@@ -102,13 +105,15 @@ async function loadIncidents() {
   try {
     loading.value = true
     error.value = null
+    loadFailed.value = false
     // RF018: filtrado server-side (el backend solo devuelve las del residente autenticado).
     const own = await incidentsApi.listByResident(residentId)
     incidents.value = own
       .slice()
       .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
   } catch {
-    error.value = t('app.residentsLoadError')
+    error.value = t('app.incidentsLoadError')
+    loadFailed.value = true
   } finally {
     loading.value = false
   }
@@ -145,7 +150,7 @@ async function reportIncident() {
     cancelCompose()
     await loadIncidents()
   } catch (err) {
-    error.value = err?.payload?.message || t('app.residentsLoadError')
+    error.value = err?.payload?.message || t('app.incidentsSaveError')
   } finally {
     sending.value = false
   }
@@ -174,7 +179,8 @@ onBeforeUnmount(() => stopRealtime())
       <h1 class="visually-hidden">{{ t('resident.incidentsTitle') }}</h1>
     </header>
 
-    <p v-if="error" class="inc-alert" role="alert">{{ error }}</p>
+    <LoadErrorRetry v-if="loadFailed" :message="error" :loading="loading" @retry="loadIncidents" />
+    <p v-else-if="error" class="inc-alert" role="alert">{{ error }}</p>
 
     <section v-if="composing" class="inc-form" aria-labelledby="inc-form-heading">
       <h2 id="inc-form-heading" class="inc-form__title">

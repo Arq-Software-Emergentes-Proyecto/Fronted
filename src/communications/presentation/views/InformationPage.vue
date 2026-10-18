@@ -5,6 +5,7 @@ import { useSession } from '@/iam/application/sessionStore.js'
 import { announcementsApi } from '@/communications/infrastructure/announcementsApi.js'
 import AnnouncementForm from '../components/AnnouncementForm.vue'
 import AnnouncementsList from '../components/AnnouncementsList.vue'
+import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 
 const { t } = useI18n()
 const { isAdmin, state: session } = useSession()
@@ -12,6 +13,8 @@ const { isAdmin, state: session } = useSession()
 const announcements = ref([])
 const loading = ref(false)
 const loadError = ref(false)
+/** Publish / delete failures (not retryable from the banner). */
+const actionError = ref('')
 const composing = ref(false)
 const priorityFilter = ref('all')
 
@@ -48,21 +51,28 @@ async function fetchAnnouncements() {
 }
 
 async function handleCreate(payload) {
-  await announcementsApi.add({
-    ...payload,
-    authorId: session.profile?.id ?? '',
-    authorName: session.profile?.name ?? 'Admin',
-  })
+  actionError.value = ''
+  try {
+    await announcementsApi.add({
+      ...payload,
+      authorId: session.profile?.id ?? '',
+      authorName: session.profile?.name ?? 'Admin',
+    })
+  } catch {
+    actionError.value = t('information.publishError')
+    return
+  }
   await fetchAnnouncements()
   composing.value = false
 }
 
 async function handleDelete(id) {
+  actionError.value = ''
   try {
     await announcementsApi.remove(id)
     announcements.value = announcements.value.filter((a) => a.id !== id)
   } catch {
-    loadError.value = true
+    actionError.value = t('information.deleteError')
   }
 }
 
@@ -75,7 +85,13 @@ onMounted(fetchAnnouncements)
       <h1 class="visually-hidden">{{ t('information.pageTitle') }}</h1>
     </header>
 
-    <p v-if="loadError" class="info-alert" role="alert">{{ t('information.loadError') }}</p>
+    <LoadErrorRetry
+      v-if="loadError"
+      :message="t('information.loadError')"
+      :loading="loading"
+      @retry="fetchAnnouncements"
+    />
+    <p v-if="actionError" class="info-alert" role="alert">{{ actionError }}</p>
 
     <AnnouncementForm v-if="isAdmin && composing" @submit="handleCreate" @cancel="cancelCompose" />
 

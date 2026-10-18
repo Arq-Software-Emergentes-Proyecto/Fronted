@@ -139,6 +139,18 @@ export const residentsApi = {
     return publicResident(data)
   },
 
+  /**
+   * IAM AccountStatus: DEACTIVATED residents cannot sign in and every request gets
+   * 403 ACCOUNT_DEACTIVATED (data is kept, unlike delete). Reversible with reactivate.
+   */
+  async setAccountActive(id, active) {
+    const cleanId = String(id ?? '').trim()
+    if (!cleanId) throw apiError('RESIDENT_NOT_FOUND')
+    const action = active ? 'reactivate' : 'deactivate'
+    const { data } = await apiClient.patch(`${USERS_BASE}/${encodeURIComponent(cleanId)}/${action}`)
+    return publicResident(data)
+  },
+
   /** Lookup público por invite token (128-bit). */
   async findByInviteToken(token) {
     const inviteToken = String(token ?? '').trim()

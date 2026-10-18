@@ -49,6 +49,7 @@ export function publicResident(user) {
     billFromNextMonth: Boolean(user.billFromNextMonth),
     inviteToken: user.inviteToken ?? user.InviteToken ?? null,
     inviteExpiresAt: user.inviteExpiresAt ?? user.InviteExpiresAt ?? null,
+    accountStatus: String(user.accountStatus ?? '').toUpperCase() === 'DEACTIVATED' ? 'DEACTIVATED' : 'ACTIVE',
     hasCredentials:
       user.hasCredentials === true ||
       user.authProvider === 'google' ||

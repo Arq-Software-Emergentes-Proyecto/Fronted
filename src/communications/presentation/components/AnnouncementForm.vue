@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -12,6 +12,10 @@ const priority = ref('normal')
 const duration = ref(7)
 const submitting = ref(false)
 const error = ref('')
+/** RNF003: highlight the empty required fields after a submit attempt. */
+const submitAttempted = ref(false)
+const titleInvalid = computed(() => submitAttempted.value && !title.value.trim())
+const bodyInvalid = computed(() => submitAttempted.value && !body.value.trim())
 
 const priorities = [
   { id: 'normal', icon: 'pi pi-megaphone', labelKey: 'information.priorityNormal' },
@@ -28,6 +32,7 @@ function durationLabel(days) {
 }
 
 async function handleSubmit() {
+  submitAttempted.value = true
   if (!title.value.trim() || !body.value.trim()) {
     error.value = t('information.requiredFields')
     return
@@ -48,7 +53,7 @@ async function handleSubmit() {
   <section class="ann-form" aria-labelledby="ann-form-heading">
     <h2 id="ann-form-heading" class="ann-form__title">{{ t('information.newAnnouncement') }}</h2>
 
-    <label class="ann-form__field" for="input-announcement-title">
+    <label class="ann-form__field" :class="{ 'bf-field--invalid': titleInvalid }" for="input-announcement-title">
       <span>{{ t('information.titleLabel') }}</span>
       <input
         id="input-announcement-title"
@@ -56,19 +61,31 @@ async function handleSubmit() {
         type="text"
         :placeholder="t('information.titlePlaceholder')"
         maxlength="120"
+        required
         :disabled="submitting"
+        :aria-invalid="titleInvalid ? 'true' : 'false'"
+        :aria-describedby="titleInvalid ? 'announcement-title-error' : undefined"
       />
+      <small v-if="titleInvalid" id="announcement-title-error" class="bf-field-error">
+        {{ t('common.fieldRequired') }}
+      </small>
     </label>
 
-    <label class="ann-form__field" for="input-announcement-body">
+    <label class="ann-form__field" :class="{ 'bf-field--invalid': bodyInvalid }" for="input-announcement-body">
       <span>{{ t('information.bodyLabel') }}</span>
       <textarea
         id="input-announcement-body"
         v-model="body"
         rows="6"
         :placeholder="t('information.bodyPlaceholder')"
+        required
         :disabled="submitting"
+        :aria-invalid="bodyInvalid ? 'true' : 'false'"
+        :aria-describedby="bodyInvalid ? 'announcement-body-error' : undefined"
       />
+      <small v-if="bodyInvalid" id="announcement-body-error" class="bf-field-error">
+        {{ t('common.fieldRequired') }}
+      </small>
     </label>
 
     <fieldset class="ann-form__group">
@@ -115,7 +132,7 @@ async function handleSubmit() {
       <button
         type="button"
         class="bf-btn bf-btn--confirm"
-        :disabled="submitting || !title.trim() || !body.trim()"
+        :disabled="submitting"
         @click="handleSubmit"
       >
         {{ submitting ? t('information.sending') : t('information.send') }}

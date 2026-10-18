@@ -16,6 +16,7 @@ import {
 import { useResidentPaymentStore } from '@/finances/application/residentPaymentStore.js'
 import { financesApi } from '@/finances/infrastructure/financesApi.js'
 import DebtTrafficLightGrid from '@/finances/presentation/components/DebtTrafficLightGrid.vue'
+import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 
 const { t, locale } = useI18n()
 const { state } = useSession()
@@ -315,7 +316,11 @@ function translateMonth(value) {
     <h1 class="visually-hidden">{{ t('resident.financeTitle') }}</h1>
 
     <div class="finance-page">
-      <p v-if="paymentState.error" class="dash-error">{{ paymentState.error }}</p>
+      <LoadErrorRetry
+        v-if="paymentState.error"
+        :loading="paymentState.isLoading"
+        @retry="loadData(profile.id)"
+      />
 
       <!-- Recibos por pagar -->
       <section class="finance-panel" aria-labelledby="pending-heading">
@@ -443,6 +448,7 @@ function translateMonth(value) {
           :due-soon-days="myCalendar.dueSoonDays"
           :loading="myCalendarLoading"
           :error="myCalendarError"
+          @retry="loadMyCalendar"
         />
       </section>
     </div>

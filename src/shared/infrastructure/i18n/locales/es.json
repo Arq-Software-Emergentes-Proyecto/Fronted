@@ -288,6 +288,17 @@
   "a11y": {
     "skipToContent": "Saltar al contenido principal"
   },
+  "common": {
+    "retry": "Reintentar",
+    "retrying": "Reintentando…",
+    "loadErrorTitle": "No pudimos cargar esta información",
+    "loadErrorBody": "Ocurrió un problema al cargar los datos. Revisa tu conexión e inténtalo de nuevo.",
+    "serviceUnavailable": "BuildingFex no está disponible en este momento. Revisa tu conexión e inténtalo de nuevo en unos minutos.",
+    "fieldRequired": "Este campo es obligatorio.",
+    "fieldsHighlighted": "Revisa los campos resaltados.",
+    "calendarAria": "Calendario de disponibilidad",
+    "chatHistoryAria": "Historial de conversaciones"
+  },
   "guestInvite": {
     "loading": "Cargando invitación…",
     "invalidTitle": "Enlace no disponible",
@@ -361,6 +372,14 @@
     "guestExpiredBody": "El acceso con este enlace y el código QR finalizó 2 horas después del término de la reserva."
   },
   "app": {
+    "residentAccountDeactivated": "Cuenta desactivada",
+    "deactivateResidentAction": "Desactivar cuenta",
+    "reactivateResidentAction": "Reactivar cuenta",
+    "deactivateResidentModalTitle": "Desactivar cuenta del residente",
+    "reactivateResidentModalTitle": "Reactivar cuenta del residente",
+    "deactivateResidentWarning": "{name} no podrá iniciar sesión ni usar la app hasta que reactives su cuenta. Sus datos se conservan.",
+    "reactivateResidentWarning": "{name} podrá volver a iniciar sesión y usar la app.",
+    "residentAccountStatusError": "No se pudo cambiar el estado de la cuenta.",
     "sidebarNav": "Navegación de la aplicación",
     "languageSwitch": "Cambiar entre español e inglés",
     "logout": "Cerrar sesión",
@@ -692,6 +711,7 @@
     "generationGuestNotEntered": "Pendiente"
   },
   "auth": {
+    "accountDeactivated": "Tu cuenta fue desactivada por la administración del condominio.",
     "tabsAria": "Iniciar sesión, registro admin o login de residente",
     "loginTab": "Iniciar sesión",
     "registerTab": "Registro admin",
@@ -719,7 +739,7 @@
     "tooManyRequests": "Demasiados intentos. Espera un momento e inténtalo de nuevo.",
     "emailAlreadyExists": "Ya existe una cuenta con este correo.",
     "genericError": "Ocurrió un error. Inténtalo nuevamente.",
-    "apiUnavailable": "No se pudo conectar con el servidor. Verifica que BuildingFex.Api esté en ejecución (http://localhost:5001) y reinicia el frontend.",
+    "apiUnavailable": "No pudimos conectar con BuildingFex en este momento. Revisa tu conexión a internet e inténtalo de nuevo en unos minutos.",
     "registerTitle": "Registro de admin",
     "completeProfileTitle": "Completa tu perfil",
     "completeProfileHint": "Tu cuenta de acceso ya existe, pero falta el perfil de negocio en el servidor. Completa estos datos para continuar.",
@@ -854,6 +874,68 @@
     "chargeDatesHint": "Periodo {start} – {end} · Se puede pagar desde {open}"
   },
   "teamMgmt": {
+    "positionLabel": "Puesto",
+    "tablePosition": "Puesto",
+    "tableStatus": "Estado",
+    "tableOpenTasks": "Tareas abiertas",
+    "positions": {
+      "CONCIERGE": "Conserje",
+      "MAINTENANCE": "Mantenimiento",
+      "CLEANING": "Limpieza",
+      "SECURITY": "Seguridad"
+    },
+    "statuses": {
+      "ACTIVE": "Activo",
+      "INACTIVE": "Inactivo"
+    },
+    "deactivate": "Desactivar",
+    "reactivate": "Reactivar",
+    "deactivateModalTitle": "Desactivar trabajador",
+    "deactivateConfirm": "¿Desactivar a {name}? No recibirá nuevas tareas ni turnos. Podrás reactivarlo luego.",
+    "reassignLabel": "Tiene {count} tareas abiertas. Reasignarlas a:",
+    "keepTasksAssigned": "No reasignar (quedan a su nombre)",
+    "statusError": "No se pudo cambiar el estado del trabajador.",
+    "taskStatuses": {
+      "PENDING": "Pendiente",
+      "IN_PROGRESS": "En proceso",
+      "COMPLETED": "Completada"
+    },
+    "tasks": {
+      "title": "Tareas de mantenimiento",
+      "allWorkers": "Todos los trabajadores",
+      "allStatuses": "Todos los estados",
+      "workerLabel": "Trabajador",
+      "workerPlaceholder": "Elegir trabajador",
+      "statusLabel": "Estado",
+      "descriptionLabel": "Descripción",
+      "scheduledForLabel": "Programada para",
+      "create": "Crear tarea",
+      "empty": "No hay tareas registradas.",
+      "loadError": "No se pudieron cargar las tareas.",
+      "saveError": "No se pudo guardar la tarea.",
+      "requiredFields": "Elige un trabajador y escribe la descripción.",
+      "workloadExceeded": "El trabajador ya tiene el máximo de tareas abiertas.",
+      "workerInactive": "El trabajador está inactivo.",
+      "invalidTransition": "La tarea ya cambió de estado.",
+      "fromIncident": "incidencia {id}",
+      "actions": "Acciones",
+      "start": "Iniciar",
+      "complete": "Completar",
+      "createFromIncident": "Crear tarea de mantenimiento",
+      "createdFromIncident": "Tarea de mantenimiento creada."
+    },
+    "shifts": {
+      "title": "Turnos",
+      "startLabel": "Inicio",
+      "endLabel": "Fin",
+      "create": "Agregar turno",
+      "empty": "No hay turnos programados.",
+      "loadError": "No se pudieron cargar los turnos.",
+      "saveError": "No se pudo guardar el turno.",
+      "requiredFields": "Elige trabajador, inicio y fin.",
+      "invalidRange": "El fin debe ser posterior al inicio (máximo 24 horas).",
+      "overlap": "El turno se cruza con otro turno del mismo trabajador."
+    },
     "addWorker": "Agregar trabajador",
     "modalTitle": "Agregar trabajador",
     "nameLabel": "Nombre completo",
@@ -1201,11 +1283,34 @@
     "empty": "Aún no hay comunicados. Cuando se publique uno, aparecerá aquí.",
     "deleteConfirm": "¿Eliminar este comunicado?",
     "deleteError": "No se pudo eliminar el comunicado.",
+    "publishError": "No se pudo publicar el comunicado. Inténtalo de nuevo.",
     "cancel": "Cancelar",
     "close": "Cerrar",
     "delete": "Eliminar"
   },
   "importView": {
+    "documentTypes": {
+      "REGULATION": "Reglamento",
+      "MINUTES": "Acta",
+      "OTHER": "Otro"
+    },
+    "documentStatuses": {
+      "PUBLISHED": "Vigente",
+      "SUPERSEDED": "Reemplazado",
+      "ARCHIVED": "Archivado",
+      "PENDING_UPLOAD": "Subida pendiente"
+    },
+    "documentAction": "Tipo y vigencia",
+    "documentModalTitle": "Tipo y vigencia del documento",
+    "documentTypeLabel": "Tipo de documento",
+    "supersedesLabel": "Reemplaza al documento vigente",
+    "supersedesNone": "No reemplaza a ninguno",
+    "documentCurrentHint": "El asistente IA solo responde con documentos vigentes. Al reemplazar o archivar, el anterior deja de usarse.",
+    "documentActionError": "No se pudo actualizar el documento.",
+    "saveTypeAction": "Guardar tipo",
+    "archiveAction": "Archivar",
+    "publishAction": "Publicar",
+    "publishVersionAction": "Publicar como nueva versión",
     "subtitle": "Sube documentos para tenerlos a mano. Se guardan por edificio y se agrupan por día de subida.",
     "dropTitle": "Arrastra archivos aquí",
     "dropHint": "o haz clic para elegir desde tu equipo",

@@ -7,6 +7,7 @@ import { adminManagementExpensesApi } from '@/finances/infrastructure/adminManag
 import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
 import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.js'
 import { spacesApi } from '@/socialSpaces/infrastructure/spacesApi.js'
+import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 
 const { t, locale } = useI18n()
 
@@ -70,7 +71,10 @@ const trendLabel = computed(() => {
 async function refreshKpi() {
   try {
     const data = await financesApi.getDashboardKpis()
-    if (data && typeof data === 'object') applyKpi(data)
+    if (data && typeof data === 'object') {
+      applyKpi(data)
+      kpiLoadFailed.value = false
+    }
   } catch {
     // Silencioso: se mantiene el último valor mostrado.
   }
@@ -97,6 +101,9 @@ const reservations = ref([])
 const spacesById = ref(new Map())
 const isLoading = ref(true)
 const chartHasData = ref(false)
+/** RNF012: main dashboard loads that failed (shown with a retry action). */
+const kpiLoadFailed = ref(false)
+const listsLoadFailed = ref(false)
 
 function todayKey() {
   const d = new Date()
@@ -241,7 +248,10 @@ async function loadAdminChart(kpiData) {
   applyChartData(buildChartFromTransactions(payments, expenses, receipts))
 }
 
-onMounted(async () => {
+async function loadDashboard() {
+  isLoading.value = true
+  kpiLoadFailed.value = false
+  listsLoadFailed.value = false
   try {
     const [kpiResult, incidentsResult, reservationsResult, spacesResult] = await Promise.allSettled([
       financesApi.getDashboardKpis(),
@@ -249,6 +259,9 @@ onMounted(async () => {
       reservationsApi.listAllForAdmin(),
       spacesApi.list(),
     ])
+
+    kpiLoadFailed.value = kpiResult.status === 'rejected'
+    listsLoadFailed.value = [incidentsResult, reservationsResult, spacesResult].some((r) => r.status === 'rejected')
 
     const kpiData = kpiResult.status === 'fulfilled' ? kpiResult.value : null
     if (kpiData && typeof kpiData === 'object') {
@@ -270,10 +283,13 @@ onMounted(async () => {
     spacesById.value = new Map((Array.isArray(spaces) ? spaces : []).map((s) => [s.id, s]))
   } catch (error) {
     console.error('Error loading dashboard data:', error)
+    kpiLoadFailed.value = true
   } finally {
     isLoading.value = false
   }
-})
+}
+
+onMounted(loadDashboard)
 
 function incidentStatusLabel(status) {
   switch (status) {
@@ -362,6 +378,12 @@ const chartOptions = ref({
         <h2 id="dashboard-kpi-heading" class="finance-panel__section-title">
           {{ t('dashboard.financialOverview') }}
         </h2>
+
+        <LoadErrorRetry
+          v-if="!isLoading && (kpiLoadFailed || listsLoadFailed)"
+          :loading="isLoading"
+          @retry="loadDashboard"
+        />
 
         <div class="kpi-grid custom-scrollbar">
           <div class="kpi-card">

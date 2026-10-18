@@ -288,6 +288,17 @@
   "a11y": {
     "skipToContent": "Skip to main content"
   },
+  "common": {
+    "retry": "Retry",
+    "retrying": "Retrying…",
+    "loadErrorTitle": "We couldn't load this information",
+    "loadErrorBody": "Something went wrong while loading the data. Check your connection and try again.",
+    "serviceUnavailable": "BuildingFex is temporarily unavailable. Check your connection and try again in a few minutes.",
+    "fieldRequired": "This field is required.",
+    "fieldsHighlighted": "Review the highlighted fields.",
+    "calendarAria": "Availability calendar",
+    "chatHistoryAria": "Chat history"
+  },
   "guestInvite": {
     "loading": "Loading invitation…",
     "invalidTitle": "Link not available",
@@ -361,6 +372,14 @@
     "guestExpiredBody": "Access with this link and QR code ended 2 hours after the booking finished."
   },
   "app": {
+    "residentAccountDeactivated": "Account deactivated",
+    "deactivateResidentAction": "Deactivate account",
+    "reactivateResidentAction": "Reactivate account",
+    "deactivateResidentModalTitle": "Deactivate resident account",
+    "reactivateResidentModalTitle": "Reactivate resident account",
+    "deactivateResidentWarning": "{name} will not be able to sign in or use the app until you reactivate the account. Their data is kept.",
+    "reactivateResidentWarning": "{name} will be able to sign in and use the app again.",
+    "residentAccountStatusError": "Could not change the account status.",
     "sidebarNav": "App navigation",
     "languageSwitch": "Switch between English and Spanish",
     "logout": "Log out",
@@ -692,6 +711,7 @@
     "generationGuestNotEntered": "Not yet"
   },
   "auth": {
+    "accountDeactivated": "Your account was deactivated by the building administration.",
     "tabsAria": "Sign in, admin register, or resident login",
     "loginTab": "Sign in",
     "registerTab": "Admin register",
@@ -719,7 +739,7 @@
     "tooManyRequests": "Too many attempts. Wait a moment and try again.",
     "emailAlreadyExists": "An account with this email already exists.",
     "genericError": "Something went wrong. Please try again.",
-    "apiUnavailable": "Could not reach the API. Make sure BuildingFex.Api is running (http://localhost:5001) and restart the frontend.",
+    "apiUnavailable": "We couldn't connect to BuildingFex right now. Check your internet connection and try again in a few minutes.",
     "registerTitle": "Admin registration",
     "completeProfileTitle": "Complete your profile",
     "completeProfileHint": "Your login account exists, but the business profile is missing on the server. Fill in these details to continue.",
@@ -854,6 +874,68 @@
     "chargeDatesHint": "Period {start} – {end} · Payable from {open}"
   },
   "teamMgmt": {
+    "positionLabel": "Position",
+    "tablePosition": "Position",
+    "tableStatus": "Status",
+    "tableOpenTasks": "Open tasks",
+    "positions": {
+      "CONCIERGE": "Concierge",
+      "MAINTENANCE": "Maintenance",
+      "CLEANING": "Cleaning",
+      "SECURITY": "Security"
+    },
+    "statuses": {
+      "ACTIVE": "Active",
+      "INACTIVE": "Inactive"
+    },
+    "deactivate": "Deactivate",
+    "reactivate": "Reactivate",
+    "deactivateModalTitle": "Deactivate worker",
+    "deactivateConfirm": "Deactivate {name}? They will not receive new tasks or shifts. You can reactivate them later.",
+    "reassignLabel": "They have {count} open tasks. Reassign them to:",
+    "keepTasksAssigned": "Do not reassign (keep them assigned)",
+    "statusError": "Could not change the worker status.",
+    "taskStatuses": {
+      "PENDING": "Pending",
+      "IN_PROGRESS": "In progress",
+      "COMPLETED": "Completed"
+    },
+    "tasks": {
+      "title": "Maintenance tasks",
+      "allWorkers": "All workers",
+      "allStatuses": "All statuses",
+      "workerLabel": "Worker",
+      "workerPlaceholder": "Choose a worker",
+      "statusLabel": "Status",
+      "descriptionLabel": "Description",
+      "scheduledForLabel": "Scheduled for",
+      "create": "Create task",
+      "empty": "No tasks yet.",
+      "loadError": "Could not load tasks.",
+      "saveError": "Could not save the task.",
+      "requiredFields": "Choose a worker and enter a description.",
+      "workloadExceeded": "This worker already has the maximum number of open tasks.",
+      "workerInactive": "This worker is inactive.",
+      "invalidTransition": "The task status already changed.",
+      "fromIncident": "incident {id}",
+      "actions": "Actions",
+      "start": "Start",
+      "complete": "Complete",
+      "createFromIncident": "Create maintenance task",
+      "createdFromIncident": "Maintenance task created."
+    },
+    "shifts": {
+      "title": "Shifts",
+      "startLabel": "Start",
+      "endLabel": "End",
+      "create": "Add shift",
+      "empty": "No upcoming shifts.",
+      "loadError": "Could not load shifts.",
+      "saveError": "Could not save the shift.",
+      "requiredFields": "Choose a worker, start and end.",
+      "invalidRange": "The end must be after the start (24 hours max).",
+      "overlap": "This shift overlaps another shift of the same worker."
+    },
     "addWorker": "Add worker",
     "modalTitle": "Add worker",
     "nameLabel": "Full name",
@@ -903,6 +985,9 @@
     "tableAmount": "Amount",
     "tableDate": "Purchase date",
     "emptyCosts": "No costs yet. Register one with the button above.",
+    "emptyHeading": "Building balance",
+    "selectPrompt": "Choose a transaction to see its details.",
+    "recents": "Transactions",
     "loadCostsError": "Could not load expenses.",
     "saveCostError": "Could not save the expense.",
     "requiredCostFields": "Enter name, amount, and purchase date.",
@@ -1198,11 +1283,34 @@
     "empty": "No announcements yet. When an announcement is published, it will appear here.",
     "deleteConfirm": "Delete this announcement?",
     "deleteError": "Could not delete the announcement.",
+    "publishError": "Could not publish the announcement. Try again.",
     "cancel": "Cancel",
     "close": "Close",
     "delete": "Delete"
   },
   "importView": {
+    "documentTypes": {
+      "REGULATION": "Regulation",
+      "MINUTES": "Minutes",
+      "OTHER": "Other"
+    },
+    "documentStatuses": {
+      "PUBLISHED": "Current",
+      "SUPERSEDED": "Superseded",
+      "ARCHIVED": "Archived",
+      "PENDING_UPLOAD": "Upload pending"
+    },
+    "documentAction": "Type and validity",
+    "documentModalTitle": "Document type and validity",
+    "documentTypeLabel": "Document type",
+    "supersedesLabel": "Replaces current document",
+    "supersedesNone": "Does not replace any",
+    "documentCurrentHint": "The AI assistant only answers from current documents. Replacing or archiving stops using the previous one.",
+    "documentActionError": "Could not update the document.",
+    "saveTypeAction": "Save type",
+    "archiveAction": "Archive",
+    "publishAction": "Publish",
+    "publishVersionAction": "Publish as new version",
     "subtitle": "Upload documents to keep them on hand. They are stored per building and grouped by upload day.",
     "dropTitle": "Drag files here",
     "dropHint": "or click to choose from your device",

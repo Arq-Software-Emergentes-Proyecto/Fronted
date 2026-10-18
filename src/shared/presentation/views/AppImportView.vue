@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Button from 'primevue/button'
-import { importUploadsApi } from '@/communications/infrastructure/importUploadsApi.js'
+import { importUploadsApi, DOCUMENT_TYPES } from '@/communications/infrastructure/importUploadsApi.js'
 import { importFoldersApi, isContextFolder, isHomeFolder, isSystemFolder } from '@/communications/infrastructure/importFoldersApi.js'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 
@@ -512,6 +512,80 @@ async function onDiscard(id) {
   }
 }
 
+/**
+ * OfficialDocument (Communications 5.7): type, version and validity. Only PUBLISHED documents are
+ * "vigentes" and feed the AI assistant (RF033); publishing a new version supersedes the previous one.
+ */
+const docCandidate = ref(null)
+const docType = ref('OTHER')
+const docSupersedesId = ref('')
+const docSaving = ref(false)
+const docError = ref('')
+
+function documentStatusOf(file) {
+  return String(file?.documentStatus ?? 'PUBLISHED').toUpperCase()
+}
+
+function documentTypeLabel(type) {
+  const value = String(type ?? 'OTHER').toUpperCase()
+  return DOCUMENT_TYPES.includes(value) ? t(`importView.documentTypes.${value}`) : t('importView.documentTypes.OTHER')
+}
+
+function documentStatusLabel(file) {
+  const status = documentStatusOf(file)
+  return ['PUBLISHED', 'SUPERSEDED', 'ARCHIVED', 'PENDING_UPLOAD'].includes(status)
+    ? t(`importView.documentStatuses.${status}`)
+    : status
+}
+
+const supersedeOptions = computed(() =>
+  items.value.filter(
+    (file) => file.id !== docCandidate.value?.id && documentStatusOf(file) === 'PUBLISHED',
+  ),
+)
+
+function openDocModal(file) {
+  docCandidate.value = file
+  docType.value = String(file.documentType ?? 'OTHER').toUpperCase()
+  docSupersedesId.value = ''
+  docError.value = ''
+}
+
+function closeDocModal() {
+  if (docSaving.value) return
+  docCandidate.value = null
+}
+
+function mergeDocRows(...rows) {
+  const byId = new Map(rows.filter(Boolean).map((row) => [row.id, row]))
+  items.value = items.value.map((row) => (byId.has(row.id) ? { ...row, ...byId.get(row.id) } : row))
+}
+
+async function runDocAction(action) {
+  const file = docCandidate.value
+  if (!file || docSaving.value) return
+  docSaving.value = true
+  docError.value = ''
+  try {
+    if (action === 'type') {
+      mergeDocRows(await importUploadsApi.setDocumentType(file.id, docType.value))
+    } else if (action === 'publish') {
+      const result = await importUploadsApi.publish(file.id, {
+        supersedesId: docSupersedesId.value || null,
+        documentType: docType.value,
+      })
+      mergeDocRows(result?.document, result?.superseded)
+    } else if (action === 'archive') {
+      mergeDocRows(await importUploadsApi.archive(file.id))
+    }
+    docCandidate.value = null
+  } catch {
+    docError.value = t('importView.documentActionError')
+  } finally {
+    docSaving.value = false
+  }
+}
+
 onMounted(loadList)
 </script>
 
@@ -704,6 +778,16 @@ onMounted(loadList)
                           · {{ indexingLabel(file.indexingStatus) }}
                         </span>
                       </p>
+                      <p class="r-card__meta r-card__doc">
+                        <span>{{ documentTypeLabel(file.documentType) }}</span>
+                        <span v-if="file.version"> · v{{ file.version }}</span>
+                        <span
+                          class="r-card__doc-status"
+                          :data-status="documentStatusOf(file)"
+                        >
+                          · {{ documentStatusLabel(file) }}
+                        </span>
+                      </p>
                     </div>
                     <div class="r-card__actions">
                       <button
@@ -715,6 +799,16 @@ onMounted(loadList)
                         @click="onDownload(file)"
                       >
                         <i class="pi pi-download" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        class="r-card__icon-btn"
+                        :title="t('importView.documentAction')"
+                        :aria-label="t('importView.documentAction')"
+                        :disabled="docSaving"
+                        @click="openDocModal(file)"
+                      >
+                        <i class="pi pi-verified" aria-hidden="true" />
                       </button>
                       <button
                         type="button"
@@ -784,6 +878,73 @@ onMounted(loadList)
             @cancel="closeEditModal"
           />
         </form>
+      </section>
+    </div>
+
+    <div
+      v-if="docCandidate"
+      class="resident-modal-backdrop bf-modal-backdrop"
+      role="presentation"
+      @click.self="closeDocModal"
+    >
+      <section
+        class="resident-modal bf-modal-panel"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="t('importView.documentModalTitle')"
+      >
+        <h3 class="resident-modal__title">{{ t('importView.documentModalTitle') }}</h3>
+        <div class="resident-modal__form">
+          <p class="resident-modal__hint">
+            {{ docCandidate.fileName }} · v{{ docCandidate.version || 1 }} · {{ documentStatusLabel(docCandidate) }}
+          </p>
+          <label class="resident-modal__field">
+            <span>{{ t('importView.documentTypeLabel') }}</span>
+            <select v-model="docType" :disabled="docSaving">
+              <option v-for="type in DOCUMENT_TYPES" :key="type" :value="type">
+                {{ documentTypeLabel(type) }}
+              </option>
+            </select>
+          </label>
+          <label v-if="supersedeOptions.length" class="resident-modal__field">
+            <span>{{ t('importView.supersedesLabel') }}</span>
+            <select v-model="docSupersedesId" :disabled="docSaving">
+              <option value="">{{ t('importView.supersedesNone') }}</option>
+              <option v-for="other in supersedeOptions" :key="other.id" :value="other.id">
+                {{ other.fileName }} (v{{ other.version || 1 }})
+              </option>
+            </select>
+          </label>
+          <p class="resident-modal__hint">{{ t('importView.documentCurrentHint') }}</p>
+          <p v-if="docError" class="resident-modal__error">{{ docError }}</p>
+          <div class="import-doc-actions">
+            <button type="button" class="bf-btn" :disabled="docSaving" @click="closeDocModal">
+              {{ t('app.cancelAction') }}
+            </button>
+            <button type="button" class="bf-btn" :disabled="docSaving" @click="runDocAction('type')">
+              {{ t('importView.saveTypeAction') }}
+            </button>
+            <button
+              v-if="documentStatusOf(docCandidate) === 'PUBLISHED'"
+              type="button"
+              class="bf-btn bf-btn--danger"
+              :disabled="docSaving"
+              @click="runDocAction('archive')"
+            >
+              {{ t('importView.archiveAction') }}
+            </button>
+            <button
+              v-if="documentStatusOf(docCandidate) !== 'PUBLISHED' || docSupersedesId"
+              type="button"
+              class="bf-btn bf-btn--confirm"
+              :disabled="docSaving"
+              @click="runDocAction('publish')"
+            >
+              <span v-if="docSaving" class="bf-btn__spinner" aria-hidden="true" />
+              {{ docSupersedesId ? t('importView.publishVersionAction') : t('importView.publishAction') }}
+            </button>
+          </div>
+        </div>
       </section>
     </div>
 
@@ -1321,6 +1482,33 @@ onMounted(loadList)
 .resident-modal__field input:focus {
   outline: none;
   border-color: #0071e3;
+}
+
+.resident-modal__field select {
+  border: 1px solid #d2d2d7;
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+  color: #1d1d1f;
+  font-weight: 400;
+  background: #fff;
+}
+
+.import-doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.r-card__doc-status[data-status='PUBLISHED'] {
+  color: #1a7f37;
+  font-weight: 600;
+}
+
+.r-card__doc-status[data-status='SUPERSEDED'],
+.r-card__doc-status[data-status='ARCHIVED'] {
+  color: #8a4b00;
 }
 
 .resident-modal__error {

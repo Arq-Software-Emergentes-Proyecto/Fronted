@@ -6,6 +6,7 @@ import InputNumber from 'primevue/inputnumber'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
+import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import { residentExtraChargesApi } from '../../../finances/infrastructure/residentExtraChargesApi.js'
 import { useFinancesStore } from '../../../finances/application/financesStore.js'
 import { financesApi } from '../../../finances/infrastructure/financesApi.js'
@@ -54,6 +55,9 @@ const chargeForm = ref({
   paymentOpen: '',
 })
 const chargeError = ref('')
+/** RNF003: highlighted fields of the monthly-charge and extra-charge forms. */
+const chargeInvalid = ref({ month: false, paymentOpen: false, amount: false })
+const extraInvalid = ref({ resident: false, title: false, amount: false, description: false })
 const isSavingCharge = ref(false)
 
 const selectedCharge = computed(() =>
@@ -122,14 +126,16 @@ function settingsPayload() {
   }
 }
 
-onMounted(async () => {
+async function loadFinancePage() {
   await store.loadData()
   applySettingsToForm(store.state.settings)
   resetChargeForm()
   extraCharges.value = await residentExtraChargesApi.list().catch(() => [])
   uiState.value.isLoaded = true
   await Promise.all([loadBillingAlerts(), loadCalendar()])
-})
+}
+
+onMounted(loadFinancePage)
 
 // --- RF021 / US021: alertas de facturación + generación manual (TS003) ---
 const billingAlerts = ref([])
@@ -285,17 +291,20 @@ function selectExtraResident(resident) {
 function resetExtraForm() {
   extraForm.value = { title: '', amount: null, description: '' }
   extraError.value = ''
+  extraInvalid.value = { resident: false, title: false, amount: false, description: false }
 }
 
 async function onAddExtraCharge() {
-  if (!selectedResidentId.value) {
-    extraError.value = t('financeAdmin.extraRequired')
-    return
-  }
   const title = String(extraForm.value.title ?? '').trim()
   const description = String(extraForm.value.description ?? '').trim()
   const amount = Number(extraForm.value.amount)
-  if (!title || !description || !Number.isFinite(amount) || amount <= 0) {
+  extraInvalid.value = {
+    resident: !selectedResidentId.value,
+    title: !title,
+    amount: extraForm.value.amount == null || !Number.isFinite(amount) || amount <= 0,
+    description: !description,
+  }
+  if (Object.values(extraInvalid.value).some(Boolean)) {
     extraError.value = t('financeAdmin.extraRequired')
     return
   }
@@ -314,7 +323,7 @@ async function onAddExtraCharge() {
     await store.loadData()
     applySettingsToForm(store.state.settings)
   } catch (e) {
-    extraError.value = e.message
+    extraError.value = e?.payload?.message || t('auth.genericError')
   } finally {
     isSavingExtra.value = false
   }
@@ -338,7 +347,12 @@ async function onSaveCharge() {
     chargeError.value = t('financeAdmin.chargeLocked', { month: chargeMonthLabel(month) })
     return
   }
-  if (!month || !Number.isFinite(amount) || amount <= 0 || !paymentOpen) {
+  chargeInvalid.value = {
+    month: !month,
+    paymentOpen: !paymentOpen,
+    amount: chargeForm.value.amount == null || !Number.isFinite(amount) || amount <= 0,
+  }
+  if (Object.values(chargeInvalid.value).some(Boolean)) {
     chargeError.value = t('financeAdmin.chargeRequired')
     return
   }
@@ -359,7 +373,7 @@ async function onSaveCharge() {
     await loadBillingAlerts()
     alert(t('financeAdmin.chargeSaved'))
   } catch (e) {
-    chargeError.value = e.message
+    chargeError.value = e?.payload?.message || t('auth.genericError')
   } finally {
     isSavingCharge.value = false
   }
@@ -481,6 +495,11 @@ const residentsStatusMonthLabel = computed(() =>
 <template>
   <div v-if="uiState.isLoaded" class="app-view">
     <div class="finance-page">
+      <LoadErrorRetry
+        v-if="store.state.error"
+        :loading="store.state.isLoading"
+        @retry="loadFinancePage"
+      />
       <div
         v-for="alertItem in billingAlerts"
         :key="`${alertItem.code}-${alertItem.month}`"
@@ -522,7 +541,10 @@ const residentsStatusMonthLabel = computed(() =>
               v-model="chargeForm.month"
               type="month"
               class="settings-native-input"
-              @change="onChargeMonthChange"
+              required
+              :aria-invalid="chargeInvalid.month ? 'true' : 'false'"
+              :aria-describedby="chargeInvalid.month ? 'charge-form-error' : undefined"
+              @change="chargeInvalid.month = false; onChargeMonthChange()"
             />
           </label>
           <div class="settings-field">
@@ -536,7 +558,11 @@ const residentsStatusMonthLabel = computed(() =>
               v-model="chargeForm.paymentOpen"
               type="date"
               class="settings-native-input"
+              required
               :disabled="isChargeRegistered"
+              :aria-invalid="chargeInvalid.paymentOpen ? 'true' : 'false'"
+              :aria-describedby="chargeInvalid.paymentOpen ? 'charge-form-error' : undefined"
+              @input="chargeInvalid.paymentOpen = false"
             />
           </label>
           <label class="settings-field" for="chargeAmount">
@@ -552,12 +578,15 @@ const residentsStatusMonthLabel = computed(() =>
               locale="es-PE"
               class="settings-input"
               :disabled="isChargeRegistered"
+              :invalid="chargeInvalid.amount"
+              :pt="{ pcInputText: { root: { 'aria-describedby': chargeInvalid.amount ? 'charge-form-error' : undefined } } }"
+              @update:model-value="chargeInvalid.amount = false"
             />
           </label>
         </div>
 
         <div class="settings-actions">
-          <p v-if="chargeError" class="settings-error">{{ chargeError }}</p>
+          <p v-if="chargeError" id="charge-form-error" class="settings-error" role="alert">{{ chargeError }}</p>
           <p v-else-if="isChargeRegistered" class="settings-locked">
             {{ t('financeAdmin.chargeLocked', { month: chargeMonthLabel(chargeForm.month) }) }}
           </p>
@@ -680,6 +709,7 @@ const residentsStatusMonthLabel = computed(() =>
           :due-soon-days="calendar.dueSoonDays"
           :loading="calendarLoading"
           :error="calendarError"
+          @retry="loadCalendar"
         />
       </section>
 
@@ -737,7 +767,11 @@ const residentsStatusMonthLabel = computed(() =>
               type="text"
               maxlength="80"
               class="settings-native-input"
+              required
               :disabled="!selectedResidentId"
+              :aria-invalid="extraInvalid.title ? 'true' : 'false'"
+              :aria-describedby="extraInvalid.title ? 'extra-form-error' : undefined"
+              @input="extraInvalid.title = false"
             />
           </label>
           <label class="settings-field" for="extraAmount">
@@ -753,6 +787,9 @@ const residentsStatusMonthLabel = computed(() =>
               locale="es-PE"
               class="settings-input"
               :disabled="!selectedResidentId"
+              :invalid="extraInvalid.amount"
+              :pt="{ pcInputText: { root: { 'aria-describedby': extraInvalid.amount ? 'extra-form-error' : undefined } } }"
+              @update:model-value="extraInvalid.amount = false"
             />
           </label>
           <label class="settings-field extra-form-grid__full" for="extraDescription">
@@ -763,13 +800,17 @@ const residentsStatusMonthLabel = computed(() =>
               class="settings-native-input settings-textarea"
               maxlength="240"
               rows="2"
+              required
               :disabled="!selectedResidentId"
+              :aria-invalid="extraInvalid.description ? 'true' : 'false'"
+              :aria-describedby="extraInvalid.description ? 'extra-form-error' : undefined"
+              @input="extraInvalid.description = false"
             />
           </label>
         </div>
 
         <div class="settings-actions">
-          <p v-if="extraError" class="settings-error">{{ extraError }}</p>
+          <p v-if="extraError" id="extra-form-error" class="settings-error" role="alert">{{ extraError }}</p>
           <Button
             type="button"
             class="import-dropzone__btn"

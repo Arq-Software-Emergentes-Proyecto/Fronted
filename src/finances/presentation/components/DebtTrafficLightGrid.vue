@@ -7,6 +7,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { formatMonthLabel } from '@/finances/domain/billingCycle.js'
+import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 
 const props = defineProps({
   months: { type: Array, default: () => [] },
@@ -17,6 +18,9 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   error: { type: String, default: '' },
 })
+
+/** RNF012: parent reloads the calendar. */
+defineEmits(['retry'])
 
 const { t, locale } = useI18n()
 
@@ -82,7 +86,7 @@ const legend = computed(() => [
     </ul>
 
     <p v-if="loading" class="tl-empty">…</p>
-    <p v-else-if="error" class="tl-empty tl-empty--error" role="alert">{{ error }}</p>
+    <LoadErrorRetry v-else-if="error" compact :message="error" @retry="$emit('retry')" />
     <p v-else-if="!residents.length" class="tl-empty">{{ t('financeOps.trafficEmpty') }}</p>
 
     <div v-else-if="compact" class="tl-strip" role="list">

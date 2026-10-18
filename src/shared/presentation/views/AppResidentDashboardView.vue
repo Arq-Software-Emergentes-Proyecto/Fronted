@@ -12,6 +12,7 @@ import {
 } from '@/communications/domain/model/announcementConstants.js'
 import noAnnouncementsIllustration from '@/communications/presentation/assets/no-announcements.svg'
 import { useResidentPaymentStore } from '@/finances/application/residentPaymentStore.js'
+import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 
 const { t, locale } = useI18n()
 const { state: sessionState } = useSession()
@@ -28,6 +29,13 @@ const isLoadingAnnouncements = ref(false)
 
 const incidents = ref([])
 const isLoadingIncidents = ref(false)
+
+/** RNF012: the dashboard data (or the finance summary) could not be loaded. */
+const dashboardLoadFailed = ref(false)
+const isRetrying = ref(false)
+const showLoadError = computed(
+  () => !isLoadingReservations.value && (dashboardLoadFailed.value || Boolean(paymentState.error)),
+)
 
 const currentIndex = ref(0)
 const showAllAnnouncements = ref(false)
@@ -304,6 +312,7 @@ async function loadInitialData() {
   isLoadingReservations.value = true
   isLoadingAnnouncements.value = true
   isLoadingIncidents.value = true
+  dashboardLoadFailed.value = false
 
   try {
     const [resList, spaces, annList, allIncidents] = await Promise.all([
@@ -323,6 +332,7 @@ async function loadInitialData() {
     await loadFinanceData(profile.value.id)
   } catch (err) {
     console.error('Error loading dashboard data', err)
+    dashboardLoadFailed.value = true
   } finally {
     isLoadingReservations.value = false
     isLoadingAnnouncements.value = false
@@ -338,6 +348,15 @@ watch(
     }
   },
 )
+
+async function retryLoad() {
+  isRetrying.value = true
+  try {
+    await loadInitialData()
+  } finally {
+    isRetrying.value = false
+  }
+}
 
 onMounted(() => {
   loadInitialData()
@@ -355,6 +374,8 @@ onMounted(() => {
         <h2 id="resident-kpi-heading" class="finance-panel__section-title">
           {{ t('resident.financeChartTitle') }}
         </h2>
+
+        <LoadErrorRetry v-if="showLoadError" :loading="isRetrying" @retry="retryLoad" />
 
         <div class="kpi-grid custom-scrollbar">
           <div class="kpi-card" :class="{ 'card-danger': financeSummary.overdue > 0 }">

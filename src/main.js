@@ -8,6 +8,7 @@ import router from '@/shared/presentation/router'
 import '@/shared/presentation/assets/main.css'
 import 'primeicons/primeicons.css'
 import { syncDocumentLocale } from '@/shared/application/syncDocumentLocale.js'
+import { storeLocale } from '@/shared/infrastructure/i18n/localePreference.js'
 import { startFirebaseAnalytics } from '@/iam/infrastructure/firebaseApp.js'
 import { hydratePreviewMockFromBrowser } from '@/shared/infrastructure/mock/hydratePreviewMock.js'
 
@@ -29,8 +30,10 @@ hydratePreviewMockFromBrowser().finally(() => {
 
 watch(
   () => i18n.global.locale.value,
-  (loc) => {
+  (loc, previous) => {
     syncDocumentLocale(loc)
+    // Persist only explicit changes, so a browser-derived default can still follow the browser.
+    if (previous !== undefined) storeLocale(loc)
   },
   { immediate: true },
 )

@@ -101,7 +101,38 @@ export const importUploadsApi = {
     if (!cleanId) return
     await apiClient.delete(`${BASE}/${encodeURIComponent(cleanId)}`)
   },
+
+  /** OfficialDocument type: REGULATION | MINUTES | OTHER. */
+  async setDocumentType(id, documentType) {
+    const cleanId = String(id ?? '').trim()
+    if (!cleanId) return null
+    const { data } = await apiClient.patch(`${BASE}/${encodeURIComponent(cleanId)}`, {
+      documentType: String(documentType ?? '').toUpperCase(),
+    })
+    return data
+  },
+
+  /**
+   * Publica el documento (vigente). Con supersedesId, el anterior queda SUPERSEDED y el
+   * asistente deja de usarlo (RF033). Respuesta: { document, superseded }.
+   */
+  async publish(id, { supersedesId, documentType } = {}) {
+    const cleanId = String(id ?? '').trim()
+    const body = {}
+    if (supersedesId) body.supersedesId = String(supersedesId)
+    if (documentType) body.documentType = String(documentType).toUpperCase()
+    const { data } = await apiClient.post(`${BASE}/${encodeURIComponent(cleanId)}/publish`, body)
+    return data
+  },
+
+  async archive(id) {
+    const cleanId = String(id ?? '').trim()
+    const { data } = await apiClient.post(`${BASE}/${encodeURIComponent(cleanId)}/archive`)
+    return data
+  },
 }
+
+export const DOCUMENT_TYPES = Object.freeze(['REGULATION', 'MINUTES', 'OTHER'])
 
 function guessMime(file) {
   const typed = String(file?.type || '').trim().toLowerCase()

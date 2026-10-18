@@ -5,12 +5,16 @@ import { useI18n } from 'vue-i18n'
 import QRCode from 'qrcode'
 import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.js'
 import { reservationInviteExpiresAtMs } from '@/shared/infrastructure/api/utils.js'
+import LocaleSwitch from '@/shared/presentation/components/LocaleSwitch.vue'
+import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 
 const route = useRoute()
 const { t, locale } = useI18n()
 
 const loading = ref(true)
 const loadError = ref(false)
+/** RNF012: the server could not be reached (retryable), as opposed to an invalid / unknown pass. */
+const loadUnavailable = ref(false)
 const bundle = ref(null)
 const nowMs = ref(Date.now())
 const qrSrc = ref('')
@@ -73,11 +77,14 @@ async function loadInvite() {
   }
   loading.value = true
   loadError.value = false
+  loadUnavailable.value = false
   bundle.value = null
   try {
     bundle.value = await reservationsApi.getPublicInviteByToken(token)
-  } catch {
+  } catch (error) {
     loadError.value = true
+    loadUnavailable.value =
+      error?.code === 'NETWORK_ERROR' || error?.code === 'TIMEOUT' || Number(error?.status) >= 500
     bundle.value = null
   } finally {
     loading.value = false
@@ -157,10 +164,17 @@ const slotSummary = computed(() => {
 <template>
   <div class="invite-page">
     <div class="invite-card">
-      <p class="invite-brand">{{ t('brand') }}</p>
+      <div class="invite-top">
+        <p class="invite-brand">{{ t('brand') }}</p>
+        <LocaleSwitch />
+      </div>
 
       <template v-if="loading">
         <p class="invite-muted">{{ t('guestInvite.loading') }}</p>
+      </template>
+
+      <template v-else-if="loadUnavailable">
+        <LoadErrorRetry :message="t('common.serviceUnavailable')" :loading="loading" @retry="loadInvite" />
       </template>
 
       <template v-else-if="loadError || !bundle">
@@ -244,8 +258,16 @@ const slotSummary = computed(() => {
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
 }
 
-.invite-brand {
+.invite-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   margin: 0 0 1rem;
+}
+
+.invite-brand {
+  margin: 0;
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.06em;

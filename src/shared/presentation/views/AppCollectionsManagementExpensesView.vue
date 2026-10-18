@@ -19,6 +19,7 @@ import { adminManagementExpensesApi } from '@/finances/infrastructure/adminManag
 import { sharedUtilityServicesApi } from '@/finances/infrastructure/sharedUtilityServicesApi.js'
 import { useFinancesStore } from '@/finances/application/financesStore.js'
 import { financesApi } from '@/finances/infrastructure/financesApi.js'
+import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 
 const { t, locale } = useI18n()
 const { state, loadData } = useFinancesStore()
@@ -598,9 +599,11 @@ onMounted(async () => {
     </div>
 
     <p v-if="state.isLoading" class="app-view__status">{{ t('collectionsMgmt.loading') }}</p>
-    <p v-else-if="state.error" class="app-view__error" role="alert">
-      {{ t('collectionsMgmt.loadError') }}
-    </p>
+    <LoadErrorRetry
+      v-else-if="state.error"
+      :message="t('collectionsMgmt.loadError')"
+      @retry="loadData(); loadCosts(); loadSharedServices(); loadFixedRecipients();"
+    />
 
     <template v-else>
       <div class="collections-page">
@@ -841,9 +844,13 @@ onMounted(async () => {
           </Column>
         </DataTable>
 
-        <p v-if="costsLoadError" class="collections-panel__error" role="alert">
-          {{ costsLoadError }}
-        </p>
+        <LoadErrorRetry
+          v-if="costsLoadError"
+          compact
+          :message="costsLoadError"
+          :loading="costsLoading"
+          @retry="loadCosts"
+        />
         </section>
 
         <section class="collections-panel" aria-labelledby="collections-services-heading">
@@ -960,9 +967,13 @@ onMounted(async () => {
           </DataTable>
           <p class="collections-panel__hint">{{ t('sharedServices.splitHint') }}</p>
 
-          <p v-if="servicesLoadError" class="collections-panel__error" role="alert">
-            {{ servicesLoadError }}
-          </p>
+          <LoadErrorRetry
+            v-if="servicesLoadError"
+            compact
+            :message="servicesLoadError"
+            :loading="servicesLoading"
+            @retry="loadSharedServices"
+          />
         </section>
 
         <section class="collections-panel" aria-labelledby="collections-fixed-heading">
@@ -1165,9 +1176,13 @@ onMounted(async () => {
           </Column>
         </DataTable>
 
-        <p v-if="fixedLoadError" class="collections-panel__error" role="alert">
-          {{ fixedLoadError }}
-        </p>
+        <LoadErrorRetry
+          v-if="fixedLoadError"
+          compact
+          :message="fixedLoadError"
+          :loading="fixedLoading"
+          @retry="loadFixedRecipients"
+        />
         </section>
 
         <Dialog
