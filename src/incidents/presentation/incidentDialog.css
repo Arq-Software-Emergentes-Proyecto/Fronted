@@ -73,6 +73,17 @@
   min-height: 2.6rem;
 }
 
+.inc-dialog .p-inputtext,
+.inc-dialog .p-select-label {
+  font-size: 0.9rem;
+}
+
+.inc-dialog .p-select {
+  border-radius: 12px;
+  min-height: 2.6rem;
+  align-items: center;
+}
+
 .inc-dialog .incd-field textarea {
   width: 100%;
   min-height: 6.5rem;

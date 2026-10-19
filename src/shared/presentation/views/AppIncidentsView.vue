@@ -199,9 +199,12 @@ function clearFilters() {
 }
 
 /** Summary cards. "Resueltas este mes" usa resolvedAt (o la última actualización). */
-const monthLabel = computed(() =>
-  new Date().toLocaleDateString(locale.value === 'es' ? 'es-PE' : 'en-US', { month: 'long' }),
-)
+const monthLabel = computed(() => {
+  const tag = locale.value === 'es' ? 'es-PE' : 'en-US'
+  const month = new Date().toLocaleDateString(tag, { month: 'long' })
+  // Spanish month names are lowercase mid-sentence ("Cerradas en octubre").
+  return locale.value === 'es' ? month.toLocaleLowerCase(tag) : month
+})
 
 const summary = computed(() => {
   const now = new Date()
@@ -1361,8 +1364,8 @@ onBeforeUnmount(() => stopRealtime())
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex-wrap: wrap;
   flex: 0 1 auto;
+  min-width: 0;
 }
 
 .inc-filters {
@@ -1419,7 +1422,7 @@ onBeforeUnmount(() => stopRealtime())
 
 .inc-search {
   position: relative;
-  flex: 0 1 18rem;
+  flex: 0 1 20rem;
   min-width: 12rem;
 }
 
@@ -1802,6 +1805,7 @@ onBeforeUnmount(() => stopRealtime())
   }
   .inc-toolbar__right {
     width: 100%;
+    flex-wrap: wrap;
   }
   .inc-search {
     flex: 1 1 14rem;
