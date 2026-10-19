@@ -1,10 +1,9 @@
 ﻿<script setup>
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import Button from 'primevue/button'
 import InputNumber from 'primevue/inputnumber'
-import DataTable from 'primevue/datatable'
-import Column from 'primevue/column'
+import Dialog from 'primevue/dialog'
+import Paginator from 'primevue/paginator'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import { residentExtraChargesApi } from '../../../finances/infrastructure/residentExtraChargesApi.js'
@@ -12,6 +11,7 @@ import { useFinancesStore } from '../../../finances/application/financesStore.js
 import { financesApi } from '../../../finances/infrastructure/financesApi.js'
 import DebtTrafficLightGrid from '../../../finances/presentation/components/DebtTrafficLightGrid.vue'
 import {
+  addMonths,
   applyLateFeeToReceipt,
   computeChargeDates,
   currentStatementMonthKey,
@@ -21,14 +21,19 @@ import {
   normalizeCharge,
   normalizeMonthKey,
   normalizeSettings,
+  parseMonthKey,
+  todayYmd,
+  toMonthKey,
 } from '../../../finances/domain/billingCycle.js'
 
 const { t, locale } = useI18n()
 const store = useFinancesStore()
 
+const intlLocale = computed(() => (locale.value === 'es' ? 'es-PE' : 'en-US'))
+
 const nfPen = computed(() => (value) => {
   const n = Number(value)
-  return new Intl.NumberFormat(locale.value === 'es' ? 'es-PE' : 'en-US', {
+  return new Intl.NumberFormat(intlLocale.value, {
     style: 'currency',
     currency: 'PEN',
     minimumFractionDigits: 2,
@@ -47,6 +52,34 @@ const editSettings = ref({
   monthlyCharges: [],
 })
 
+/** Month the page is looking at (summary, fee column, "Generate receipts", fee dialog default). */
+const selectedMonth = ref(currentStatementMonthKey())
+
+function shiftMonthKey(monthKey, delta) {
+  const parsed = parseMonthKey(monthKey)
+  if (!parsed) return monthKey
+  const next = addMonths(parsed.year, parsed.month0, delta)
+  return toMonthKey(next.year, next.month0)
+}
+
+function shiftSelectedMonth(delta) {
+  selectedMonth.value = shiftMonthKey(selectedMonth.value, delta)
+}
+
+const selectedMonthLabel = computed(() => chargeMonthLabel(selectedMonth.value))
+
+/** Page-level feedback (receipts generated, fee saved, extra charge added). */
+const notice = ref({ text: '', tone: 'ok' })
+
+function showNotice(text, tone = 'ok') {
+  notice.value = { text, tone }
+}
+
+function dismissNotice() {
+  notice.value = { text: '', tone: 'ok' }
+}
+
+// --- Monthly fee (dialog "Configurar cuota") ---
 const chargeForm = ref({
   month: '',
   amount: null,
@@ -59,6 +92,7 @@ const chargeError = ref('')
 const chargeInvalid = ref({ month: false, paymentOpen: false, amount: false })
 const extraInvalid = ref({ resident: false, title: false, amount: false, description: false })
 const isSavingCharge = ref(false)
+const isChargeDialogOpen = ref(false)
 
 const selectedCharge = computed(() =>
   findCharge(editSettings.value.monthlyCharges, chargeForm.value.month),
@@ -66,7 +100,6 @@ const selectedCharge = computed(() =>
 const isChargeRegistered = computed(() => Boolean(selectedCharge.value))
 const isReceiptsModalOpen = ref(false)
 const extraCharges = ref([])
-const extraSearch = ref('')
 const residentsSearch = ref('')
 const selectedResidentId = ref('')
 const extraForm = ref({
@@ -76,6 +109,7 @@ const extraForm = ref({
 })
 const extraError = ref('')
 const isSavingExtra = ref(false)
+const isExtraDialogOpen = ref(false)
 
 const chargePeriodLabel = computed(() => {
   if (!chargeForm.value.billingStart || !chargeForm.value.billingEnd) return '—'
@@ -113,8 +147,19 @@ function resetChargeForm(monthKey) {
   chargeError.value = ''
 }
 
-function onChargeMonthChange() {
-  resetChargeForm(chargeForm.value.month)
+function shiftChargeMonth(delta) {
+  chargeInvalid.value = { month: false, paymentOpen: false, amount: false }
+  resetChargeForm(shiftMonthKey(chargeForm.value.month, delta))
+}
+
+function openChargeDialog(monthKey) {
+  chargeInvalid.value = { month: false, paymentOpen: false, amount: false }
+  resetChargeForm(monthKey || selectedMonth.value)
+  isChargeDialogOpen.value = true
+}
+
+function closeChargeDialog() {
+  isChargeDialogOpen.value = false
 }
 
 function settingsPayload() {
@@ -129,7 +174,8 @@ function settingsPayload() {
 async function loadFinancePage() {
   await store.loadData()
   applySettingsToForm(store.state.settings)
-  resetChargeForm()
+  selectedMonth.value = store.currentBillingMonthKey.value || currentStatementMonthKey()
+  resetChargeForm(selectedMonth.value)
   extraCharges.value = await residentExtraChargesApi.list().catch(() => [])
   uiState.value.isLoaded = true
   await Promise.all([loadBillingAlerts(), loadCalendar()])
@@ -140,8 +186,6 @@ onMounted(loadFinancePage)
 // --- RF021 / US021: alertas de facturación + generación manual (TS003) ---
 const billingAlerts = ref([])
 const isGeneratingReceipts = ref(false)
-const generateMessage = ref('')
-const generateTone = ref('ok')
 
 async function loadBillingAlerts() {
   billingAlerts.value = await financesApi.getBillingAlerts().catch(() => [])
@@ -151,35 +195,32 @@ function billingAlertMonthLabel(alert) {
   return chargeMonthLabel(alert?.month) || String(alert?.month ?? '')
 }
 
-function focusChargeSettings(alert) {
-  if (alert?.month) resetChargeForm(alert.month)
-  document.getElementById('finance-settings-heading')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  setTimeout(() => document.getElementById('chargeAmount')?.querySelector('input')?.focus(), 350)
-}
-
 async function onGenerateReceipts() {
   if (isGeneratingReceipts.value) return
   isGeneratingReceipts.value = true
-  generateMessage.value = ''
-  const month = store.currentBillingMonthKey.value
+  dismissNotice()
+  // Bill exactly the month shown in the month selector (not whatever the server deems current).
+  const month = selectedMonth.value
   try {
-    // Bill exactly the month shown in the button label (not whatever the server deems current).
     const result = await store.generateMonthlyReceipts(month)
     const label = chargeMonthLabel(result?.month || month)
-    generateTone.value = 'ok'
-    generateMessage.value = Number(result?.created) > 0
-      ? t('financeOps.generateDone', {
-          created: result.created,
-          month: label,
-          already: Number(result.alreadyBilled) || 0,
-        })
-      : t('financeOps.generateNone', { month: label })
+    showNotice(
+      Number(result?.created) > 0
+        ? t('financeOps.generateDone', {
+            created: result.created,
+            month: label,
+            already: Number(result.alreadyBilled) || 0,
+          })
+        : t('financeOps.generateNone', { month: label }),
+    )
     await loadCalendar()
   } catch (e) {
-    generateTone.value = 'error'
-    generateMessage.value = e?.code === 'MISSING_MONTHLY_CHARGE'
-      ? t('financeOps.generateMissing', { month: chargeMonthLabel(month) })
-      : t('financeOps.generateError')
+    showNotice(
+      e?.code === 'MISSING_MONTHLY_CHARGE'
+        ? t('financeOps.generateMissing', { month: chargeMonthLabel(month) })
+        : t('financeOps.generateError'),
+      'error',
+    )
   } finally {
     isGeneratingReceipts.value = false
     await loadBillingAlerts()
@@ -203,16 +244,28 @@ async function loadCalendar() {
   }
 }
 
-const filteredCalendarRows = computed(() => {
-  const rows = calendar.value.residents || []
-  const query = residentsSearch.value.trim().toLowerCase()
-  if (!query) return rows
-  return rows.filter((row) => residentSearchText(row).includes(query))
-})
-
-const calendarOverdueCount = computed(
-  () => (calendar.value.residents || []).filter((row) => row.hasOverdue).length,
+const calendarByResident = computed(
+  () => new Map((calendar.value.residents || []).map((row) => [String(row.residentId), row])),
 )
+
+function shortMonth(monthKey) {
+  const parsed = parseMonthKey(monthKey)
+  if (!parsed) return String(monthKey ?? '')
+  const label = new Date(parsed.year, parsed.month0, 1)
+    .toLocaleDateString(intlLocale.value, { month: 'short' })
+    .replace('.', '')
+  // es-PE capitalizes standalone months ("May."); Spanish writes them in lower case ("7 set.").
+  return locale.value === 'es' ? label.toLocaleLowerCase('es-PE') : label
+}
+
+const calendarRangeLabel = computed(() => {
+  const months = calendar.value.months || []
+  if (!months.length) return ''
+  return t('financeAdmin.chargePeriodValue', {
+    start: shortMonth(months[0]),
+    end: shortMonth(months[months.length - 1]),
+  })
+})
 
 // --- RF022: recibo descargable de meses pagados ---
 const downloadingReceiptId = ref('')
@@ -248,26 +301,151 @@ function residentSearchText(resident) {
     .toLowerCase()
 }
 
-function residentLabel(resident) {
-  if (!resident) return ''
-  const code = String(resident.code ?? '').trim()
-  return code ? `${resident.name} · ${code}` : String(resident.name ?? '')
+function residentInitials(name) {
+  const parts = String(name ?? '').trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return '?'
+  return parts
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join('')
 }
 
-const extraResidentMatches = computed(() => {
-  const query = extraSearch.value.trim().toLowerCase()
-  const residents = store.state.residents || []
-  if (!query) return residents
-  return residents.filter((resident) => residentSearchText(resident).includes(query))
-})
+function residentFloorApt(resident) {
+  return t('financeAdmin.residentFloorApt', {
+    floor: resident?.floor || '—',
+    code: resident?.code || '—',
+  })
+}
 
-const filteredResidentStatus = computed(() => {
+function receiptMonthKey(receipt) {
+  return (
+    normalizeMonthKey(String(receipt?.billingMonth || '').trim()) ||
+    String(normalizeYmd(receipt?.dueDate) || '').slice(0, 7)
+  )
+}
+
+function isReceiptOverdue(receipt, today = todayYmd()) {
+  const key = receiptStatusKey(receipt?.status)
+  if (key === 'Paid') return false
+  if (key === 'Overdue') return true
+  const due = normalizeYmd(receipt?.dueDate)
+  return Boolean(due) && today >= due
+}
+
+// --- One residents table (status of the selected month + traffic light + overdue) ---
+const residentRows = computed(() => {
   const rows = store.getResidentFinancialStatus.value || []
-  const query = residentsSearch.value.trim().toLowerCase()
-  if (!query) return rows
-  return rows.filter((resident) => residentSearchText(resident).includes(query))
+  const month = selectedMonth.value
+  const hasCalendar = !calendarError.value && (calendar.value.residents || []).length > 0
+  return rows
+    .map((resident) => {
+      const cal = calendarByResident.value.get(String(resident.id)) || null
+      const monthStatus =
+        month === resident.currentBillingMonth
+          ? resident.monthStatus
+          : store.residentMonthStatus(resident, month)
+      // Overdue amount: same source as the traffic light; receipts are the fallback when it failed.
+      const overdueAmount = hasCalendar
+        ? Number(cal?.overdueAmount) || 0
+        : (resident.receipts || [])
+            .filter((receipt) => isReceiptOverdue(receipt))
+            .reduce((sum, receipt) => sum + receiptPayable(receipt), 0)
+      const isOverdue = overdueAmount > 0 || Boolean(cal?.hasOverdue) || monthStatus === 'Overdue'
+      const group = isOverdue
+        ? 'overdue'
+        : monthStatus === 'Paid' || monthStatus === 'Exempt'
+          ? 'upToDate'
+          : 'pending'
+      return { ...resident, cal, monthStatus, overdueAmount, group }
+    })
+    .sort(
+      (a, b) =>
+        String(a.floor ?? '').localeCompare(String(b.floor ?? ''), undefined, { numeric: true }) ||
+        String(a.code ?? '').localeCompare(String(b.code ?? ''), undefined, { numeric: true }) ||
+        String(a.name ?? '').localeCompare(String(b.name ?? '')),
+    )
 })
 
+const statusFilter = ref('all')
+const searchedRows = computed(() => {
+  const query = residentsSearch.value.trim().toLowerCase()
+  if (!query) return residentRows.value
+  return residentRows.value.filter((row) => residentSearchText(row).includes(query))
+})
+
+const filterOptions = computed(() => {
+  const rows = searchedRows.value
+  const count = (group) => rows.filter((row) => row.group === group).length
+  return [
+    { key: 'all', label: t('financeAdmin.filterAll'), count: rows.length },
+    { key: 'pending', label: t('financeAdmin.filterPending'), count: count('pending') },
+    { key: 'overdue', label: t('financeAdmin.filterOverdue'), count: count('overdue') },
+    { key: 'upToDate', label: t('financeAdmin.filterUpToDate'), count: count('upToDate') },
+  ]
+})
+
+const filteredRows = computed(() =>
+  statusFilter.value === 'all'
+    ? searchedRows.value
+    : searchedRows.value.filter((row) => row.group === statusFilter.value),
+)
+
+const PAGE_SIZE = 10
+const pageFirst = ref(0)
+const pagedRows = computed(() =>
+  filteredRows.value.slice(pageFirst.value, pageFirst.value + PAGE_SIZE),
+)
+watch([statusFilter, residentsSearch], () => {
+  pageFirst.value = 0
+})
+
+function nextPaymentDateLabel(row) {
+  return formatDayMonth(normalizeYmd(row?.nextPaymentDate), locale.value) || '—'
+}
+
+function nextPaymentRelative(row) {
+  const days = Number(row?.daysUntilNextPayment)
+  if (!Number.isFinite(days)) return ''
+  return new Intl.RelativeTimeFormat(intlLocale.value, { numeric: 'auto' }).format(days, 'day')
+}
+
+function nextPaymentTone(row) {
+  const days = Number(row?.daysUntilNextPayment)
+  if (days < 0) return 'late'
+  if (days <= (Number(calendar.value.dueSoonDays) || 5)) return 'soon'
+  return ''
+}
+
+// --- Summary cards (selected month) ---
+const monthReceipts = computed(() => {
+  const lateFeePerDay = editSettings.value.lateFeePerDay
+  return (store.state.receipts || [])
+    .filter((receipt) => receiptMonthKey(receipt) === selectedMonth.value)
+    .map((receipt) => applyLateFeeToReceipt(receipt, lateFeePerDay))
+})
+
+const summary = computed(() => {
+  const receipts = monthReceipts.value
+  const paid = receipts.filter((receipt) => receiptStatusKey(receipt.status) === 'Paid')
+  const unpaid = receipts.filter((receipt) => receiptStatusKey(receipt.status) !== 'Paid')
+  const rows = residentRows.value
+  const overdueRows = rows.filter((row) => row.overdueAmount > 0)
+  const upToDate = rows.filter((row) => row.group === 'upToDate').length
+  return {
+    issued: receipts.length,
+    toCollect: unpaid.reduce((sum, receipt) => sum + receiptPayable(receipt), 0),
+    toCollectCount: unpaid.length,
+    collected: paid.reduce((sum, receipt) => sum + receiptPayable(receipt), 0),
+    collectedCount: paid.length,
+    overdue: overdueRows.reduce((sum, row) => sum + row.overdueAmount, 0),
+    overdueResidents: overdueRows.length,
+    upToDate,
+    total: rows.length,
+    upToDatePct: rows.length ? Math.round((upToDate / rows.length) * 100) : 0,
+  }
+})
+
+// --- Extra charge (row dialog "Agregar monto") ---
 const selectedExtraResident = computed(
   () =>
     (store.state.residents || []).find(
@@ -275,24 +453,21 @@ const selectedExtraResident = computed(
     ) || null,
 )
 
-const historyExtraCharges = computed(() => {
-  const resident = selectedHistoryResident.value
-  if (!resident) return []
-  return extraCharges.value.filter(
-    (item) => String(item.residentId) === String(resident.id),
-  )
-})
-
-function selectExtraResident(resident) {
-  selectedResidentId.value = resident.id
-  extraSearch.value = residentLabel(resident)
-  extraError.value = ''
-}
-
 function resetExtraForm() {
   extraForm.value = { title: '', amount: null, description: '' }
   extraError.value = ''
   extraInvalid.value = { resident: false, title: false, amount: false, description: false }
+}
+
+function openExtraDialog(row) {
+  resetExtraForm()
+  selectedResidentId.value = row?.id ?? ''
+  isExtraDialogOpen.value = true
+}
+
+function closeExtraDialog() {
+  if (isSavingExtra.value) return
+  isExtraDialogOpen.value = false
 }
 
 async function onAddExtraCharge() {
@@ -312,6 +487,7 @@ async function onAddExtraCharge() {
 
   isSavingExtra.value = true
   extraError.value = ''
+  const residentName = selectedExtraResident.value?.name || ''
   try {
     const created = await residentExtraChargesApi.add({
       residentId: selectedResidentId.value,
@@ -323,6 +499,10 @@ async function onAddExtraCharge() {
     resetExtraForm()
     await store.loadData()
     applySettingsToForm(store.state.settings)
+    isSavingExtra.value = false
+    isExtraDialogOpen.value = false
+    showNotice(t('financeAdmin.extraAdded', { name: residentName }))
+    await loadCalendar()
   } catch (e) {
     extraError.value = e?.payload?.message || t('auth.genericError')
   } finally {
@@ -372,7 +552,8 @@ async function onSaveCharge() {
     await persistCharges([nextCharge, ...editSettings.value.monthlyCharges])
     resetChargeForm(month)
     await loadBillingAlerts()
-    alert(t('financeAdmin.chargeSaved'))
+    isChargeDialogOpen.value = false
+    showNotice(`${t('financeAdmin.chargeSaved')} · ${chargeMonthLabel(month)}`)
   } catch (e) {
     chargeError.value = e?.payload?.message || t('auth.genericError')
   } finally {
@@ -420,18 +601,9 @@ const chargeReceiptGroups = computed(() => {
   }))
 })
 
-const historySearch = ref('')
+// --- Payment history (row dialog "Historial") ---
 const selectedHistoryResidentId = ref('')
-
-const historyResidentMatches = computed(() => {
-  const query = historySearch.value.trim().toLowerCase()
-  const residents = store.state.residents || []
-  if (!query) return []
-  return residents.filter((resident) => {
-    const hay = `${resident.name ?? ''} ${resident.code ?? ''} ${resident.floor ?? ''}`.toLowerCase()
-    return hay.includes(query)
-  })
-})
+const isHistoryDialogOpen = ref(false)
 
 const selectedHistoryResident = computed(
   () =>
@@ -440,10 +612,19 @@ const selectedHistoryResident = computed(
     ) || null,
 )
 
-function selectHistoryResident(resident) {
-  selectedHistoryResidentId.value = resident.id
-  historySearch.value = resident.name
+function openHistoryDialog(row) {
+  selectedHistoryResidentId.value = row?.id ?? ''
+  downloadError.value = ''
+  isHistoryDialogOpen.value = true
 }
+
+const historyExtraCharges = computed(() => {
+  const resident = selectedHistoryResident.value
+  if (!resident) return []
+  return extraCharges.value.filter(
+    (item) => String(item.residentId) === String(resident.id),
+  )
+})
 
 const historyPaidMonths = computed(() => {
   const resident = selectedHistoryResident.value
@@ -466,6 +647,15 @@ const historyPaidMonths = computed(() => {
     .sort((a, b) => String(b.month).localeCompare(String(a.month)))
 })
 
+function formatLongDate(ymd) {
+  const match = String(normalizeYmd(ymd)).match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return ''
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).toLocaleDateString(
+    intlLocale.value,
+    { day: 'numeric', month: 'short', year: 'numeric' },
+  )
+}
+
 function normalizeYmd(value) {
   const raw = String(value ?? '').trim()
   if (!raw) return ''
@@ -480,528 +670,667 @@ function normalizeYmd(value) {
 }
 
 const getStatusBadgeClass = (status) => {
-  if(status === 'Paid') return 'status-paid';
-  if(status === 'Pending') return 'status-pending';
-  if(status === 'Overdue') return 'status-overdue';
-  if(status === 'Unbilled') return 'status-unbilled';
-  if(status === 'Exempt') return 'status-unbilled';
-  return '';
+  if (status === 'Paid') return 'status-paid'
+  if (status === 'Pending') return 'status-pending'
+  if (status === 'Overdue') return 'status-overdue'
+  if (status === 'Unbilled') return 'status-unbilled'
+  if (status === 'Exempt') return 'status-unbilled'
+  return ''
 }
-
-const residentsStatusMonthLabel = computed(() =>
-  chargeMonthLabel(store.currentBillingMonthKey.value),
-)
 </script>
 
 <template>
-  <div v-if="uiState.isLoaded" class="app-view">
-    <div class="finance-page">
-      <LoadErrorRetry
-        v-if="store.state.error"
-        :loading="store.state.isLoading"
-        @retry="loadFinancePage"
-      />
-      <div
-        v-for="alertItem in billingAlerts"
-        :key="`${alertItem.code}-${alertItem.month}`"
-        class="billing-alert"
-        role="alert"
-      >
-        <i class="pi pi-exclamation-triangle billing-alert__icon" aria-hidden="true" />
-        <div class="billing-alert__text">
-          <strong>{{ t('financeOps.billingAlertTitle') }}</strong>
-          <span>{{ t('financeOps.billingAlertBody', { month: billingAlertMonthLabel(alertItem) }) }}</span>
+  <div v-if="uiState.isLoaded" class="app-view fin">
+    <header class="fin-head">
+      <div class="fin-head__text">
+        <h1 class="fin-head__title">{{ t('financeAdmin.pageTitle') }}</h1>
+        <p class="fin-head__sub">{{ t('financeAdmin.subtitle') }}</p>
+      </div>
+      <div class="fin-head__controls">
+        <div class="fin-month" role="group" :aria-label="t('financeAdmin.monthSelectorLabel')">
+          <button
+            type="button"
+            class="fin-month__step"
+            :aria-label="t('financeAdmin.monthPrev')"
+            :title="t('financeAdmin.monthPrev')"
+            @click="shiftSelectedMonth(-1)"
+          >
+            <i class="pi pi-chevron-left" aria-hidden="true" />
+          </button>
+          <span class="fin-month__label" aria-live="polite">
+            <i class="pi pi-calendar" aria-hidden="true" />
+            {{ selectedMonthLabel }}
+          </span>
+          <button
+            type="button"
+            class="fin-month__step"
+            :aria-label="t('financeAdmin.monthNext')"
+            :title="t('financeAdmin.monthNext')"
+            @click="shiftSelectedMonth(1)"
+          >
+            <i class="pi pi-chevron-right" aria-hidden="true" />
+          </button>
         </div>
-        <Button
-          type="button"
-          class="billing-alert__btn"
-          :label="t('financeOps.billingAlertAction')"
-          @click="focusChargeSettings(alertItem)"
-        />
+        <div class="fin-head__actions" role="group" :aria-label="t('financeAdmin.headerActions')">
+          <button type="button" class="fin-btn" @click="openReceiptsModal">
+            <i class="pi pi-list" aria-hidden="true" />
+            {{ t('financeAdmin.viewReceipts') }}
+          </button>
+          <button type="button" class="fin-btn" @click="openChargeDialog()">
+            <i class="pi pi-cog" aria-hidden="true" />
+            {{ t('financeAdmin.configureCharge') }}
+          </button>
+          <button
+            type="button"
+            class="fin-btn fin-btn--primary"
+            :disabled="isGeneratingReceipts"
+            :aria-label="t('financeOps.generateNow', { month: selectedMonthLabel })"
+            :title="t('financeOps.generateHint')"
+            @click="onGenerateReceipts"
+          >
+            <i
+              class="pi"
+              :class="isGeneratingReceipts ? 'pi-spin pi-spinner' : 'pi-file-plus'"
+              aria-hidden="true"
+            />
+            {{ t('financeAdmin.generateAction') }}
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <LoadErrorRetry
+      v-if="store.state.error"
+      :loading="store.state.isLoading"
+      @retry="loadFinancePage"
+    />
+
+    <div
+      v-for="alertItem in billingAlerts"
+      :key="`${alertItem.code}-${alertItem.month}`"
+      class="fin-alert"
+      role="alert"
+    >
+      <i class="pi pi-exclamation-triangle fin-alert__icon" aria-hidden="true" />
+      <p class="fin-alert__text">
+        <strong>{{ t('financeOps.billingAlertTitle') }}.</strong>
+        {{ t('financeOps.billingAlertBody', { month: billingAlertMonthLabel(alertItem) }) }}
+      </p>
+      <button type="button" class="fin-alert__btn" @click="openChargeDialog(alertItem.month)">
+        {{ t('financeOps.billingAlertAction') }}
+      </button>
+    </div>
+
+    <div
+      v-if="notice.text"
+      class="fin-notice"
+      :class="`fin-notice--${notice.tone}`"
+      :role="notice.tone === 'error' ? 'alert' : 'status'"
+    >
+      <i
+        class="pi"
+        :class="notice.tone === 'error' ? 'pi-times-circle' : 'pi-check-circle'"
+        aria-hidden="true"
+      />
+      <p class="fin-notice__text">{{ notice.text }}</p>
+      <button
+        type="button"
+        class="fin-notice__close"
+        :aria-label="t('financeAdmin.dismissNotice')"
+        @click="dismissNotice"
+      >
+        <i class="pi pi-times" aria-hidden="true" />
+      </button>
+    </div>
+
+    <section class="kpi-grid" :aria-label="t('financeAdmin.summaryAria', { month: selectedMonthLabel })">
+      <article class="kpi-card kpi-card--blue">
+        <div class="kpi-header">
+          <span class="kpi-label">{{ t('financeAdmin.kpiToCollect') }}</span>
+          <span class="kpi-icon icon-blue"><i class="pi pi-clock" aria-hidden="true" /></span>
+        </div>
+        <div class="kpi-value">{{ nfPen(summary.toCollect) }}</div>
+        <span class="kpi-subtext">
+          {{
+            summary.issued
+              ? t('financeAdmin.kpiToCollectHint', { n: summary.toCollectCount, month: selectedMonthLabel }, summary.toCollectCount)
+              : t('financeAdmin.kpiNoReceipts', { month: selectedMonthLabel })
+          }}
+        </span>
+        <i class="pi pi-clock kpi-watermark" aria-hidden="true" />
+      </article>
+
+      <article class="kpi-card kpi-card--green">
+        <div class="kpi-header">
+          <span class="kpi-label">{{ t('financeAdmin.kpiCollected') }}</span>
+          <span class="kpi-icon icon-green"><i class="pi pi-wallet" aria-hidden="true" /></span>
+        </div>
+        <div class="kpi-value">{{ nfPen(summary.collected) }}</div>
+        <span class="kpi-subtext">
+          {{ t('financeAdmin.kpiCollectedHint', { n: summary.collectedCount, month: selectedMonthLabel }, summary.collectedCount) }}
+        </span>
+        <i class="pi pi-wallet kpi-watermark" aria-hidden="true" />
+      </article>
+
+      <article class="kpi-card" :class="summary.overdue > 0 ? 'kpi-card--red' : 'kpi-card--amber'">
+        <div class="kpi-header">
+          <span class="kpi-label">{{ t('financeAdmin.kpiOverdue') }}</span>
+          <span class="kpi-icon" :class="summary.overdue > 0 ? 'icon-red' : 'icon-amber'">
+            <i class="pi pi-exclamation-triangle" aria-hidden="true" />
+          </span>
+        </div>
+        <div class="kpi-value" :class="{ 'text-red': summary.overdue > 0 }">{{ nfPen(summary.overdue) }}</div>
+        <span class="kpi-subtext" :class="{ 'subtext-red': summary.overdue > 0 }">
+          {{
+            summary.overdueResidents
+              ? t('financeOps.trafficOverdueCount', { n: summary.overdueResidents })
+              : t('financeAdmin.kpiOverdueNone')
+          }}
+        </span>
+        <i class="pi pi-exclamation-triangle kpi-watermark" aria-hidden="true" />
+      </article>
+
+      <article class="kpi-card kpi-card--orange">
+        <div class="kpi-header">
+          <span class="kpi-label">{{ t('financeAdmin.kpiUpToDate') }}</span>
+          <span class="kpi-icon icon-orange"><i class="pi pi-users" aria-hidden="true" /></span>
+        </div>
+        <div class="kpi-value">
+          {{ summary.upToDate }}<span class="kpi-value__of"> / {{ summary.total }}</span>
+        </div>
+        <div
+          class="kpi-meter"
+          role="progressbar"
+          :aria-valuenow="summary.upToDatePct"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          :aria-label="t('financeAdmin.kpiUpToDate')"
+        >
+          <span class="kpi-meter__fill" :style="{ width: `${summary.upToDatePct}%` }" />
+        </div>
+        <span class="kpi-subtext">{{ t('financeAdmin.kpiUpToDateHint', { month: selectedMonthLabel }) }}</span>
+        <i class="pi pi-users kpi-watermark" aria-hidden="true" />
+      </article>
+    </section>
+
+    <section class="fin-card" aria-labelledby="finance-residents-heading">
+      <div class="fin-card__head">
+        <div>
+          <h2 id="finance-residents-heading" class="fin-card__title">
+            {{ t('financeAdmin.residentsPanelTitle') }}
+          </h2>
+          <p class="fin-card__hint">{{ t('financeAdmin.residentsHint') }}</p>
+        </div>
       </div>
 
-      <section class="finance-panel import-panel" aria-labelledby="finance-settings-heading">
-        <div class="mgmt-panel-toolbar">
-          <h2 id="finance-settings-heading" class="finance-panel__section-title finance-panel__section-title--plain">
-            <i class="pi pi-cog" aria-hidden="true" />
-            {{ t('financeAdmin.settingsTitle') }}
-          </h2>
-          <Button
+      <div class="fin-toolbar">
+        <div class="fin-filters" role="group" :aria-label="t('financeAdmin.filterAria')">
+          <button
+            v-for="option in filterOptions"
+            :key="option.key"
             type="button"
-            class="import-dropzone__btn"
-            :label="t('financeAdmin.viewReceipts')"
-            @click="openReceiptsModal"
-          />
-        </div>
-
-        <div class="settings-grid">
-          <label class="settings-field" for="chargeMonth">
-            <span>{{ t('financeAdmin.chargeMonth') }}</span>
-            <input
-              id="chargeMonth"
-              v-model="chargeForm.month"
-              type="month"
-              class="settings-native-input"
-              required
-              :aria-invalid="chargeInvalid.month ? 'true' : 'false'"
-              :aria-describedby="chargeInvalid.month ? 'charge-form-error' : undefined"
-              @change="chargeInvalid.month = false; onChargeMonthChange()"
-            />
-          </label>
-          <div class="settings-field">
-            <span>{{ t('financeAdmin.chargePeriod') }}</span>
-            <p class="settings-period">{{ chargePeriodLabel }}</p>
-          </div>
-          <label class="settings-field" for="chargePaymentOpen">
-            <span>{{ t('financeAdmin.chargePaymentOpen') }}</span>
-            <input
-              id="chargePaymentOpen"
-              v-model="chargeForm.paymentOpen"
-              type="date"
-              class="settings-native-input"
-              required
-              :disabled="isChargeRegistered"
-              :aria-invalid="chargeInvalid.paymentOpen ? 'true' : 'false'"
-              :aria-describedby="chargeInvalid.paymentOpen ? 'charge-form-error' : undefined"
-              @input="chargeInvalid.paymentOpen = false"
-            />
-          </label>
-          <label class="settings-field" for="chargeAmount">
-            <span>{{ t('financeAdmin.chargeAmount') }}</span>
-            <InputNumber
-              id="chargeAmount"
-              v-model="chargeForm.amount"
-              :minFractionDigits="2"
-              :maxFractionDigits="2"
-              :min="0"
-              mode="currency"
-              currency="PEN"
-              locale="es-PE"
-              class="settings-input"
-              :disabled="isChargeRegistered"
-              :invalid="chargeInvalid.amount"
-              :pt="{ pcInputText: { root: { 'aria-describedby': chargeInvalid.amount ? 'charge-form-error' : undefined } } }"
-              @update:model-value="chargeInvalid.amount = false"
-            />
-          </label>
-        </div>
-
-        <div class="settings-actions">
-          <p v-if="chargeError" id="charge-form-error" class="settings-error" role="alert">{{ chargeError }}</p>
-          <p v-else-if="isChargeRegistered" class="settings-locked">
-            {{ t('financeAdmin.chargeLocked', { month: chargeMonthLabel(chargeForm.month) }) }}
-          </p>
-          <Button
-            v-if="!isChargeRegistered"
-            type="button"
-            class="import-dropzone__btn"
-            :label="t('financeAdmin.addCharge')"
-            :loading="isSavingCharge"
-            @click="onSaveCharge"
-          />
-        </div>
-
-        <div class="settings-billing">
-          <p class="settings-billing__hint">{{ t('financeOps.generateHint') }}</p>
-          <p
-            v-if="generateMessage"
-            class="settings-billing__msg"
-            :class="{ 'settings-billing__msg--error': generateTone === 'error' }"
-            role="status"
+            class="fin-filter"
+            :class="[`fin-filter--${option.key}`, { 'is-active': statusFilter === option.key }]"
+            :aria-pressed="statusFilter === option.key ? 'true' : 'false'"
+            @click="statusFilter = option.key"
           >
-            {{ generateMessage }}
-          </p>
-          <Button
-            type="button"
-            class="import-dropzone__btn"
-            icon="pi pi-file-plus"
-            :label="t('financeOps.generateNow', { month: residentsStatusMonthLabel })"
-            :loading="isGeneratingReceipts"
-            @click="onGenerateReceipts"
-          />
+            {{ option.label }}
+            <span class="fin-filter__count">{{ option.count }}</span>
+          </button>
         </div>
-      </section>
-
-      <section
-        class="finance-panel finance-panel--table import-panel"
-        aria-labelledby="finance-residents-heading"
-      >
-        <div class="mgmt-panel-toolbar">
-          <h2 id="finance-residents-heading" class="finance-panel__section-title">
-            <i class="pi pi-users" aria-hidden="true" />
-            {{ t('financeAdmin.residentsPanelTitle') }}
-            <span class="finance-panel__title-month">{{ residentsStatusMonthLabel }}</span>
-          </h2>
-        </div>
-        <label class="settings-field" for="residentsStatusSearch">
+        <label class="fin-search" for="residentsStatusSearch">
+          <i class="pi pi-search" aria-hidden="true" />
           <input
             id="residentsStatusSearch"
             v-model="residentsSearch"
             type="search"
-            class="settings-native-input"
             :placeholder="t('financeAdmin.extraSearchPlaceholder')"
             :aria-label="t('financeAdmin.extraSearch')"
           />
         </label>
-          <DataTable
-            :value="filteredResidentStatus"
-            responsiveLayout="scroll"
-            class="finance-data finance-table"
-            :paginator="true"
-            :rows="10"
-            :empty-message="t('financeAdmin.extraNoResidents')"
-          >
-            <Column field="name" :header="t('financeAdmin.tableResident')">
-              <template #body="slotProps">
-                <div class="resident-info">
-                  <strong>{{ slotProps.data.name }}</strong>
-                  <small>{{
-                    t('financeAdmin.residentFloorApt', {
-                      floor: slotProps.data.floor,
-                      code: slotProps.data.code,
-                    })
-                  }}</small>
-                </div>
-              </template>
-            </Column>
-            <Column field="admissionDate" :header="t('financeAdmin.tableAdmission')" />
-            <Column field="nextPaymentDate" :header="t('financeAdmin.tableNextPayment')">
-              <template #body="slotProps">
-                <span class="finance-date-cell">{{ slotProps.data.nextPaymentDate }}</span>
-              </template>
-            </Column>
-            <Column :header="t('financeAdmin.tableCountdown')">
-              <template #body="slotProps">
-                <span
-                  class="days-left"
-                  :class="{ urgent: slotProps.data.daysUntilNextPayment <= 5 }"
-                >
-                  {{ t('financeAdmin.daysRemaining', { n: slotProps.data.daysUntilNextPayment }) }}
-                </span>
-              </template>
-            </Column>
-            <Column :header="t('financeAdmin.tableMonthStatus', { month: residentsStatusMonthLabel })">
-              <template #body="slotProps">
-                <span
-                  class="status-badge"
-                  :class="getStatusBadgeClass(slotProps.data.monthStatus)"
-                >
-                  {{ t(`financeAdmin.status${slotProps.data.monthStatus}`) }}
-                </span>
-              </template>
-            </Column>
-          </DataTable>
-      </section>
-
-      <section class="finance-panel import-panel" aria-labelledby="finance-traffic-heading">
-        <div class="mgmt-panel-toolbar">
-          <h2 id="finance-traffic-heading" class="finance-panel__section-title">
-            <i class="pi pi-circle-fill traffic-title-icon" aria-hidden="true" />
-            {{ t('financeOps.trafficTitle') }}
-            <span v-if="calendarOverdueCount" class="finance-panel__title-month traffic-title-count">
-              {{ t('financeOps.trafficOverdueCount', { n: calendarOverdueCount }) }}
-            </span>
-          </h2>
-        </div>
-        <p class="traffic-hint">{{ t('financeOps.trafficHint') }}</p>
-        <DebtTrafficLightGrid
-          :months="calendar.months"
-          :residents="filteredCalendarRows"
-          :due-soon-days="calendar.dueSoonDays"
-          :loading="calendarLoading"
-          :error="calendarError"
-          @retry="loadCalendar"
-        />
-      </section>
-
-      <div class="finance-split">
-      <section
-        class="finance-panel import-panel"
-        aria-labelledby="finance-extra-heading"
-      >
-        <div class="mgmt-panel-toolbar">
-          <h2 id="finance-extra-heading" class="finance-panel__section-title">
-            <i class="pi pi-plus-circle" aria-hidden="true" />
-            {{ t('financeAdmin.extraTitle') }}
-          </h2>
-        </div>
-
-        <label class="settings-field" for="extraResidentSearch">
-          <input
-            id="extraResidentSearch"
-            v-model="extraSearch"
-            type="search"
-            class="settings-native-input"
-            :placeholder="t('financeAdmin.extraSearchPlaceholder')"
-            :aria-label="t('financeAdmin.extraSearch')"
-            @input="selectedResidentId = ''"
-          />
-        </label>
-
-        <ul v-if="extraSearch.trim() && !selectedExtraResident" class="extra-resident-list" role="listbox">
-          <li v-if="!extraResidentMatches.length" class="extra-resident-list__empty">
-            {{ t('financeAdmin.extraNoResidents') }}
-          </li>
-          <li
-            v-for="resident in extraResidentMatches"
-            :key="resident.id"
-            class="extra-resident-list__item"
-            role="option"
-            @click="selectExtraResident(resident)"
-          >
-            <strong>{{ resident.name }}</strong>
-            <span>{{
-              t('financeAdmin.residentFloorApt', {
-                floor: resident.floor,
-                code: resident.code,
-              })
-            }}</span>
-          </li>
-        </ul>
-
-        <div class="settings-grid extra-form-grid">
-          <label class="settings-field" for="extraTitle">
-            <span>{{ t('financeAdmin.extraAmountTitle') }}</span>
-            <input
-              id="extraTitle"
-              v-model="extraForm.title"
-              type="text"
-              maxlength="80"
-              class="settings-native-input"
-              required
-              :disabled="!selectedResidentId"
-              :aria-invalid="extraInvalid.title ? 'true' : 'false'"
-              :aria-describedby="extraInvalid.title ? 'extra-form-error' : undefined"
-              @input="extraInvalid.title = false"
-            />
-          </label>
-          <label class="settings-field" for="extraAmount">
-            <span>{{ t('financeAdmin.extraAmount') }}</span>
-            <InputNumber
-              id="extraAmount"
-              v-model="extraForm.amount"
-              :minFractionDigits="2"
-              :maxFractionDigits="2"
-              :min="0"
-              mode="currency"
-              currency="PEN"
-              locale="es-PE"
-              class="settings-input"
-              :disabled="!selectedResidentId"
-              :invalid="extraInvalid.amount"
-              :pt="{ pcInputText: { root: { 'aria-describedby': extraInvalid.amount ? 'extra-form-error' : undefined } } }"
-              @update:model-value="extraInvalid.amount = false"
-            />
-          </label>
-          <label class="settings-field extra-form-grid__full" for="extraDescription">
-            <span>{{ t('financeAdmin.extraDescription') }}</span>
-            <textarea
-              id="extraDescription"
-              v-model="extraForm.description"
-              class="settings-native-input settings-textarea"
-              maxlength="240"
-              rows="2"
-              required
-              :disabled="!selectedResidentId"
-              :aria-invalid="extraInvalid.description ? 'true' : 'false'"
-              :aria-describedby="extraInvalid.description ? 'extra-form-error' : undefined"
-              @input="extraInvalid.description = false"
-            />
-          </label>
-        </div>
-
-        <div class="settings-actions">
-          <p v-if="extraError" id="extra-form-error" class="settings-error" role="alert">{{ extraError }}</p>
-          <Button
-            type="button"
-            class="import-dropzone__btn"
-            :label="t('financeAdmin.extraAdd')"
-            :loading="isSavingExtra"
-            :disabled="!selectedResidentId"
-            @click="onAddExtraCharge"
-          />
-        </div>
-      </section>
-
-      <section
-        class="finance-panel finance-panel--history import-panel"
-        aria-labelledby="finance-history-heading"
-      >
-        <div class="mgmt-panel-toolbar">
-          <h2 id="finance-history-heading" class="finance-panel__section-title">
-            <i class="pi pi-wallet" aria-hidden="true" />
-            {{ t('financeAdmin.paymentHistory') }}
-          </h2>
-        </div>
-
-        <label class="settings-field" for="historyResidentSearch">
-          <input
-            id="historyResidentSearch"
-            v-model="historySearch"
-            type="search"
-            class="settings-native-input"
-            :placeholder="t('financeAdmin.extraSearchPlaceholder')"
-            :aria-label="t('financeAdmin.historySearch')"
-            @input="selectedHistoryResidentId = ''"
-          />
-        </label>
-
-        <ul v-if="historySearch.trim() && !selectedHistoryResident" class="extra-resident-list" role="listbox">
-          <li v-if="!historyResidentMatches.length" class="extra-resident-list__empty">
-            {{ t('financeAdmin.extraNoResidents') }}
-          </li>
-          <li
-            v-for="resident in historyResidentMatches"
-            :key="resident.id"
-            class="extra-resident-list__item"
-            role="option"
-            @click="selectHistoryResident(resident)"
-          >
-            <strong>{{ resident.name }}</strong>
-            <span>{{
-              t('financeAdmin.residentFloorApt', {
-                floor: resident.floor,
-                code: resident.code,
-              })
-            }}</span>
-          </li>
-        </ul>
-
-        <div v-if="!selectedHistoryResident" class="import-empty">
-          <i class="pi pi-search" aria-hidden="true" />
-          <span>{{ t('financeAdmin.historySearchHint') }}</span>
-        </div>
-        <div v-else>
-          <p class="settings-locked">
-            {{ t('financeAdmin.extraSelected', { name: selectedHistoryResident.name }) }}
-          </p>
-          <ul
-            v-if="historyPaidMonths.length || historyExtraCharges.length"
-            class="receipt-list"
-            role="list"
-          >
-            <li v-for="rc in historyPaidMonths" :key="rc.id">
-              <div class="rc-info">
-                <span>{{ rc.monthLabel }}</span>
-                <strong>{{ nfPen(receiptPayable(rc)) }}</strong>
-              </div>
-              <div class="rc-actions">
-                <span class="small-badge status-paid">{{ t('financeAdmin.statusPaid') }}</span>
-                <button
-                  type="button"
-                  class="rc-download"
-                  :disabled="downloadingReceiptId === String(rc.id)"
-                  :aria-label="`${t('financeOps.downloadReceipt')} · ${rc.monthLabel}`"
-                  @click="downloadPaidReceipt(rc)"
-                >
-                  <i class="pi pi-download" aria-hidden="true" />
-                  {{
-                    downloadingReceiptId === String(rc.id)
-                      ? t('financeOps.downloading')
-                      : t('financeOps.downloadReceipt')
-                  }}
-                </button>
-              </div>
-            </li>
-            <li v-for="item in historyExtraCharges" :key="item.id">
-              <div class="rc-info">
-                <span>{{ item.title }}</span>
-                <span>{{ item.description }}</span>
-                <strong>{{ nfPen(item.amount) }}</strong>
-              </div>
-              <span class="small-badge">{{ t('financeAdmin.receiptExtraLabel') }}</span>
-            </li>
-          </ul>
-          <div v-else class="import-empty">
-            <i class="pi pi-inbox" aria-hidden="true" />
-            <span>{{ t('financeAdmin.historyEmptyPaid') }}</span>
-          </div>
-          <p v-if="downloadError" class="settings-error" role="alert">{{ downloadError }}</p>
-        </div>
-      </section>
       </div>
 
-      <p class="mgmt-view-footer" role="note">
-        {{ t('financeAdmin.subtitle') }}
-      </p>
-    </div>
+      <DebtTrafficLightGrid
+        class="fin-legend"
+        legend-only
+        :months="calendar.months"
+        :residents="calendar.residents"
+        :due-soon-days="calendar.dueSoonDays"
+        :loading="calendarLoading"
+        :error="calendarError"
+        @retry="loadCalendar"
+      />
 
-    <div
-      v-if="isReceiptsModalOpen"
-      class="resident-modal-backdrop bf-modal-backdrop"
-      role="presentation"
-      @click.self="closeReceiptsModal"
-    >
-      <section
-        class="resident-modal resident-modal--wide bf-modal-panel"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="t('financeAdmin.receiptsModalTitle')"
-      >
-        <h3 class="resident-modal__title">{{ t('financeAdmin.receiptsModalTitle') }}</h3>
-        <div v-if="!chargeReceiptGroups.length" class="import-empty">
-          <i class="pi pi-inbox" aria-hidden="true" />
-          <span>{{ t('financeAdmin.emptyCharges') }}</span>
-        </div>
-        <ul v-else class="r-list charge-list" role="list">
-          <li v-for="group in chargeReceiptGroups" :key="group.charge.id" class="r-card">
-            <div class="r-card__row">
-              <span class="r-card__avatar" aria-hidden="true">
-                <i class="pi pi-calendar" />
-              </span>
-              <div class="r-card__body">
-                <p class="r-card__name">{{ chargeMonthLabel(group.charge.month) }}</p>
-                <p class="r-card__meta">
-                  {{
-                    t('financeAdmin.chargeDatesHint', {
-                      start: formatDayMonth(group.charge.billingStart, locale),
-                      end: formatDayMonth(group.charge.billingEnd, locale),
-                      open: formatDayMonth(group.charge.paymentOpen, locale),
-                    })
-                  }}
-                </p>
-              </div>
-              <strong class="charge-amount">{{ nfPen(group.charge.amount) }}</strong>
-            </div>
-            <ul class="receipt-list receipt-list--modal">
-              <li v-for="rc in group.receipts" :key="rc.id">
-                <div class="rc-info">
-                  <span>{{ rc.residentName }}</span>
-                  <span>{{
-                    t('financeAdmin.residentFloorApt', {
-                      floor: rc.residentFloor,
-                      code: rc.residentCode,
-                    })
-                  }}</span>
-                  <span>{{
-                    t('financeAdmin.receiptDue')
-                  }}: {{ formatDayMonth(normalizeYmd(rc.dueDate), locale) }}</span>
-                  <span v-if="Number(rc.lateFee) > 0" class="rc-late-fee">
-                    {{ t('financeAdmin.receiptLateFee', { amount: nfPen(rc.lateFee), n: rc.lateDays || 0 }) }}
+      <div class="fin-table-wrap">
+        <table class="fin-table">
+          <thead>
+            <tr>
+              <th scope="col">{{ t('financeAdmin.tableResident') }}</th>
+              <th scope="col">{{ t('financeAdmin.tableMonthStatus', { month: selectedMonthLabel }) }}</th>
+              <th scope="col">{{ t('financeAdmin.colNextPayment') }}</th>
+              <th scope="col">
+                {{ t('financeAdmin.colLast6') }}
+                <span v-if="calendarRangeLabel" class="fin-table__th-sub">{{ calendarRangeLabel }}</span>
+              </th>
+              <th scope="col" class="is-num">{{ t('financeOps.trafficOverdue') }}</th>
+              <th scope="col" class="is-actions">
+                <span class="visually-hidden">{{ t('financeAdmin.colActions') }}</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in pagedRows" :key="row.id" :class="`is-${row.group}`">
+              <td class="c-resident">
+                <div class="fin-res">
+                  <span class="fin-avatar" :class="`fin-avatar--${row.group}`" aria-hidden="true">
+                    {{ residentInitials(row.name) }}
                   </span>
-                  <span v-if="Number(rc.extraCharges) > 0">
-                    {{ t('financeAdmin.receiptExtra', { amount: nfPen(rc.extraCharges) }) }}
-                  </span>
-                  <strong>{{ nfPen(receiptPayable(rc)) }}</strong>
+                  <div class="fin-res__text">
+                    <strong>{{ row.name }}</strong>
+                    <small>{{ residentFloorApt(row) }}</small>
+                  </div>
                 </div>
-                <span class="small-badge" :class="getStatusBadgeClass(rc.statusKey)">
-                  {{ t(`financeAdmin.status${rc.statusKey}`) }}
+              </td>
+              <td :data-label="t('financeAdmin.tableMonthStatus', { month: selectedMonthLabel })">
+                <span class="fin-pill" :class="getStatusBadgeClass(row.monthStatus)">
+                  {{ t(`financeAdmin.status${row.monthStatus}`) }}
                 </span>
-              </li>
-              <li v-if="!group.receipts.length" class="empty-list">
-                {{ t('financeAdmin.emptyChargeReceipts') }}
-              </li>
-            </ul>
+              </td>
+              <td :data-label="t('financeAdmin.colNextPayment')">
+                <span class="fin-date">{{ nextPaymentDateLabel(row) }}</span>
+                <span class="fin-rel" :class="nextPaymentTone(row) && `fin-rel--${nextPaymentTone(row)}`">
+                  {{ nextPaymentRelative(row) }}
+                </span>
+              </td>
+              <td :data-label="t('financeAdmin.colLast6')">
+                <span v-if="calendarLoading" class="fin-muted">…</span>
+                <DebtTrafficLightGrid
+                  v-else
+                  inline
+                  :months="calendar.months"
+                  :residents="row.cal ? [row.cal] : []"
+                  :due-soon-days="calendar.dueSoonDays"
+                />
+              </td>
+              <td class="is-num" :data-label="t('financeOps.trafficOverdue')">
+                <span :class="row.overdueAmount > 0 ? 'fin-amount--danger' : 'fin-muted'">
+                  {{ row.overdueAmount > 0 ? nfPen(row.overdueAmount) : '—' }}
+                </span>
+              </td>
+              <td class="c-actions">
+                <div class="fin-row-actions">
+                  <button
+                    type="button"
+                    class="fin-chip"
+                    :aria-label="`${t('financeAdmin.extraAdd')} · ${row.name}`"
+                    @click="openExtraDialog(row)"
+                  >
+                    <i class="pi pi-plus" aria-hidden="true" />
+                    {{ t('financeAdmin.extraAdd') }}
+                  </button>
+                  <button
+                    type="button"
+                    class="fin-chip"
+                    :aria-label="`${t('financeAdmin.rowHistory')} · ${row.name}`"
+                    @click="openHistoryDialog(row)"
+                  >
+                    <i class="pi pi-history" aria-hidden="true" />
+                    {{ t('financeAdmin.rowHistory') }}
+                  </button>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="!filteredRows.length" class="fin-table__empty-row">
+              <td colspan="6">
+                <div class="fin-empty">
+                  <i class="pi pi-inbox" aria-hidden="true" />
+                  <span>
+                    {{
+                      residentRows.length
+                        ? t('financeAdmin.emptyFiltered')
+                        : t('financeAdmin.extraNoResidents')
+                    }}
+                  </span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <Paginator
+        v-if="filteredRows.length > PAGE_SIZE"
+        v-model:first="pageFirst"
+        class="fin-paginator"
+        :rows="PAGE_SIZE"
+        :total-records="filteredRows.length"
+      />
+    </section>
+
+    <!-- Configurar cuota -->
+    <Dialog
+      v-model:visible="isChargeDialogOpen"
+      modal
+      :header="t('financeAdmin.chargeDialogTitle')"
+      class="fin-dialog"
+      :style="{ width: 'min(30rem, 94vw)' }"
+      :draggable="false"
+      :closable="!isSavingCharge"
+    >
+      <div class="fin-form">
+        <div class="fin-field">
+          <span id="chargeMonthLabel" class="fin-field__label">{{ t('financeAdmin.chargeMonth') }}</span>
+          <div
+            class="fin-month fin-month--field"
+            role="group"
+            aria-labelledby="chargeMonthLabel"
+            :aria-invalid="chargeInvalid.month ? 'true' : 'false'"
+          >
+            <button
+              type="button"
+              class="fin-month__step"
+              :aria-label="t('financeAdmin.monthPrev')"
+              @click="shiftChargeMonth(-1)"
+            >
+              <i class="pi pi-chevron-left" aria-hidden="true" />
+            </button>
+            <span class="fin-month__label" aria-live="polite">{{ chargeMonthLabel(chargeForm.month) }}</span>
+            <button
+              type="button"
+              class="fin-month__step"
+              :aria-label="t('financeAdmin.monthNext')"
+              @click="shiftChargeMonth(1)"
+            >
+              <i class="pi pi-chevron-right" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+        <div class="fin-field">
+          <span class="fin-field__label">{{ t('financeAdmin.chargePeriod') }}</span>
+          <p class="fin-readonly">{{ chargePeriodLabel }}</p>
+        </div>
+        <label class="fin-field" for="chargePaymentOpen">
+          <span class="fin-field__label">{{ t('financeAdmin.chargePaymentOpen') }}</span>
+          <input
+            id="chargePaymentOpen"
+            v-model="chargeForm.paymentOpen"
+            type="date"
+            class="fin-input"
+            :lang="intlLocale"
+            required
+            :disabled="isChargeRegistered"
+            :aria-invalid="chargeInvalid.paymentOpen ? 'true' : 'false'"
+            :aria-describedby="chargeInvalid.paymentOpen ? 'charge-form-error' : undefined"
+            @input="chargeInvalid.paymentOpen = false"
+          />
+        </label>
+        <label class="fin-field" for="chargeAmount">
+          <span class="fin-field__label">{{ t('financeAdmin.chargeAmount') }}</span>
+          <InputNumber
+            v-model="chargeForm.amount"
+            input-id="chargeAmount"
+            :min-fraction-digits="2"
+            :max-fraction-digits="2"
+            :min="0"
+            mode="currency"
+            currency="PEN"
+            :locale="intlLocale"
+            class="fin-number"
+            :disabled="isChargeRegistered"
+            :invalid="chargeInvalid.amount"
+            :pt="{ pcInputText: { root: { 'aria-describedby': chargeInvalid.amount ? 'charge-form-error' : undefined } } }"
+            @update:model-value="chargeInvalid.amount = false"
+          />
+        </label>
+      </div>
+      <p v-if="chargeError" id="charge-form-error" class="fin-form-error" role="alert">{{ chargeError }}</p>
+      <p v-else-if="isChargeRegistered" class="fin-locked">
+        <i class="pi pi-lock" aria-hidden="true" />
+        {{ t('financeAdmin.chargeLocked', { month: chargeMonthLabel(chargeForm.month) }) }}
+      </p>
+      <p class="fin-dialog-hint">{{ t('financeOps.generateHint') }}</p>
+      <template #footer>
+        <ConfirmActions
+          :cancel-label="isChargeRegistered ? t('app.closeAction') : t('app.cancelAction')"
+          :confirm-label="t('financeAdmin.saveCharge')"
+          :show-confirm="!isChargeRegistered"
+          :loading="isSavingCharge"
+          :stagger="false"
+          @cancel="closeChargeDialog"
+          @confirm="onSaveCharge"
+        />
+      </template>
+    </Dialog>
+
+    <!-- Agregar monto -->
+    <Dialog
+      v-model:visible="isExtraDialogOpen"
+      modal
+      :header="t('financeAdmin.extraDialogTitle')"
+      class="fin-dialog"
+      :style="{ width: 'min(30rem, 94vw)' }"
+      :draggable="false"
+      :closable="!isSavingExtra"
+    >
+      <div v-if="selectedExtraResident" class="fin-res fin-res--chip">
+        <span class="fin-avatar" aria-hidden="true">{{ residentInitials(selectedExtraResident.name) }}</span>
+        <div class="fin-res__text">
+          <strong>{{ selectedExtraResident.name }}</strong>
+          <small>{{ residentFloorApt(selectedExtraResident) }}</small>
+        </div>
+      </div>
+      <div class="fin-form fin-form--single">
+        <label class="fin-field" for="extraTitle">
+          <span class="fin-field__label">{{ t('financeAdmin.extraAmountTitle') }}</span>
+          <input
+            id="extraTitle"
+            v-model="extraForm.title"
+            type="text"
+            maxlength="80"
+            class="fin-input"
+            required
+            :aria-invalid="extraInvalid.title ? 'true' : 'false'"
+            :aria-describedby="extraInvalid.title ? 'extra-form-error' : undefined"
+            @input="extraInvalid.title = false"
+          />
+        </label>
+        <label class="fin-field" for="extraAmount">
+          <span class="fin-field__label">{{ t('financeAdmin.extraAmount') }}</span>
+          <InputNumber
+            v-model="extraForm.amount"
+            input-id="extraAmount"
+            :min-fraction-digits="2"
+            :max-fraction-digits="2"
+            :min="0"
+            mode="currency"
+            currency="PEN"
+            :locale="intlLocale"
+            class="fin-number"
+            :invalid="extraInvalid.amount"
+            :pt="{ pcInputText: { root: { 'aria-describedby': extraInvalid.amount ? 'extra-form-error' : undefined } } }"
+            @update:model-value="extraInvalid.amount = false"
+          />
+        </label>
+        <label class="fin-field" for="extraDescription">
+          <span class="fin-field__label">{{ t('financeAdmin.extraDescription') }}</span>
+          <textarea
+            id="extraDescription"
+            v-model="extraForm.description"
+            class="fin-input fin-textarea"
+            maxlength="240"
+            rows="3"
+            required
+            :aria-invalid="extraInvalid.description ? 'true' : 'false'"
+            :aria-describedby="extraInvalid.description ? 'extra-form-error' : undefined"
+            @input="extraInvalid.description = false"
+          />
+        </label>
+      </div>
+      <p v-if="extraError" id="extra-form-error" class="fin-form-error" role="alert">{{ extraError }}</p>
+      <template #footer>
+        <ConfirmActions
+          :cancel-label="t('app.cancelAction')"
+          :confirm-label="t('financeAdmin.extraAdd')"
+          :loading="isSavingExtra"
+          :stagger="false"
+          @cancel="closeExtraDialog"
+          @confirm="onAddExtraCharge"
+        />
+      </template>
+    </Dialog>
+
+    <!-- Historial de pagos -->
+    <Dialog
+      v-model:visible="isHistoryDialogOpen"
+      modal
+      :header="t('financeAdmin.historyDialogTitle')"
+      class="fin-dialog"
+      :style="{ width: 'min(32rem, 94vw)' }"
+      :draggable="false"
+    >
+      <template v-if="selectedHistoryResident">
+        <div class="fin-res fin-res--chip">
+          <span class="fin-avatar" aria-hidden="true">{{ residentInitials(selectedHistoryResident.name) }}</span>
+          <div class="fin-res__text">
+            <strong>{{ selectedHistoryResident.name }}</strong>
+            <small>
+              {{ residentFloorApt(selectedHistoryResident) }}
+              <template v-if="formatLongDate(selectedHistoryResident.admissionDate)">
+                · {{ t('financeAdmin.admissionOn', { date: formatLongDate(selectedHistoryResident.admissionDate) }) }}
+              </template>
+            </small>
+          </div>
+        </div>
+        <ul
+          v-if="historyPaidMonths.length || historyExtraCharges.length"
+          class="receipt-list"
+          role="list"
+        >
+          <li v-for="rc in historyPaidMonths" :key="rc.id">
+            <div class="rc-info">
+              <span>{{ rc.monthLabel }}</span>
+              <strong>{{ nfPen(receiptPayable(rc)) }}</strong>
+            </div>
+            <div class="rc-actions">
+              <span class="fin-pill status-paid">{{ t('financeAdmin.statusPaid') }}</span>
+              <button
+                type="button"
+                class="fin-chip"
+                :disabled="downloadingReceiptId === String(rc.id)"
+                :aria-label="`${t('financeOps.downloadReceipt')} · ${rc.monthLabel}`"
+                @click="downloadPaidReceipt(rc)"
+              >
+                <i
+                  class="pi"
+                  :class="downloadingReceiptId === String(rc.id) ? 'pi-spin pi-spinner' : 'pi-download'"
+                  aria-hidden="true"
+                />
+                {{
+                  downloadingReceiptId === String(rc.id)
+                    ? t('financeOps.downloading')
+                    : t('financeOps.downloadReceipt')
+                }}
+              </button>
+            </div>
+          </li>
+          <li v-for="item in historyExtraCharges" :key="item.id">
+            <div class="rc-info">
+              <span>{{ item.title }}</span>
+              <span>{{ item.description }}</span>
+              <strong>{{ nfPen(item.amount) }}</strong>
+            </div>
+            <span class="fin-pill status-extra">{{ t('financeAdmin.receiptExtraLabel') }}</span>
           </li>
         </ul>
+        <div v-else class="fin-empty">
+          <i class="pi pi-inbox" aria-hidden="true" />
+          <span>{{ t('financeAdmin.historyEmptyPaid') }}</span>
+        </div>
+        <p v-if="downloadError" class="fin-form-error" role="alert">{{ downloadError }}</p>
+      </template>
+      <template #footer>
+        <ConfirmActions
+          :show-cancel="false"
+          :confirm-label="t('app.closeAction')"
+          :stagger="false"
+          @confirm="isHistoryDialogOpen = false"
+        />
+      </template>
+    </Dialog>
+
+    <!-- Ver recibos -->
+    <Dialog
+      v-model:visible="isReceiptsModalOpen"
+      modal
+      :header="t('financeAdmin.receiptsModalTitle')"
+      class="fin-dialog"
+      :style="{ width: 'min(38rem, 94vw)' }"
+      :draggable="false"
+    >
+      <div v-if="!chargeReceiptGroups.length" class="fin-empty">
+        <i class="pi pi-inbox" aria-hidden="true" />
+        <span>{{ t('financeAdmin.emptyCharges') }}</span>
+      </div>
+      <ul v-else class="r-list" role="list">
+        <li v-for="group in chargeReceiptGroups" :key="group.charge.id" class="r-card">
+          <div class="r-card__row">
+            <span class="r-card__avatar" aria-hidden="true">
+              <i class="pi pi-calendar" />
+            </span>
+            <div class="r-card__body">
+              <p class="r-card__name">{{ chargeMonthLabel(group.charge.month) }}</p>
+              <p class="r-card__meta">
+                {{
+                  t('financeAdmin.chargeDatesHint', {
+                    start: formatDayMonth(group.charge.billingStart, locale),
+                    end: formatDayMonth(group.charge.billingEnd, locale),
+                    open: formatDayMonth(group.charge.paymentOpen, locale),
+                  })
+                }}
+              </p>
+            </div>
+            <strong class="charge-amount">{{ nfPen(group.charge.amount) }}</strong>
+          </div>
+          <ul class="receipt-list receipt-list--modal">
+            <li v-for="rc in group.receipts" :key="rc.id">
+              <div class="rc-info">
+                <span class="rc-info__name">{{ rc.residentName }}</span>
+                <span>{{
+                  t('financeAdmin.residentFloorApt', {
+                    floor: rc.residentFloor,
+                    code: rc.residentCode,
+                  })
+                }}</span>
+                <span>{{
+                  t('financeAdmin.receiptDue')
+                }}: {{ formatDayMonth(normalizeYmd(rc.dueDate), locale) }}</span>
+                <span v-if="Number(rc.lateFee) > 0" class="rc-late-fee">
+                  {{ t('financeAdmin.receiptLateFee', { amount: nfPen(rc.lateFee), n: rc.lateDays || 0 }) }}
+                </span>
+                <span v-if="Number(rc.extraCharges) > 0">
+                  {{ t('financeAdmin.receiptExtra', { amount: nfPen(rc.extraCharges) }) }}
+                </span>
+                <strong>{{ nfPen(receiptPayable(rc)) }}</strong>
+              </div>
+              <span class="fin-pill" :class="getStatusBadgeClass(rc.statusKey)">
+                {{ t(`financeAdmin.status${rc.statusKey}`) }}
+              </span>
+            </li>
+            <li v-if="!group.receipts.length" class="empty-list">
+              {{ t('financeAdmin.emptyChargeReceipts') }}
+            </li>
+          </ul>
+        </li>
+      </ul>
+      <template #footer>
         <ConfirmActions
           :show-cancel="false"
           :confirm-label="t('app.closeAction')"
           :stagger="false"
           @confirm="closeReceiptsModal"
         />
-      </section>
-    </div>
+      </template>
+    </Dialog>
   </div>
 
   <div v-else class="app-view finance-loading" role="status" aria-live="polite">
@@ -1013,79 +1342,894 @@ const residentsStatusMonthLabel = computed(() =>
 </template>
 
 <style scoped>
-.billing-alert {
-  display: flex;
-  align-items: center;
-  gap: 0.85rem;
-  flex-wrap: wrap;
-  padding: 0.9rem 1.1rem;
-  border-radius: 14px;
-  background: #fff4e5;
-  border: 1px solid #ffd8a8;
-  color: #7a3e00;
+.app-view {
+  padding: 1.25rem 1.5rem 2.5rem;
+  width: 100%;
+  max-width: 88rem;
+  box-sizing: border-box;
 }
 
-.billing-alert__icon {
-  font-size: 1.15rem;
-  color: #e65100;
-}
-
-.billing-alert__text {
-  flex: 1;
-  min-width: 14rem;
+.fin {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
-  font-size: 0.85rem;
-  line-height: 1.4;
+  gap: 1rem;
 }
 
-.billing-alert__btn {
+/* ---------- Header ---------- */
+.fin-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  flex-wrap: wrap;
+}
+
+.fin-head__text {
+  min-width: 0;
+}
+
+.fin-head__title {
+  margin: 0;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: #0f172a;
+}
+
+.fin-head__sub {
+  margin: 0.25rem 0 0;
+  font-size: 0.88rem;
+  color: #6e6e73;
+}
+
+.fin-head__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.fin-head__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* Month selector: arrows + localized label (avoids the browser's English month input). */
+.fin-month {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.2rem;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+}
+
+.fin-month__step {
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #1e3a8a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.fin-month__step:hover {
+  background: #e8eefc;
+}
+
+.fin-month__label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-width: 9.5rem;
+  padding: 0 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 650;
+  color: #0f172a;
+  white-space: nowrap;
+}
+
+.fin-month__label .pi {
+  font-size: 0.8rem;
+  color: #1e3a8a;
+}
+
+.fin-month--field {
+  width: 100%;
+  justify-content: space-between;
+  border-radius: 12px;
+  border-color: #d2d2d7;
+}
+
+.fin-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.45rem;
+  padding: 0.5rem 0.95rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  color: #1e3a8a;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.fin-btn:hover:not(:disabled) {
+  background: #e8eefc;
+  border-color: transparent;
+}
+
+.fin-btn--primary {
+  background: #1e3a8a;
+  border-color: #1e3a8a;
+  color: #fff;
+}
+
+.fin-btn--primary:hover:not(:disabled) {
+  background: #172554;
+  border-color: #172554;
+}
+
+.fin-btn:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.fin-btn:focus-visible,
+.fin-month__step:focus-visible,
+.fin-filter:focus-visible,
+.fin-chip:focus-visible,
+.fin-alert__btn:focus-visible,
+.fin-notice__close:focus-visible {
+  outline: 2px solid #1e3a8a;
+  outline-offset: 2px;
+}
+
+/* ---------- Alerts / notices ---------- */
+.fin-alert,
+.fin-notice {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.55rem 0.5rem 0.95rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.fin-alert {
+  background: #fdf3dc;
+  color: #78350f;
+}
+
+.fin-alert__icon {
+  color: #b45309;
   flex-shrink: 0;
 }
 
-.settings-billing {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 0.6rem 1rem;
-  margin-top: 1rem;
-  padding-top: 0.9rem;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.settings-billing__hint {
+.fin-alert__text,
+.fin-notice__text {
   flex: 1;
-  min-width: 14rem;
+  min-width: 0;
   margin: 0;
-  font-size: 0.78rem;
-  color: #6e6e73;
 }
 
-.settings-billing__msg {
-  margin: 0;
-  font-size: 0.8125rem;
-  color: #1b7a3d;
+.fin-alert__btn {
+  flex-shrink: 0;
+  padding: 0.35rem 0.8rem;
+  border: none;
+  border-radius: 999px;
+  background: #fff;
+  color: #92400e;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
-.settings-billing__msg--error {
+.fin-alert__btn:hover {
+  text-decoration: underline;
+}
+
+.fin-notice--ok {
+  background: #e3f4e8;
+  color: #14532d;
+}
+
+.fin-notice--ok > .pi {
+  color: #15803d;
+}
+
+.fin-notice--error {
+  background: #fde4e4;
+  color: #7f1d1d;
+}
+
+.fin-notice--error > .pi {
   color: #b42318;
 }
 
-.traffic-hint {
-  margin: -0.35rem 0 0.85rem;
-  font-size: 0.8125rem;
+.fin-notice__close {
+  flex-shrink: 0;
+  width: 1.8rem;
+  height: 1.8rem;
+  border: none;
+  border-radius: 50%;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+
+/* ---------- KPI cards (same language as the dashboard) ---------- */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.kpi-card {
+  position: relative;
+  overflow: hidden;
+  background: var(--kpi-bg, #f1f5f9);
+  border-radius: 16px;
+  padding: 1.05rem 1.1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.kpi-card > *:not(.kpi-watermark) {
+  position: relative;
+  z-index: 1;
+}
+
+.kpi-watermark {
+  position: absolute;
+  right: -0.6rem;
+  bottom: -1.3rem;
+  font-size: 6.5rem;
+  opacity: 0.07;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.kpi-card--blue { --kpi-bg: #e8eefc; }
+.kpi-card--green { --kpi-bg: #e3f4e8; }
+.kpi-card--orange { --kpi-bg: #fdeee2; }
+.kpi-card--amber { --kpi-bg: #fdf3dc; }
+.kpi-card--red { --kpi-bg: #fde4e4; }
+
+.kpi-card--blue .kpi-watermark { color: #1e3a8a; }
+.kpi-card--green .kpi-watermark { color: #15803d; }
+.kpi-card--orange .kpi-watermark { color: #c2410c; }
+.kpi-card--amber .kpi-watermark { color: #b45309; }
+.kpi-card--red .kpi-watermark { color: #b42318; }
+
+.kpi-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.kpi-icon {
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 0.95rem;
+  background: #fff;
+}
+
+.icon-blue { color: #1e3a8a; }
+.icon-green { color: #15803d; }
+.icon-orange { color: #c2410c; }
+.icon-amber { color: #b45309; }
+.icon-red { color: #b42318; }
+
+.kpi-label {
+  color: #6e6e73;
+  font-weight: 600;
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+}
+
+.kpi-value {
+  color: #0f172a;
+  font-family: var(--bf-font-heading, inherit);
+  font-weight: 700;
+  font-size: 1.65rem;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  margin-bottom: 0.45rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kpi-value__of {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 0;
+}
+
+.kpi-subtext {
+  margin-top: auto;
+  color: #6e6e73;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.subtext-red,
+.text-red {
+  color: #b42318;
+}
+
+.kpi-meter {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+.kpi-meter__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #c2410c;
+  transition: width 0.4s ease;
+}
+
+/* ---------- Residents card ---------- */
+.fin-card {
+  padding: 1.2rem 1.25rem 1.1rem;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  min-width: 0;
+}
+
+.fin-card__head {
+  margin-bottom: 0.9rem;
+}
+
+.fin-card__title {
+  margin: 0;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+  text-transform: none;
+}
+
+.fin-card__hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
   color: #6e6e73;
 }
 
-.traffic-title-icon {
-  color: #ff3b30;
+.fin-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.85rem;
+}
+
+.fin-filters {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.fin-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 0.5rem 0.4rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fin-filter:hover:not(.is-active) {
+  background: #f1f5f9;
+}
+
+.fin-filter__count {
+  min-width: 1.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.fin-filter.is-active {
+  background: #1e3a8a;
+  border-color: #1e3a8a;
+  color: #fff;
+}
+
+.fin-filter.is-active .fin-filter__count {
+  background: #fff;
+  color: #1e3a8a;
+}
+
+.fin-filter--overdue:not(.is-active) .fin-filter__count {
+  background: #fde4e4;
+  color: #b42318;
+}
+
+.fin-filter--pending:not(.is-active) .fin-filter__count {
+  background: #fdf3dc;
+  color: #92400e;
+}
+
+.fin-filter--upToDate:not(.is-active) .fin-filter__count {
+  background: #e3f4e8;
+  color: #15803d;
+}
+
+.fin-search {
+  position: relative;
+  flex: 0 1 18rem;
+  min-width: 12rem;
+}
+
+.fin-search .pi {
+  position: absolute;
+  left: 0.85rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.8rem;
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.fin-search input {
+  width: 100%;
+  height: 2.4rem;
+  padding: 0 0.9rem 0 2.2rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #f8fafc;
+  font: inherit;
+  font-size: 0.84rem;
+  color: #0f172a;
+}
+
+.fin-search input:focus {
+  outline: 2px solid #1e3a8a;
+  outline-offset: 1px;
+  background: #fff;
+}
+
+.fin-legend {
+  margin-bottom: 0.6rem;
+}
+
+.fin-legend :deep(.tl-legend) {
+  gap: 0.35rem 0.9rem;
+}
+
+/* Table */
+.fin-table-wrap {
+  overflow-x: auto;
+}
+
+.fin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.fin-table th {
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #6e6e73;
+  background: #f8fafc;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.07);
+  white-space: nowrap;
+}
+
+.fin-table th:first-child {
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+}
+
+.fin-table th:last-child {
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+}
+
+.fin-table__th-sub {
+  margin-left: 0.3rem;
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+.fin-table td {
+  padding: 0.7rem 0.75rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  vertical-align: middle;
+  color: #0f172a;
+}
+
+.fin-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.fin-table tbody tr:not(.fin-table__empty-row):hover td {
+  background: #fafbfd;
+}
+
+.fin-table .is-num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.fin-table .is-actions,
+.fin-table .c-actions {
+  text-align: right;
+}
+
+.fin-res {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.fin-res__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fin-res__text strong {
+  font-weight: 650;
+  font-size: 0.875rem;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fin-res__text small {
+  font-size: 0.74rem;
+  color: #6e6e73;
+}
+
+.fin-res--chip {
+  padding: 0.65rem 0.75rem;
+  margin-bottom: 1rem;
+  border-radius: 14px;
+  background: #f1f5f9;
+}
+
+.fin-avatar {
+  flex-shrink: 0;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: #e8eefc;
+  color: #1e3a8a;
+}
+
+.fin-res--chip .fin-avatar {
+  background: #fff;
+}
+
+.fin-avatar--overdue { background: #fde4e4; color: #b42318; }
+.fin-avatar--pending { background: #fdf3dc; color: #92400e; }
+.fin-avatar--upToDate { background: #e3f4e8; color: #15803d; }
+
+.fin-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.22rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.status-paid { background: #e3f4e8; color: #15803d; }
+.status-pending { background: #fdf3dc; color: #92400e; }
+.status-overdue { background: #fde4e4; color: #b42318; }
+.status-unbilled { background: #f1f5f9; color: #64748b; }
+.status-extra { background: #e8eefc; color: #1e3a8a; }
+
+.fin-date {
+  display: block;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.fin-rel {
+  display: block;
+  font-size: 0.74rem;
+  color: #6e6e73;
+  white-space: nowrap;
+}
+
+.fin-rel--soon { color: #b45309; font-weight: 600; }
+.fin-rel--late { color: #b42318; font-weight: 600; }
+
+.fin-muted {
+  color: #94a3b8;
+}
+
+.fin-amount--danger {
+  color: #b42318;
+  font-weight: 650;
+}
+
+.fin-row-actions {
+  display: inline-flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.fin-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.32rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+  color: #1e3a8a;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fin-chip .pi {
+  font-size: 0.7rem;
+}
+
+.fin-chip:hover:not(:disabled) {
+  background: #e8eefc;
+  border-color: transparent;
+}
+
+.fin-chip:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.fin-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 1.5rem 1rem;
+  color: #6e6e73;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.fin-empty .pi {
+  font-size: 1.4rem;
+  color: #cbd5e1;
+}
+
+.fin-paginator {
+  margin-top: 0.5rem;
+}
+
+.fin-paginator :deep(.p-paginator) {
+  background: transparent;
+  padding: 0.4rem 0;
+}
+
+/* ---------- Dialog forms ---------- */
+.fin-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem 1rem;
+}
+
+.fin-form--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.fin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.fin-field__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.fin-input,
+.fin-readonly,
+.fin-number :deep(.p-inputnumber-input) {
+  width: 100%;
+  height: 2.6rem;
+  padding: 0 0.8rem;
+  border-radius: 12px;
+  border: 1px solid #d2d2d7;
+  background: #fff;
+  font: inherit;
+  font-size: 0.875rem;
+  color: #0f172a;
+  box-shadow: none;
+}
+
+.fin-number {
+  width: 100%;
+}
+
+.fin-readonly {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  background: #f1f5f9;
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.fin-textarea {
+  height: auto;
+  min-height: 4.5rem;
+  padding: 0.6rem 0.8rem;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.fin-input:focus,
+.fin-number :deep(.p-inputnumber-input:focus) {
+  outline: 2px solid #1e3a8a;
+  outline-offset: 1px;
+  border-color: #1e3a8a;
+}
+
+.fin-input:disabled,
+.fin-number :deep(.p-inputnumber-input:disabled) {
+  background: #f1f5f9;
+  color: #475569;
+  cursor: default;
+}
+
+.fin-input[aria-invalid='true'],
+.fin-number :deep(.p-inputnumber-input.p-invalid),
+.fin-number :deep(.p-invalid .p-inputnumber-input) {
+  border-color: #dc2626;
+  background: #fff7f7;
+}
+
+.fin-form-error {
+  margin: 0.85rem 0 0;
+  color: #b42318;
   font-size: 0.8rem;
 }
 
-.traffic-title-count {
-  color: #b42318;
+.fin-locked {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin: 0.9rem 0 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: 12px;
+  background: #e8eefc;
+  color: #1e3a8a;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.fin-locked .pi {
+  margin-top: 0.1rem;
+  font-size: 0.75rem;
+}
+
+.fin-dialog-hint {
+  margin: 0.85rem 0 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: #6e6e73;
+}
+
+/* ---------- Receipts lists (history + receipts modal) ---------- */
+.receipt-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.receipt-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  background: #fff;
+  padding: 0.65rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+.rc-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.8rem;
+  min-width: 0;
+}
+
+.rc-info span {
+  color: #6e6e73;
+}
+
+.rc-info__name {
+  color: #0f172a !important;
+  font-weight: 600;
+}
+
+.rc-late-fee {
+  color: #b45309 !important;
+}
+
+.rc-info strong {
+  color: #0f172a;
+  font-size: 0.92rem;
+  font-weight: 650;
 }
 
 .rc-actions {
@@ -1096,450 +2240,79 @@ const residentsStatusMonthLabel = computed(() =>
   justify-content: flex-end;
 }
 
-.rc-download {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.3rem 0.65rem;
-  border-radius: 999px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  background: #fff;
-  color: #1d1d1f;
-  font-size: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.rc-download:hover:not(:disabled) {
-  background: #f5f5f7;
-}
-
-.rc-download:disabled {
-  opacity: 0.6;
-  cursor: progress;
-}
-
-.app-view {
-  padding: 1.75rem 1.5rem 1.25rem;
-  width: 100%;
-  max-width: none;
-  min-height: 100dvh;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-}
-
-.finance-page {
-  margin-top: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-  min-height: 0;
-}
-
-.finance-split {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 2.5rem;
-  align-items: start;
-}
-
-.finance-split > .finance-panel {
-  min-width: 0;
-}
-
-@media (max-width: 900px) {
-  .finance-split {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 1.25rem;
-  }
-}
-
-.finance-panel {
-  padding: 1.2rem 1.25rem 1.35rem;
-  border-radius: 16px;
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-}
-
-.finance-panel--table {
-  padding: 1.2rem 1.25rem 1.35rem;
-  overflow: hidden;
-}
-
-.finance-panel__section-title {
-  margin: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  font-size: 1.15rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.25;
-  color: var(--apple-text, #1d1d1f);
-  text-transform: capitalize;
-}
-
-.finance-panel__section-title .pi {
-  font-size: 1.25rem;
-  color: #0071e3;
-}
-
-.finance-panel__section-title--plain {
-  text-transform: none;
-}
-
-.mgmt-panel-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.5rem;
-}
-
-.mgmt-panel-toolbar__actions {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  flex-wrap: wrap;
-}
-
-.finance-panel > .settings-field {
-  --settings-control-height: 2.75rem;
-}
-
-.finance-panel--table > .settings-field {
-  margin-bottom: 0.85rem;
-}
-
-.mgmt-view-footer {
-  margin-top: auto;
-  padding: 1.5rem 0 0.25rem;
-  width: 100%;
-  text-align: center;
-  font-size: 0.6875rem;
-  font-weight: 400;
-  line-height: 1.35;
-  letter-spacing: -0.01em;
-  color: #aeaeb2;
-}
-
-.app-view :deep(.import-dropzone__btn.p-button) {
-  min-height: 1.7rem;
-  padding: 0.22rem 0.85rem;
-  border-radius: 8px;
-  font-weight: 500;
-  font-size: 0.8125rem;
-  box-shadow: none;
-  border: none;
-  background: #0071e3;
-  color: #ffffff;
-}
-
-.app-view :deep(.import-dropzone__btn.p-button:hover) {
-  background: #0066cc;
-  color: #ffffff;
-}
-
-.import-panel .finance-table {
-  margin-top: 0.65rem;
-}
-
-.finance-panel__title-month {
-  display: inline-block;
-  margin-left: 0.35rem;
-  text-transform: none;
-  color: #86868b;
-  font-weight: 500;
-}
-
-.finance-table {
-  margin-top: 0.15rem;
-}
-
-.finance-data :deep(.p-datatable) {
-  font-size: 0.875rem;
-  border: none;
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.finance-data :deep(.p-datatable-wrapper) {
-  border-radius: 12px;
-}
-
-.finance-data :deep(.p-datatable-header) {
-  background: transparent;
-  border: none;
-  padding: 0;
-}
-
-.finance-data :deep(.p-datatable-thead > tr > th) {
-  background: rgba(0, 0, 0, 0.02);
-  color: #86868b;
-  font-weight: 600;
-  font-size: 0.6875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.055em;
-  border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  padding: 0.6rem 0.75rem;
-}
-
-.finance-data :deep(.p-datatable-tbody > tr) {
-  background: transparent;
-  transition: background 0.12s ease;
-}
-
-.finance-data :deep(.p-datatable-tbody > tr:hover) {
-  background: rgba(0, 0, 0, 0.02);
-}
-
-.finance-data :deep(.p-datatable-tbody > tr > td) {
-  border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  padding: 0.7rem 0.75rem;
-  vertical-align: middle;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.finance-data :deep(.p-datatable-tbody > tr:last-child > td) {
-  border-bottom: none;
-}
-
-.finance-data :deep(.p-paginator) {
-  background: transparent;
-  border: none;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-  padding: 0.6rem 0.5rem;
-  font-size: 0.8125rem;
-  --p-paginator-page-selected-background: #dbeafe;
-  --p-paginator-page-selected-color: #0071e3;
-}
-
-.finance-data :deep(.p-paginator .p-paginator-page) {
-  min-width: 2rem;
-  height: 2rem;
-  border-radius: 50%;
-}
-
-.finance-data :deep(.p-paginator .p-paginator-page.p-highlight),
-.finance-data :deep(.p-paginator .p-paginator-page[data-p-active="true"]),
-.finance-data :deep(.p-paginator .p-paginator-page.p-paginator-page-selected) {
-  background: #dbeafe;
-  color: #0071e3;
-  border-color: transparent;
-}
-
-.finance-date-cell {
-  font-weight: 500;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.resident-info {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-}
-
-.resident-info strong {
-  font-weight: 600;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.resident-info small {
-  color: var(--apple-text-secondary, #6e6e73);
-  font-size: 0.75rem;
-}
-
-.days-left {
-  font-weight: 600;
-  font-size: 0.8125rem;
-  color: #0071e3;
-  background: rgba(0, 113, 227, 0.08);
-  padding: 0.25rem 0.55rem;
-  border-radius: 8px;
-}
-
-.days-left.urgent {
-  color: #ff3b30;
-  background: rgba(255, 59, 48, 0.08);
-}
-
-.status-badge {
-  padding: 0.25rem 0.65rem;
-  border-radius: 8px;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.status-paid {
-  background: rgba(52, 199, 89, 0.14);
-  color: #248a3d;
-}
-
-.status-pending {
-  background: rgba(255, 149, 0, 0.14);
-  color: #c35b00;
-}
-
-.status-overdue {
-  background: rgba(255, 59, 48, 0.12);
-  color: #d70015;
-}
-
-.status-unbilled {
-  background: rgba(142, 142, 147, 0.14);
-  color: #6e6e73;
-}
-
-.finance-history__toolbar {
-  margin-bottom: 0.65rem;
-}
-
-.finance-history__floor-filter {
-  min-width: 11rem;
-  flex: 0 1 auto;
-}
-
-.finance-history__floor-filter :deep(.p-dropdown) {
-  border-radius: 8px;
-  border: 1px solid #d2d2d7;
-  background: #fff;
-  font-size: 0.875rem;
-  box-shadow: none;
-}
-
-.finance-history__floor-filter :deep(.p-dropdown:not(.p-disabled):hover) {
-  border-color: rgba(0, 0, 0, 0.14);
-}
-
-.finance-history__floor-filter :deep(.p-dropdown:not(.p-disabled).p-focus) {
-  outline: none;
-  border-color: #0071e3;
-  box-shadow: none;
-}
-
-.finance-history__floor-filter :deep(.p-dropdown-label) {
-  padding: 0.5rem 0.75rem;
-  font-weight: 500;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.floor-section {
-  margin-bottom: 1.75rem;
-}
-
-.floor-section:last-child {
-  margin-bottom: 0;
-}
-
-.floor-title {
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: capitalize;
-  letter-spacing: -0.01em;
-  color: #86868b;
-  padding-bottom: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.history-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 1rem;
-}
-
-.finance-card {
-  padding: 1.1rem 1.2rem;
-  border-radius: 10px;
-  background: #fafafa;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  transition: box-shadow 0.15s ease;
-}
-
-.finance-card:hover {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-}
-
-.finance-card h4 {
-  margin: 0 0 0.85rem;
-  font-size: 0.9375rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  color: var(--apple-text, #1d1d1f);
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-}
-
-.apt-code {
-  color: var(--apple-text-secondary, #6e6e73);
-  font-weight: 500;
-  font-size: 0.8125rem;
-}
-
-.receipt-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-}
-
-.receipt-list li {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.75rem;
-  background: #fff;
-  padding: 0.65rem 0.75rem;
-  border-radius: 10px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.rc-info {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  font-size: 0.8125rem;
-}
-
-.rc-info span {
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.rc-late-fee {
-  color: #c35b00 !important;
-}
-
-.rc-info strong {
-  color: var(--apple-text, #1d1d1f);
-  font-size: 0.9375rem;
-  font-weight: 600;
-}
-
-.small-badge {
-  font-size: 0.6875rem;
-  padding: 0.2rem 0.45rem;
-  border-radius: 6px;
-  font-weight: 600;
-}
-
 .empty-list {
-  color: var(--apple-text-secondary, #6e6e73);
-  font-size: 0.8125rem;
+  color: #6e6e73;
+  font-size: 0.8rem;
   justify-content: center !important;
   background: transparent !important;
   border: none !important;
 }
 
+.r-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.r-card {
+  border-radius: 14px;
+  padding: 0.8rem 0.85rem;
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.r-card__row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.r-card__avatar {
+  flex-shrink: 0;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  background: #e8eefc;
+  color: #1e3a8a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+}
+
+.r-card__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.r-card__name {
+  margin: 0;
+  font-weight: 650;
+  font-size: 0.875rem;
+  color: #0f172a;
+}
+
+.r-card__meta {
+  margin: 0.15rem 0 0;
+  font-size: 0.74rem;
+  color: #6e6e73;
+}
+
+.charge-amount {
+  flex-shrink: 0;
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: #0f172a;
+}
+
+.receipt-list--modal {
+  margin-top: 0.7rem;
+}
+
+/* ---------- Loading ---------- */
 .finance-loading {
   display: flex;
   justify-content: center;
@@ -1563,377 +2336,204 @@ const residentsStatusMonthLabel = computed(() =>
   color: #c7c7cc;
 }
 
-.settings-grid {
-  --settings-control-height: 2.75rem;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem 1.25rem;
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-@media (max-width: 720px) {
-  .settings-grid {
-    grid-template-columns: minmax(0, 1fr);
+/* ---------- Responsive ---------- */
+@media (max-width: 1100px) {
+  .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .fin-head__controls {
+    justify-content: flex-start;
   }
 }
 
-.extra-form-grid {
-  --settings-control-height: 1.375rem;
-  margin-top: 1rem;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0.65rem 1.25rem;
+@media (max-width: 720px) {
+  .app-view {
+    padding: 1rem 1rem 2rem;
+  }
+  .fin-head__title {
+    font-size: 1.35rem;
+  }
+  .fin-head,
+  .fin-head__controls,
+  .fin-head__actions {
+    width: 100%;
+  }
+  .fin-month {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .fin-head__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .fin-btn {
+    justify-content: center;
+    padding-inline: 0.6rem;
+  }
+  .fin-btn--primary {
+    grid-column: 1 / -1;
+    order: -1;
+  }
+  .fin-alert,
+  .fin-notice {
+    border-radius: 16px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .fin-alert__btn {
+    margin-left: auto;
+  }
+  .kpi-grid {
+    gap: 0.6rem;
+  }
+  .kpi-card {
+    padding: 0.85rem 0.85rem 0.9rem;
+  }
+  .kpi-icon {
+    width: 1.8rem;
+    height: 1.8rem;
+    font-size: 0.8rem;
+  }
+  .kpi-value {
+    font-size: 1.2rem;
+  }
+  .kpi-value__of {
+    font-size: 0.85rem;
+  }
+  .fin-card {
+    padding: 1rem 0.85rem;
+  }
+  .fin-search {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .fin-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* The table becomes one card per resident. */
+  .fin-table-wrap {
+    overflow: visible;
+  }
+  .fin-table,
+  .fin-table tbody,
+  .fin-table tr,
+  .fin-table td {
+    display: block;
+    width: 100%;
+  }
+  .fin-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+  .fin-table tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .fin-table tbody tr:not(.fin-table__empty-row) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.7rem 0.75rem;
+    padding: 0.85rem;
+    border-radius: 16px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: #fff;
+  }
+  .fin-table tbody tr:not(.fin-table__empty-row):hover td {
+    background: transparent;
+  }
+  .fin-table td {
+    padding: 0;
+    border: none;
+    text-align: left !important;
+    min-width: 0;
+  }
+  .fin-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: #6e6e73;
+  }
+  .fin-table .c-resident,
+  .fin-table .c-actions {
+    grid-column: 1 / -1;
+  }
+  .fin-table .c-actions {
+    padding-top: 0.6rem;
+    border-top: 1px solid rgba(15, 23, 42, 0.06);
+  }
+  .fin-row-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+  .fin-chip {
+    justify-content: center;
+    padding-block: 0.45rem;
+  }
+  .receipt-list li {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .receipt-list li > .fin-pill {
+    align-self: flex-start;
+  }
+  .rc-actions {
+    justify-content: space-between;
+  }
 }
 
-.extra-form-grid .settings-native-input,
-.extra-form-grid .settings-input :deep(.p-inputnumber),
-.extra-form-grid .settings-input :deep(.p-inputnumber-input) {
-  height: var(--settings-control-height);
-  line-height: var(--settings-control-height);
-  font-size: 0.8125rem;
-  padding: 0 0.55rem;
+@media (prefers-reduced-motion: reduce) {
+  .fin-btn,
+  .kpi-meter__fill {
+    transition: none;
+  }
 }
+</style>
 
-.extra-form-grid .settings-input :deep(.p-inputnumber-input) {
-  line-height: var(--settings-control-height);
-}
-
-.extra-form-grid__full {
-  grid-column: 1 / -1;
-}
-
-.settings-textarea {
-  height: auto;
-  min-height: 2.15rem;
-  line-height: 1.3;
-  padding: 0.3rem 0.55rem;
-  resize: vertical;
-}
-
-.extra-resident-list {
-  margin: 0.5rem 0 0;
-  padding: 0;
-  list-style: none;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 10px;
-  background: #fff;
-  max-height: 12rem;
-  overflow-y: auto;
-}
-
-.extra-resident-list__item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  padding: 0.65rem 0.8rem;
-  cursor: pointer;
-}
-
-.extra-resident-list__item + .extra-resident-list__item {
-  border-top: 1px solid rgba(0, 0, 0, 0.05);
-}
-
-.extra-resident-list__item strong {
-  font-size: 0.875rem;
-  color: #1d1d1f;
-}
-
-.extra-resident-list__item span {
-  font-size: 0.75rem;
-  color: #86868b;
-}
-
-.extra-resident-list__item:hover,
-.extra-resident-list__item--active {
-  background: #f0f7ff;
-}
-
-.extra-resident-list__empty {
-  padding: 0.75rem 0.8rem;
-  color: #86868b;
-  font-size: 0.8125rem;
-}
-
-.settings-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  min-width: 0;
-  text-transform: none;
-}
-
-.settings-field span {
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: #6e6e73;
-}
-
-.settings-period {
-  margin: 0;
-  height: var(--settings-control-height);
-  display: flex;
-  align-items: center;
-  padding: 0 0.7rem;
-  border-radius: 8px;
-  background: #f5f5f7;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #1d1d1f;
-  box-sizing: border-box;
-}
-
-.settings-input {
-  width: 100%;
-  height: var(--settings-control-height);
-}
-
-.settings-input :deep(.p-inputnumber),
-.settings-input :deep(.p-inputnumber-input) {
-  width: 100%;
-  height: var(--settings-control-height);
-}
-
-.settings-input :deep(.p-inputnumber-input) {
-  border-radius: 8px;
-  border: 1px solid #d2d2d7;
-  font-size: 0.875rem;
-  padding: 0 0.7rem;
-  line-height: var(--settings-control-height);
-  box-shadow: none;
-  box-sizing: border-box;
-}
-
-.settings-input :deep(.p-inputnumber:not(.p-disabled):hover .p-inputnumber-input) {
-  border-color: rgba(0, 0, 0, 0.14);
-}
-
-.settings-input :deep(.p-inputnumber.p-inputnumber-focus .p-inputnumber-input) {
-  border-color: #0071e3;
-  box-shadow: none;
-  outline: none;
-}
-
-.settings-native-input {
-  display: block;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  height: var(--settings-control-height);
-  border: 1px solid #d2d2d7;
-  border-radius: 8px;
-  padding: 0 0.7rem;
-  font: inherit;
-  font-size: 0.875rem;
-  line-height: var(--settings-control-height);
-  color: #1d1d1f;
-  background: #fff;
-  box-sizing: border-box;
-}
-
-.settings-native-input::-webkit-date-and-time-value {
-  text-align: left;
-  min-width: 100%;
-}
-
-.settings-native-input:focus {
-  outline: none;
-  border-color: #0071e3;
-}
-
-.settings-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.75rem;
-  margin-top: 1.15rem;
-}
-
-.settings-error {
-  margin: 0;
-  margin-right: auto;
-  color: #ff3b30;
-  font-size: 0.78rem;
-}
-
-.settings-locked {
-  margin: 0;
-  margin-right: auto;
-  color: #86868b;
-  font-size: 0.78rem;
-}
-
-.settings-native-input:disabled,
-.settings-input :deep(.p-inputnumber.p-disabled .p-inputnumber-input) {
-  background: #f5f5f7;
-  color: #1d1d1f;
-  cursor: default;
-}
-
-.charge-saved {
-  margin-top: 1.5rem;
-  padding-top: 1.15rem;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.charge-saved__title {
-  margin: 0 0 0.75rem;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #1d1d1f;
-}
-
-.charge-amount {
-  flex-shrink: 0;
-  font-size: 0.9375rem;
-  font-weight: 600;
-  color: #1d1d1f;
-}
-
-.import-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 1.5rem 1rem;
-  margin-top: 0.85rem;
-  color: #86868b;
-  font-size: 0.875rem;
-  text-align: center;
-}
-
-.import-empty .pi {
-  font-size: 1.5rem;
-  color: #c7c7cc;
-}
-
-.charge-list {
-  margin-top: 0.85rem;
-}
-
-.r-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.r-card {
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 10px;
-  padding: 0.75rem 0.85rem;
-  background: #fafafa;
-}
-
-.r-card__row {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-}
-
-.r-card__avatar {
-  flex-shrink: 0;
-  width: 2.2rem;
-  height: 2.2rem;
-  border-radius: 50%;
-  background: #e8e8ed;
-  color: #6e6e73;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.85rem;
-}
-
-.r-card__body {
-  flex: 1;
-  min-width: 0;
-}
-
-.r-card__name {
-  margin: 0;
-  font-weight: 600;
-  font-size: 0.875rem;
-  color: #1d1d1f;
-}
-
-.r-card__meta {
-  margin: 0.15rem 0 0;
-  font-size: 0.75rem;
-  color: #86868b;
-}
-
-.r-card__actions {
-  flex-shrink: 0;
-  display: flex;
-  gap: 0.25rem;
-}
-
-.receipt-list--modal {
-  margin-top: 0.75rem;
-}
-
-.resident-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  z-index: 1000;
-}
-
-.resident-modal {
-  width: min(100%, 26rem);
-  background: #ffffff;
-  border-radius: 14px;
-  border: 1px solid #e8e8ed;
-  padding: 1.15rem;
+<style>
+/* PrimeVue Dialog shell is teleported to <body>: style it by class (unscoped). */
+.fin-dialog.p-dialog {
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
   max-height: 90vh;
-  overflow-y: auto;
 }
 
-.resident-modal--wide {
-  width: min(100%, 36rem);
+.fin-dialog .p-dialog-header {
+  padding: 1.1rem 1.25rem 0.6rem;
 }
 
-.resident-modal__title {
-  margin: 0;
+.fin-dialog .p-dialog-title {
+  font-family: var(--bf-font-heading, inherit);
   font-size: 1.05rem;
-  font-weight: 600;
-  color: #1d1d1f;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: #0f172a;
 }
 
-.resident-modal .charge-list {
-  margin-top: 0.85rem;
+.fin-dialog .p-dialog-content {
+  padding: 0.25rem 1.25rem 0.5rem;
 }
 
-.resident-modal .bf-actions {
-  margin-top: 1rem;
-}
-
-.app-view :deep(.bf-btn) {
-  min-height: 1.7rem;
-  padding: 0.22rem 0.85rem;
-  border-radius: 8px;
-  box-shadow: none;
-  transform: none;
-}
-
-.app-view :deep(.bf-btn--confirm) {
-  background: #0071e3;
-  color: #ffffff;
-  border-color: transparent;
-  box-shadow: none;
-}
-
-.app-view :deep(.bf-btn--confirm:not(:disabled):hover) {
-  background: #0066cc;
-  border-color: transparent;
-  box-shadow: none;
-}
-
-.app-view :deep(.bf-btn--confirm:not(:disabled):focus-visible) {
-  animation: none;
-  box-shadow: none;
+.fin-dialog .p-dialog-footer {
+  padding: 0.75rem 1.25rem 1.1rem;
 }
 </style>

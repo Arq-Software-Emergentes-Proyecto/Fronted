@@ -15,6 +15,10 @@ const props = defineProps({
   dueSoonDays: { type: Number, default: 5 },
   /** Vista del residente: una sola fila, sin columna de nombre. */
   compact: { type: Boolean, default: false },
+  /** Solo la fila de puntos de residents[0] (celda de tabla del admin), sin leyenda. */
+  inline: { type: Boolean, default: false },
+  /** Solo la leyenda (más carga/error); los puntos se pintan con `inline` en cada fila. */
+  legendOnly: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
   error: { type: String, default: '' },
 })
@@ -77,7 +81,27 @@ const legend = computed(() => [
 </script>
 
 <template>
-  <div class="tl">
+  <ul
+    v-if="inline"
+    class="tl-inline"
+    role="list"
+    :aria-label="t('financeOps.trafficTitle')"
+  >
+    <template v-if="residents.length">
+      <li
+        v-for="month in months"
+        :key="month"
+        class="tl-inline__cell"
+        :title="cellTitle(residents[0], cellFor(residents[0], month))"
+      >
+        <span class="tl-dot" :class="`tl-dot--${cellFor(residents[0], month).status}`" aria-hidden="true" />
+        <span class="visually-hidden">{{ cellTitle(residents[0], cellFor(residents[0], month)) }}</span>
+      </li>
+    </template>
+    <li v-else class="tl-inline__empty">—</li>
+  </ul>
+
+  <div v-else class="tl">
     <ul class="tl-legend" role="list" :aria-label="t('financeOps.legendTitle')">
       <li v-for="item in legend" :key="item.status" class="tl-legend__item">
         <span class="tl-dot" :class="`tl-dot--${item.status}`" aria-hidden="true" />
@@ -85,8 +109,9 @@ const legend = computed(() => [
       </li>
     </ul>
 
-    <p v-if="loading" class="tl-empty">…</p>
+    <p v-if="loading && !legendOnly" class="tl-empty">…</p>
     <LoadErrorRetry v-else-if="error" compact :message="error" @retry="$emit('retry')" />
+    <template v-else-if="legendOnly" />
     <p v-else-if="!residents.length" class="tl-empty">{{ t('financeOps.trafficEmpty') }}</p>
 
     <div v-else-if="compact" class="tl-strip" role="list">
@@ -269,6 +294,27 @@ thead .tl-table__resident {
 
 .tl-row--danger .tl-table__resident strong {
   color: #b42318;
+}
+
+.tl-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tl-inline__cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.tl-inline__empty {
+  color: #94a3b8;
 }
 
 .tl-strip {
