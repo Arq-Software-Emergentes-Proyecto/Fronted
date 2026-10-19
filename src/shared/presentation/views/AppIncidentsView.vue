@@ -254,6 +254,7 @@ const kpiPills = computed(() => {
       tone: 'green',
       icon: 'pi-check-circle',
       label: t('incidentFlow.summaryResolvedMonth'),
+      short: t('kpiShort.resolved'),
       value: shown(summary.value.resolvedMonth),
       hint: t('incidentFlow.summaryResolvedMonthHint', { month: monthLabel.value }),
     },
@@ -636,6 +637,13 @@ onBeforeUnmount(() => stopRealtime())
   <div class="app-view inc">
     <header class="inc-head">
       <h1 class="bf-sr-only">{{ t('app.pageIncidents') }}</h1>
+      <KpiPills
+        v-if="!loadFailed"
+        inline
+        :items="kpiPills"
+        :aria-label="t('incidentFlow.summaryAria')"
+        :busy="loading"
+      />
       <div class="inc-head__actions">
         <button
           type="button"
@@ -661,8 +669,6 @@ onBeforeUnmount(() => stopRealtime())
         <i class="pi pi-exclamation-circle" aria-hidden="true" />
         {{ error }}
       </p>
-
-      <KpiPills :items="kpiPills" :aria-label="t('incidentFlow.summaryAria')" :busy="loading" />
 
       <section class="inc-card" aria-labelledby="inc-list-title">
         <div class="inc-card__head">
@@ -1151,7 +1157,7 @@ onBeforeUnmount(() => stopRealtime())
 /* ---------- Header ---------- */
 .inc-head {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;

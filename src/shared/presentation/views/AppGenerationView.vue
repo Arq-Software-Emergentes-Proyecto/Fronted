@@ -316,6 +316,7 @@ const statPills = computed(() => {
       tone: 'blue',
       icon: 'pi-calendar',
       label: t('app.generationStatReservations'),
+      short: t('kpiShort.reservations'),
       value: shown(summary.value.reservations),
       hint: t('app.generationStatReservationsHint', { n: summary.value.withGuests }, summary.value.withGuests),
     },
@@ -324,6 +325,7 @@ const statPills = computed(() => {
       tone: 'amber',
       icon: 'pi-users',
       label: t('app.generationStatExpected'),
+      short: t('kpiShort.guests'),
       value: shown(summary.value.expected),
       hint: t('app.generationStatExpectedHint'),
     },
@@ -332,6 +334,7 @@ const statPills = computed(() => {
       tone: 'green',
       icon: 'pi-sign-in',
       label: t('app.generationStatEntered'),
+      short: t('kpiShort.entered'),
       value: shown(summary.value.entered),
       total: summary.value.expected || null,
       hint: t('app.generationStatEnteredHint', { n: summary.value.pending }, summary.value.pending),
@@ -341,6 +344,7 @@ const statPills = computed(() => {
       tone: 'red',
       icon: 'pi-ban',
       label: t('app.generationStatExpired'),
+      short: t('kpiShort.expired'),
       value: shown(summary.value.expired),
       hint: t('app.generationStatExpiredHint'),
     },
@@ -449,6 +453,8 @@ onMounted(load)
   <div class="app-view gen">
     <header class="gen-head">
       <h1 class="bf-sr-only">{{ t('app.generationAdminPageTitle') }}</h1>
+      <!-- Summary of the selected day -->
+      <KpiPills inline :items="statPills" :aria-label="selectedDayLong" :busy="loading" />
       <div class="gen-head__controls">
         <div class="gen-head__nav">
           <div class="gen-day" role="group" :aria-label="t('app.generationDayGroup')">
@@ -509,8 +515,6 @@ onMounted(load)
       @retry="load"
     />
 
-    <!-- Summary of the selected day -->
-    <KpiPills :items="statPills" :aria-label="selectedDayLong" :busy="loading" />
 
     <div class="gen-layout">
       <!-- Validate invitation (QR) -->
@@ -878,7 +882,7 @@ onMounted(load)
 /* ---------- Header ---------- */
 .gen-head {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;

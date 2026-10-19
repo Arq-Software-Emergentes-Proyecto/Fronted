@@ -9,6 +9,7 @@ import { importFoldersApi, isContextFolder, isHomeFolder, isSystemFolder } from 
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
+import KpiPills from '@/shared/presentation/components/KpiPills.vue'
 
 const { t, locale } = useI18n()
 
@@ -254,6 +255,49 @@ const summary = computed(() => {
     bytes,
     total: rows.length,
   }
+})
+
+const kpiPills = computed(() => {
+  const s = summary.value
+  const shown = (value) => (loading.value && !items.value.length ? '…' : value)
+  return [
+    {
+      key: 'current',
+      tone: 'blue',
+      icon: 'pi-verified',
+      label: t('importView.statCurrent'),
+      short: t('kpiShort.current'),
+      value: shown(s.current),
+      hint: t('importView.statCurrentHint'),
+    },
+    {
+      key: 'ai',
+      tone: 'green',
+      icon: 'pi-sparkles',
+      label: t('importView.statAi'),
+      short: t('kpiShort.forAi'),
+      value: shown(s.aiUsed),
+      hint: t('importView.statAiHint', { n: s.aiReady }, s.aiReady),
+    },
+    {
+      key: 'inactive',
+      tone: 'amber',
+      icon: 'pi-history',
+      label: t('importView.statInactive'),
+      short: t('kpiShort.archived'),
+      value: shown(s.inactive),
+      hint: `${t('importView.statSupersededCount', { n: s.superseded }, s.superseded)} · ${t('importView.statArchivedCount', { n: s.archived }, s.archived)}`,
+    },
+    {
+      key: 'storage',
+      tone: 'orange',
+      icon: 'pi-database',
+      label: t('importView.statStorage'),
+      short: t('kpiShort.storage'),
+      value: shown(formatBytes(s.bytes)),
+      hint: t('importView.statStorageHint', { n: s.total }, s.total),
+    },
+  ]
 })
 
 /* ---------- Filters ---------- */
@@ -792,6 +836,7 @@ onMounted(loadList)
   <div class="app-view imp">
     <header class="imp-head">
       <h1 class="bf-sr-only">{{ t('importView.pageTitle') }}</h1>
+      <KpiPills inline :items="kpiPills" :aria-label="t('importView.summaryLabel')" :busy="loading" />
       <div class="imp-head__actions" role="group" :aria-label="t('importView.headerActions')">
         <button type="button" class="imp-btn" :disabled="isSavingFolder" @click="openFolderModal()">
           <i class="pi pi-folder-plus" aria-hidden="true" />
@@ -811,43 +856,6 @@ onMounted(loadList)
     </header>
 
     <!-- Summary -->
-    <section class="imp-stats" :aria-label="t('importView.summaryLabel')" :aria-busy="loading ? 'true' : 'false'">
-      <article class="imp-stat imp-stat--blue">
-        <div class="imp-stat__head">
-          <h2 class="imp-stat__label">{{ t('importView.statCurrent') }}</h2>
-          <span class="imp-stat__icon imp-stat__icon--blue"><i class="pi pi-verified" aria-hidden="true" /></span>
-        </div>
-        <p class="imp-stat__value">{{ loading && !items.length ? '…' : summary.current }}</p>
-        <p class="imp-stat__hint">{{ t('importView.statCurrentHint') }}</p>
-      </article>
-      <article class="imp-stat imp-stat--green">
-        <div class="imp-stat__head">
-          <h2 class="imp-stat__label">{{ t('importView.statAi') }}</h2>
-          <span class="imp-stat__icon imp-stat__icon--green"><i class="pi pi-sparkles" aria-hidden="true" /></span>
-        </div>
-        <p class="imp-stat__value">{{ loading && !items.length ? '…' : summary.aiUsed }}</p>
-        <p class="imp-stat__hint">{{ t('importView.statAiHint', { n: summary.aiReady }, summary.aiReady) }}</p>
-      </article>
-      <article class="imp-stat imp-stat--amber">
-        <div class="imp-stat__head">
-          <h2 class="imp-stat__label">{{ t('importView.statInactive') }}</h2>
-          <span class="imp-stat__icon imp-stat__icon--amber"><i class="pi pi-history" aria-hidden="true" /></span>
-        </div>
-        <p class="imp-stat__value">{{ loading && !items.length ? '…' : summary.inactive }}</p>
-        <p class="imp-stat__hint">
-          {{ t('importView.statSupersededCount', { n: summary.superseded }, summary.superseded) }}
-          · {{ t('importView.statArchivedCount', { n: summary.archived }, summary.archived) }}
-        </p>
-      </article>
-      <article class="imp-stat imp-stat--orange">
-        <div class="imp-stat__head">
-          <h2 class="imp-stat__label">{{ t('importView.statStorage') }}</h2>
-          <span class="imp-stat__icon imp-stat__icon--orange"><i class="pi pi-database" aria-hidden="true" /></span>
-        </div>
-        <p class="imp-stat__value">{{ loading && !items.length ? '…' : formatBytes(summary.bytes) }}</p>
-        <p class="imp-stat__hint">{{ t('importView.statStorageHint', { n: summary.total }, summary.total) }}</p>
-      </article>
-    </section>
 
     <LoadErrorRetry
       v-if="loadError && !loading"
@@ -1477,7 +1485,7 @@ onMounted(loadList)
 /* ---------- Header ---------- */
 .imp-head {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
@@ -1572,81 +1580,6 @@ onMounted(loadList)
   padding: 0.75rem 0;
   font-size: 0.85rem;
   color: #6e6e73;
-}
-
-/* ---------- Summary ---------- */
-.imp-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-
-.imp-stat {
-  background: var(--stat-bg, #f1f5f9);
-  border-radius: 16px;
-  padding: 1rem 1.1rem 1.05rem;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.imp-stat--blue { --stat-bg: #e8eefc; }
-.imp-stat--green { --stat-bg: #e3f4e8; }
-.imp-stat--amber { --stat-bg: #fdf3dc; }
-.imp-stat--orange { --stat-bg: #fdeee2; }
-
-.imp-stat__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.55rem;
-}
-
-.imp-stat__label {
-  margin: 0;
-  color: #475569;
-  font-weight: 600;
-  font-size: 0.8rem;
-}
-
-.imp-stat__icon {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  font-size: 0.85rem;
-  background: #fff;
-}
-
-.imp-stat__icon--blue { color: #1e3a8a; }
-.imp-stat__icon--green { color: #15803d; }
-.imp-stat__icon--amber { color: #b45309; }
-.imp-stat__icon--orange { color: #c2410c; }
-
-.imp-stat__value {
-  margin: 0 0 0.4rem;
-  color: #0f172a;
-  font-family: var(--bf-font-heading, inherit);
-  font-weight: 700;
-  font-size: 1.65rem;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.imp-stat__hint {
-  margin: auto 0 0;
-  color: #6e6e73;
-  font-size: 0.75rem;
-  font-weight: 500;
-  line-height: 1.35;
 }
 
 /* ---------- Layout ---------- */
@@ -2475,9 +2408,6 @@ onMounted(loadList)
 }
 
 @media (max-width: 1100px) {
-  .imp-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 
   .imp-layout {
     grid-template-columns: minmax(0, 1fr);
@@ -2549,24 +2479,6 @@ onMounted(loadList)
     text-align: center;
     line-height: 1.2;
     padding-inline: 0.6rem;
-  }
-
-  .imp-stats {
-    gap: 0.55rem;
-  }
-
-  .imp-stat {
-    padding: 0.8rem 0.85rem 0.85rem;
-  }
-
-  .imp-stat__value {
-    font-size: 1.35rem;
-  }
-
-  .imp-stat__icon {
-    width: 1.75rem;
-    height: 1.75rem;
-    font-size: 0.75rem;
   }
 
   .imp-card {

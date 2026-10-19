@@ -835,6 +835,7 @@ const kpiPills = computed(() => {
       tone: 'green',
       icon: 'pi-check-circle',
       label: t('app.advancedMgmt.statActive'),
+      short: t('kpiShort.activeAccounts'),
       value: isLoading.value ? '…' : statusCounts.value.active,
       hint: t('app.advancedMgmt.statActiveHint'),
     },
@@ -843,6 +844,7 @@ const kpiPills = computed(() => {
       tone: 'amber',
       icon: 'pi-envelope',
       label: t('app.advancedMgmt.statPending'),
+      short: t('kpiShort.invitations'),
       value: isLoading.value ? '…' : statusCounts.value.pending,
       hint: statusCounts.value.pending
         ? t('app.advancedMgmt.statPendingHint')
@@ -853,6 +855,7 @@ const kpiPills = computed(() => {
       tone: 'orange',
       icon: 'pi-building',
       label: t('app.advancedMgmt.statSpaces'),
+      short: t('kpiShort.spaces'),
       value: spacesValue,
       hint: spacesHint,
     },
@@ -965,6 +968,7 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
   <div class="app-view adv">
     <header class="adv-head">
       <h1 class="bf-sr-only">{{ t('app.advancedMgmt.pageTitle') }}</h1>
+      <KpiPills inline :items="kpiPills" :aria-label="t('app.advancedMgmt.summaryLabel')" />
       <div class="adv-head__actions" role="group" :aria-label="t('app.advancedMgmt.headerActions')">
         <button type="button" class="adv-btn" @click="openBulkResidentsModal">
           <i class="pi pi-file-import" aria-hidden="true" />
@@ -982,7 +986,6 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
     </header>
 
     <!-- Summary -->
-    <KpiPills :items="kpiPills" :aria-label="t('app.advancedMgmt.summaryLabel')" />
 
     <!-- Residents | Common spaces -->
     <section class="adv-card">
@@ -2155,7 +2158,7 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
 /* ---------- Header ---------- */
 .adv-head {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;

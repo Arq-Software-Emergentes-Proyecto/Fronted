@@ -44,13 +44,13 @@ const adminNavPrimary = computed(() => [
   {
     key: 'advancedManagement',
     label: t('app.advancedManagement'),
-    icon: 'pi pi-sitemap',
+    icon: 'pi pi-users',
     routeName: AppRouteNames.APP_ADVANCED_MANAGEMENT,
   },
   {
     key: 'import',
     label: t('app.import'),
-    icon: 'pi pi-upload',
+    icon: 'pi pi-folder',
     routeName: AppRouteNames.APP_IMPORT,
   },
   {
@@ -62,7 +62,7 @@ const adminNavPrimary = computed(() => [
   {
     key: 'generation',
     label: t('app.generation'),
-    icon: 'pi pi-cog',
+    icon: 'pi pi-qrcode',
     routeName: AppRouteNames.APP_GENERATION,
   },
   {
@@ -76,7 +76,7 @@ const adminNavPrimary = computed(() => [
   {
     key: 'information',
     label: t('app.information'),
-    icon: 'pi pi-book',
+    icon: 'pi pi-megaphone',
     routeName: AppRouteNames.APP_INFORMATION,
   },
   {
@@ -112,13 +112,13 @@ const residentNavItems = computed(() => [
   {
     key: 'residentServices',
     label: t('resident.navServices'),
-    icon: 'pi pi-bolt',
+    icon: 'pi pi-building',
     routeName: AppRouteNames.APP_RESIDENT_SERVICES,
   },
   {
     key: 'residentGeneration',
     label: t('resident.navGeneration'),
-    icon: 'pi pi-calendar',
+    icon: 'pi pi-users',
     routeName: AppRouteNames.APP_RESIDENT_GENERATION,
   },
   {

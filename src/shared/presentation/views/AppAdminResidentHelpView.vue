@@ -71,6 +71,11 @@ const usageTone = computed(() => {
   if (usage.cap > 0 && usage.used / usage.cap >= 0.8) return 'near'
   return 'ok'
 })
+
+const usageHint = computed(() => {
+  if (usageTone.value === 'reached') return t('supportAdmin.aiUsageReached')
+  return usageTone.value === 'near' ? t('supportAdmin.usageNear') : t('supportAdmin.usageOk')
+})
 const usagePercent = computed(() => {
   const usage = aiUsage.value
   if (!usage?.cap) return 0
@@ -385,45 +390,7 @@ async function sendReply() {
 <template>
   <div class="app-view app-view--ai">
     <div class="support-page">
-      <header class="page-head">
-        <h1 class="bf-sr-only">{{ t('supportAdmin.title') }}</h1>
-        <div
-          v-if="aiUsage"
-          class="usage-card"
-          :class="`is-${usageTone}`"
-          role="group"
-          :aria-label="t('supportAdmin.usageAria', { used: aiUsage.used, cap: aiUsage.cap })"
-          :title="usageTone === 'reached' ? t('supportAdmin.aiUsageReached') : undefined"
-        >
-          <span class="usage-card__icon" aria-hidden="true"><i class="pi pi-sparkles" /></span>
-          <div class="usage-card__body">
-            <div class="usage-card__row">
-              <span class="usage-card__label">{{ t('supportAdmin.usageTitle') }}</span>
-              <span class="usage-card__value">{{ t('supportAdmin.usageValue', { used: aiUsage.used, cap: aiUsage.cap }) }}</span>
-            </div>
-            <div
-              v-if="aiUsage.cap"
-              class="usage-bar"
-              role="progressbar"
-              :aria-valuenow="aiUsage.used"
-              aria-valuemin="0"
-              :aria-valuemax="aiUsage.cap"
-              :aria-label="t('supportAdmin.usageTitle')"
-            >
-              <span :style="{ width: `${usagePercent}%` }" />
-            </div>
-            <span class="usage-card__hint">
-              {{
-                usageTone === 'reached'
-                  ? t('supportAdmin.usageReachedShort')
-                  : usageTone === 'near'
-                    ? t('supportAdmin.usageNear')
-                    : t('supportAdmin.usageOk')
-              }}
-            </span>
-          </div>
-        </div>
-      </header>
+      <h1 class="bf-sr-only">{{ t('supportAdmin.title') }}</h1>
 
       <p v-if="loadError" class="support-hint" role="alert">
         {{ loadError }}
@@ -431,6 +398,34 @@ async function sendReply() {
 
       <div class="help-shell" :class="{ 'has-selection': !!selected }">
         <aside class="inbox" :aria-label="t('supportAdmin.inboxHeading')">
+            <div
+              v-if="aiUsage"
+              class="usage-card"
+              :class="`is-${usageTone}`"
+              role="group"
+              :aria-label="t('supportAdmin.usageAria', { used: aiUsage.used, cap: aiUsage.cap })"
+              :title="usageHint"
+            >
+              <span class="usage-card__icon" aria-hidden="true"><i class="pi pi-sparkles" /></span>
+              <div class="usage-card__body">
+                <div class="usage-card__row">
+                  <span class="usage-card__label">{{ t('supportAdmin.usageTitle') }}</span>
+                  <span class="usage-card__value">{{ t('supportAdmin.usageValue', { used: aiUsage.used, cap: aiUsage.cap }) }}</span>
+                </div>
+                <div
+                  v-if="aiUsage.cap"
+                  class="usage-bar"
+                  role="progressbar"
+                  :aria-valuenow="aiUsage.used"
+                  aria-valuemin="0"
+                  :aria-valuemax="aiUsage.cap"
+                  :aria-label="t('supportAdmin.usageTitle')"
+                >
+                  <span :style="{ width: `${usagePercent}%` }" />
+                </div>
+                <span class="bf-sr-only">{{ usageHint }}</span>
+              </div>
+            </div>
           <div class="inbox__tools">
             <div class="filter-pills" v-bf-seg role="group" :aria-label="t('supportAdmin.filterAria')">
               <button
@@ -739,26 +734,15 @@ async function sendReply() {
   border: 0;
 }
 
-/* ---------- Header ---------- */
-.page-head {
+.usage-card {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 1rem 1.5rem;
-  flex-wrap: wrap;
-}
-
-.usage-card {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  width: 18.5rem;
-  max-width: 100%;
-  padding: 0.7rem 0.95rem;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: #fff;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.5rem 0.85rem 0.55rem 0.5rem;
+  border-radius: 16px;
+  background: var(--tint-blue);
   box-sizing: border-box;
 }
 
@@ -767,12 +751,12 @@ async function sendReply() {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 2rem;
+  height: 2rem;
   border-radius: 50%;
-  background: var(--tint-blue);
+  background: #fff;
   color: var(--navy);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 
 .usage-card__body {
@@ -780,7 +764,7 @@ async function sendReply() {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.35rem;
 }
 
 .usage-card__row {
@@ -805,9 +789,9 @@ async function sendReply() {
 }
 
 .usage-bar {
-  height: 6px;
+  height: 5px;
   border-radius: 999px;
-  background: #edf0f5;
+  background: rgba(255, 255, 255, 0.85);
   overflow: hidden;
 }
 
@@ -819,13 +803,11 @@ async function sendReply() {
   background: var(--navy);
 }
 
-.usage-card__hint {
-  font-size: 0.7rem;
-  color: var(--muted);
+.usage-card.is-near {
+  background: var(--tint-amber);
 }
 
 .usage-card.is-near .usage-card__icon {
-  background: var(--tint-amber);
   color: #8a5a00;
 }
 
@@ -833,12 +815,11 @@ async function sendReply() {
   background: #d97706;
 }
 
-.usage-card.is-near .usage-card__hint {
-  color: #8a5a00;
+.usage-card.is-near .usage-card.is-reached {
+  background: var(--tint-red);
 }
 
 .usage-card.is-reached .usage-card__icon {
-  background: var(--tint-red);
   color: #b42318;
 }
 
@@ -846,7 +827,6 @@ async function sendReply() {
   background: #d92d20;
 }
 
-.usage-card.is-reached .usage-card__hint,
 .usage-card.is-reached .usage-card__value {
   color: #b42318;
 }
@@ -1639,9 +1619,6 @@ async function sendReply() {
     flex: none;
   }
 
-  .usage-card {
-    width: 100%;
-  }
 
   .help-shell {
     flex: none;
@@ -1656,7 +1633,7 @@ async function sendReply() {
   }
 
   .help-shell.has-selection {
-    height: calc(100dvh - 2rem);
+    height: calc(100dvh - 2rem - var(--mobilebar-height, 0px));
     min-height: 32rem;
   }
 

@@ -3,26 +3,45 @@
  * Fila de KPIs en pastillas: ícono, número y nombre. El texto de ayuda va en el tooltip
  * y queda disponible para lectores de pantalla.
  *
- * items: [{ key, tone: 'blue'|'green'|'amber'|'orange'|'red', icon, label, value,
+ * items: [{ key, tone: 'blue'|'green'|'amber'|'orange'|'red', icon, label, short?, value,
  *           total?, hint?, alert?, link?: { to, label } }]
+ * inline: versión compacta para ir en la fila de los botones del encabezado; muestra `short` si existe
+ *         (el nombre completo queda en el tooltip y para lectores de pantalla) y baja a su propia fila
+ *         cuando no hay espacio al lado de los botones.
  */
-defineProps({
+const props = defineProps({
   items: { type: Array, required: true },
   ariaLabel: { type: String, default: undefined },
   busy: { type: Boolean, default: false },
+  inline: { type: Boolean, default: false },
 })
+
+function tooltip(item) {
+  const name = props.inline && item.short ? item.label : ''
+  return [name, item.hint].filter(Boolean).join(' · ') || undefined
+}
 </script>
 
 <template>
-  <section class="kpi-pills" :aria-label="ariaLabel" :aria-busy="busy ? 'true' : 'false'">
+  <section
+    class="kpi-pills"
+    :class="{ 'kpi-pills--inline': inline }"
+    :aria-label="ariaLabel"
+    :aria-busy="busy ? 'true' : 'false'"
+    :style="{ '--pill-count': items.length }"
+  >
     <article
       v-for="item in items"
       :key="item.key"
       class="kpi-pill"
       :class="`kpi-pill--${item.tone}`"
-      :title="item.hint || undefined"
+      :title="tooltip(item)"
     >
-      <h2 class="kpi-pill__label">{{ item.label }}</h2>
+      <h2 v-if="inline && item.short" class="kpi-pill__label">
+        <span aria-hidden="true">{{ item.short }}</span>
+        <span class="bf-sr-only">{{ item.label }}</span>
+      </h2>
+      <h2 v-else class="kpi-pill__label">{{ item.label }}</h2>
       <span class="kpi-pill__icon" aria-hidden="true"><i class="pi" :class="item.icon" /></span>
       <p class="kpi-pill__value" :class="{ 'is-alert': item.alert }">
         {{ item.value }}
@@ -40,7 +59,7 @@ defineProps({
 <style scoped>
 .kpi-pills {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--pill-count, 4), minmax(0, 1fr));
   gap: 0.6rem;
 }
 
@@ -140,8 +159,39 @@ defineProps({
   outline-offset: 2px;
 }
 
+/* Compacta, en la fila del encabezado. */
+.kpi-pills--inline {
+  flex: 1 1 36rem;
+  min-width: 0;
+  gap: 0.5rem;
+}
+
+.kpi-pills--inline .kpi-pill {
+  gap: 0.5rem;
+  padding: 0.3rem 0.85rem 0.3rem 0.35rem;
+}
+
+.kpi-pills--inline .kpi-pill__icon {
+  width: 1.75rem;
+  height: 1.75rem;
+  font-size: 0.75rem;
+}
+
+.kpi-pills--inline .kpi-pill__value {
+  font-size: 1.02rem;
+}
+
+.kpi-pills--inline .kpi-pill__value small {
+  font-size: 0.72rem;
+}
+
+.kpi-pills--inline .kpi-pill__label {
+  font-size: 0.76rem;
+  line-height: 1.15;
+}
+
 @media (max-width: 1180px) {
-  .kpi-pills {
+  .kpi-pills:not(.kpi-pills--inline) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -149,6 +199,12 @@ defineProps({
 @media (max-width: 720px) {
   .kpi-pills {
     gap: 0.5rem;
+  }
+  /* En celular van debajo de los botones, en dos columnas. */
+  .kpi-pills--inline {
+    order: 2;
+    flex-basis: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   /* Number above the name so amounts like "S/ 565.00" fit in half the width. */
   .kpi-pill {
