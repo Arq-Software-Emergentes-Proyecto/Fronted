@@ -296,6 +296,42 @@ async function onPassCheckIn(guestId, checkedIn = true) {
   }
 }
 
+const statPills = computed(() => [
+  {
+    key: 'reservations',
+    tone: 'blue',
+    icon: 'pi-calendar',
+    label: t('app.generationStatReservations'),
+    value: summary.value.reservations,
+    hint: t('app.generationStatReservationsHint', { n: summary.value.withGuests }, summary.value.withGuests),
+  },
+  {
+    key: 'expected',
+    tone: 'amber',
+    icon: 'pi-users',
+    label: t('app.generationStatExpected'),
+    value: summary.value.expected,
+    hint: t('app.generationStatExpectedHint'),
+  },
+  {
+    key: 'entered',
+    tone: 'green',
+    icon: 'pi-sign-in',
+    label: t('app.generationStatEntered'),
+    value: summary.value.entered,
+    total: summary.value.expected,
+    hint: t('app.generationStatEnteredHint', { n: summary.value.pending }, summary.value.pending),
+  },
+  {
+    key: 'expired',
+    tone: 'red',
+    icon: 'pi-ban',
+    label: t('app.generationStatExpired'),
+    value: summary.value.expired,
+    hint: t('app.generationStatExpiredHint'),
+  },
+])
+
 const passStatusKey = computed(() => {
   const status = String(pass.value?.status || 'EXPIRED').toUpperCase()
   return ['VALID', 'NOT_YET_VALID', 'CANCELLED'].includes(status) ? status : 'EXPIRED'
@@ -458,44 +494,20 @@ onMounted(load)
 
     <!-- Summary of the selected day -->
     <section class="gen-stats" :aria-label="selectedDayLong" :aria-busy="loading ? 'true' : 'false'">
-      <article class="gen-stat gen-stat--blue">
-        <div class="gen-stat__head">
-          <h2 class="gen-stat__label">{{ t('app.generationStatReservations') }}</h2>
-          <span class="gen-stat__icon gen-stat__icon--blue"><i class="pi pi-calendar" aria-hidden="true" /></span>
-        </div>
-        <p class="gen-stat__value">{{ loading && !reservations.length ? '…' : summary.reservations }}</p>
-        <p class="gen-stat__hint">
-          {{ t('app.generationStatReservationsHint', { n: summary.withGuests }, summary.withGuests) }}
-        </p>
-      </article>
-      <article class="gen-stat gen-stat--amber">
-        <div class="gen-stat__head">
-          <h2 class="gen-stat__label">{{ t('app.generationStatExpected') }}</h2>
-          <span class="gen-stat__icon gen-stat__icon--amber"><i class="pi pi-users" aria-hidden="true" /></span>
-        </div>
-        <p class="gen-stat__value">{{ loading && !reservations.length ? '…' : summary.expected }}</p>
-        <p class="gen-stat__hint">{{ t('app.generationStatExpectedHint') }}</p>
-      </article>
-      <article class="gen-stat gen-stat--green">
-        <div class="gen-stat__head">
-          <h2 class="gen-stat__label">{{ t('app.generationStatEntered') }}</h2>
-          <span class="gen-stat__icon gen-stat__icon--green"><i class="pi pi-sign-in" aria-hidden="true" /></span>
-        </div>
+      <article
+        v-for="stat in statPills"
+        :key="stat.key"
+        class="gen-stat"
+        :class="`gen-stat--${stat.tone}`"
+        :title="stat.hint"
+      >
+        <h2 class="gen-stat__label">{{ stat.label }}</h2>
+        <span class="gen-stat__icon" aria-hidden="true"><i class="pi" :class="stat.icon" /></span>
         <p class="gen-stat__value">
-          {{ loading && !reservations.length ? '…' : summary.entered }}
-          <small v-if="summary.expected">/ {{ summary.expected }}</small>
+          {{ loading && !reservations.length ? '…' : stat.value }}
+          <small v-if="stat.total">/ {{ stat.total }}</small>
         </p>
-        <p class="gen-stat__hint">
-          {{ t('app.generationStatEnteredHint', { n: summary.pending }, summary.pending) }}
-        </p>
-      </article>
-      <article class="gen-stat gen-stat--red">
-        <div class="gen-stat__head">
-          <h2 class="gen-stat__label">{{ t('app.generationStatExpired') }}</h2>
-          <span class="gen-stat__icon gen-stat__icon--red"><i class="pi pi-ban" aria-hidden="true" /></span>
-        </div>
-        <p class="gen-stat__value">{{ loading && !reservations.length ? '…' : summary.expired }}</p>
-        <p class="gen-stat__hint">{{ t('app.generationStatExpiredHint') }}</p>
+        <p class="bf-sr-only">{{ stat.hint }}</p>
       </article>
     </section>
 
@@ -1048,83 +1060,71 @@ onMounted(load)
   background: #fff;
 }
 
-/* ---------- Summary cards ---------- */
+/* ---------- Summary pills ---------- */
 .gen-stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.75rem;
+  gap: 0.6rem;
 }
 
 .gen-stat {
-  background: var(--stat-bg, #f1f5f9);
-  border-radius: 16px;
-  padding: 1rem 1.1rem 1.05rem;
-  display: flex;
-  flex-direction: column;
+  --stat-bg: #f1f5f9;
+  --stat-ink: #334155;
   min-width: 0;
-}
-
-.gen-stat--blue { --stat-bg: #e8eefc; }
-.gen-stat--amber { --stat-bg: #fdf3dc; }
-.gen-stat--green { --stat-bg: #e3f4e8; }
-.gen-stat--red { --stat-bg: #fde4e4; }
-
-.gen-stat__head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.55rem;
+  gap: 0.6rem;
+  padding: 0.45rem 1rem 0.45rem 0.5rem;
+  border-radius: 999px;
+  background: var(--stat-bg);
 }
 
-.gen-stat__label {
-  margin: 0;
-  color: #475569;
-  font-weight: 600;
-  font-size: 0.8rem;
-}
+.gen-stat--blue { --stat-bg: #e8eefc; --stat-ink: #1e3a8a; }
+.gen-stat--amber { --stat-bg: #fdf3dc; --stat-ink: #b45309; }
+.gen-stat--green { --stat-bg: #e3f4e8; --stat-ink: #15803d; }
+.gen-stat--red { --stat-bg: #fde4e4; --stat-ink: #b42318; }
 
 .gen-stat__icon {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 10px;
+  flex-shrink: 0;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
   font-size: 0.85rem;
   background: #fff;
+  color: var(--stat-ink);
 }
 
-.gen-stat__icon--blue { color: #1e3a8a; }
-.gen-stat__icon--amber { color: #b45309; }
-.gen-stat__icon--green { color: #15803d; }
-.gen-stat__icon--red { color: #b42318; }
-
 .gen-stat__value {
-  margin: 0 0 0.4rem;
+  flex-shrink: 0;
+  margin: 0;
   color: #0f172a;
   font-family: var(--bf-font-heading, inherit);
   font-weight: 700;
-  font-size: 1.65rem;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
+  font-size: 1.2rem;
+  letter-spacing: -0.02em;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 
 .gen-stat__value small {
-  font-size: 1rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: #64748b;
   letter-spacing: 0;
 }
 
-.gen-stat__hint {
-  margin: auto 0 0;
-  color: #6e6e73;
-  font-size: 0.75rem;
-  font-weight: 500;
-  line-height: 1.35;
+/* Heading first in the markup for screen readers, shown after the number. */
+.gen-stat__label {
+  order: 1;
+  min-width: 0;
+  margin: 0;
+  color: #334155;
+  font-weight: 600;
+  font-size: 0.8rem;
+  line-height: 1.2;
 }
 
 /* ---------- Layout ---------- */
@@ -1837,13 +1837,10 @@ onMounted(load)
     order: -1;
   }
   .gen-stats {
-    gap: 0.6rem;
+    gap: 0.5rem;
   }
   .gen-stat {
-    padding: 0.85rem 0.9rem 0.9rem;
-  }
-  .gen-stat__value {
-    font-size: 1.4rem;
+    padding-right: 0.75rem;
   }
   .gen-card {
     padding: 1rem;
