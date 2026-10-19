@@ -4,7 +4,14 @@ import { useI18n } from 'vue-i18n'
 
 import { useSession, getActiveDataOwnerId } from '@/iam/application/sessionStore.js'
 import { normalizeChat, supportApi } from '@/residentCare/infrastructure/supportApi.js'
-import { RESIDENT_FAQS, searchFaqs, suggestFaqTerms } from '@/residentCare/domain/faq.js'
+import {
+  FAQ_TOPICS,
+  RESIDENT_FAQS,
+  filterFaqsByTopic,
+  searchFaqs,
+  suggestFaqTerms,
+} from '@/residentCare/domain/faq.js'
+import { autosizeTextarea, formatClock, relativeTime } from '@/residentCare/domain/supportFormat.js'
 import {
   isDocumentVisible,
   joinSupportChat,
@@ -34,23 +41,117 @@ const pendingText = ref('')
 const sendFailure = ref(null)
 const aiNotice = ref('')
 
-const filteredFaqs = computed(() => searchFaqs(RESIDENT_FAQS, faqQuery.value, t))
+/** Chip de tema activo del encabezado de ayuda ('' = todos). */
+const activeTopic = ref('')
+/** Móvil: lista de conversaciones desplegada. */
+const showConversations = ref(false)
+const composerEl = ref(null)
+
+/** Preguntas sugeridas del asistente (tarjeta de ayuda y chat vacío). */
+const ASSISTANT_SUGGESTIONS = ['aiAskFees', 'aiAskPool', 'aiAskGuests', 'aiAskLeak']
+const TOPIC_BY_ID = Object.fromEntries(FAQ_TOPICS.map((topic) => [topic.id, topic]))
+
+const filteredFaqs = computed(() =>
+  searchFaqs(filterFaqsByTopic(RESIDENT_FAQS, activeTopic.value), faqQuery.value, t),
+)
 const faqSuggestions = computed(() =>
   filteredFaqs.value.length ? [] : suggestFaqTerms(RESIDENT_FAQS, faqQuery.value, 4, locale.value),
 )
+const faqFiltered = computed(() => Boolean(faqQuery.value.trim() || activeTopic.value))
+
+function faqIcon(faq) {
+  return TOPIC_BY_ID[faq.topic]?.icon || 'pi-question-circle'
+}
 
 function toggleFaq(id) {
   openFaqId.value = openFaqId.value === id ? '' : id
 }
 
+function toggleTopic(id) {
+  activeTopic.value = activeTopic.value === id ? '' : id
+  openFaqId.value = ''
+}
+
+function clearFaqFilters() {
+  faqQuery.value = ''
+  activeTopic.value = ''
+  openFaqId.value = ''
+}
+
 function applyFaqSuggestion(term) {
   faqQuery.value = term
+  activeTopic.value = ''
   openFaqId.value = ''
 }
 
 function openChatView() {
   view.value = 'chat'
   scrollAiToBottom()
+}
+
+/** "Iniciar chat" / "Contactar a soporte": abre una conversación en blanco (reutiliza la vacía). */
+async function startChatFromHelp() {
+  openChatView()
+  await startAiChat()
+  focusComposer()
+}
+
+/** Pregunta sugerida desde la ayuda: abre el chat en blanco y envía la pregunta. */
+async function askFromHelp(key) {
+  openChatView()
+  await startAiChat()
+  if (disposed) return
+  void sendAiMessage(t(`supportResident.${key}`))
+}
+
+/** "Hablar con administración": si el chat activo ya está derivado lo abre; si no, pide la derivación. */
+async function talkToAdminFromHelp() {
+  openChatView()
+  const current = activeAiChat.value
+  if (current?.escalatedChatId) return
+  if (current?.messages?.length) await startAiChat()
+  if (disposed) return
+  onAiSuggestion('admin')
+}
+
+const hasHistory = computed(() => aiChats.value.some((chat) => chat.messages?.length))
+
+function chatWhen(chat) {
+  return relativeTime(chat?.updatedAt || chat?.createdAt, locale.value, t('supportResident.justNow'))
+}
+
+function messageTime(m) {
+  return formatClock(m?.createdAt, locale.value)
+}
+
+function selectConversation(id) {
+  openAiChat(id)
+  showConversations.value = false
+}
+
+async function newChatFromList() {
+  showConversations.value = false
+  sendFailure.value = null
+  aiNotice.value = ''
+  await startAiChat()
+  focusComposer()
+}
+
+async function focusComposer() {
+  await nextTick()
+  const el = composerEl.value
+  if (el && !el.disabled) el.focus()
+}
+
+function onComposerInput(event) {
+  autosizeTextarea(event.target)
+}
+
+/** Enter envía; Shift+Enter hace salto de línea (y no interfiere con IME). */
+function onComposerKeydown(event) {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+  event.preventDefault()
+  void sendAiMessage()
 }
 
 const residentId = computed(() => sessionState.profile?.id ?? '')
@@ -342,6 +443,9 @@ async function sendAiMessage(preset) {
     pendingText.value = ''
     aiSending.value = false
     scrollAiToBottom()
+    await nextTick()
+    autosizeTextarea(composerEl.value)
+    if (view.value === 'chat') focusComposer()
   }
 }
 
@@ -367,197 +471,390 @@ function onAiSuggestion(kind) {
 </script>
 
 <template>
-  <div class="app-view app-view--ai">
-    <div class="finance-page">
-      <p v-if="!residentId" class="app-view__subtitle support-session-hint" role="status">
+  <div class="app-view app-view--ai" :class="{ 'is-chat': view === 'chat' }">
+    <div class="support-page">
+      <p v-if="!residentId" class="support-hint" role="status">
         {{ t('supportResident.sessionMissing') }}
       </p>
-      <p v-else-if="!ownerId" class="app-view__subtitle support-session-hint" role="status">
+      <p v-else-if="!ownerId" class="support-hint" role="status">
         {{ t('supportResident.ownerMissing') }}
       </p>
-      <p v-if="syncError" class="app-view__subtitle support-session-hint" role="alert">
+      <p v-if="syncError" class="support-hint" role="alert">
         {{ syncError }}
       </p>
 
-      <section v-if="view === 'faq'" class="faq-panel" aria-labelledby="faq-heading">
-        <header class="faq-head">
-          <div>
-            <h2 id="faq-heading" class="faq-title">{{ t('supportResident.title') }}</h2>
-            <p class="faq-sub">{{ t('supportResident.faqDescription') }}</p>
-          </div>
-          <button type="button" class="faq-cta" @click="openChatView">
-            <i class="pi pi-comments" aria-hidden="true" />
-            {{ t('supportResident.startAiChatBtn') }}
-          </button>
-        </header>
+      <!-- Ayuda: preguntas frecuentes + asistente -->
+      <div v-if="view === 'faq'" class="help">
+        <section class="help-hero" aria-labelledby="help-heading">
+          <div class="help-hero__body">
+            <h1 id="help-heading" class="help-hero__title">{{ t('supportResident.title') }}</h1>
+            <p class="help-hero__sub">{{ t('supportResident.headerSubtitle') }}</p>
 
-        <div class="faq-search" role="search">
-          <i class="pi pi-search" aria-hidden="true" />
-          <input
-            v-model="faqQuery"
-            type="search"
-            :placeholder="t('supportResident.searchPlaceholder')"
-            :aria-label="t('supportResident.faqSearchLabel')"
-          />
-          <button
-            v-if="faqQuery"
-            type="button"
-            class="faq-search__clear"
-            :aria-label="t('supportResident.faqClear')"
-            @click="faqQuery = ''"
-          >
-            <i class="pi pi-times" aria-hidden="true" />
-          </button>
-        </div>
-
-        <h3 class="faq-section-title">{{ t('supportResident.faqTitle') }}</h3>
-        <ul v-if="filteredFaqs.length" class="faq-list" role="list">
-          <li
-            v-for="faq in filteredFaqs"
-            :key="faq.id"
-            class="faq-item"
-            :class="{ 'is-open': openFaqId === faq.id }"
-          >
-            <button
-              type="button"
-              class="faq-q"
-              :aria-expanded="openFaqId === faq.id"
-              :aria-controls="`faq-a-${faq.id}`"
-              @click="toggleFaq(faq.id)"
-            >
-              <span>{{ t(faq.questionKey) }}</span>
-              <i
-                class="pi"
-                :class="openFaqId === faq.id ? 'pi-chevron-up' : 'pi-chevron-down'"
-                aria-hidden="true"
+            <div class="help-search" role="search">
+              <i class="pi pi-search" aria-hidden="true" />
+              <label class="sr-only" for="faq-search">{{ t('supportResident.faqSearchLabel') }}</label>
+              <input
+                id="faq-search"
+                v-model="faqQuery"
+                type="search"
+                autocomplete="off"
+                :placeholder="t('supportResident.searchPlaceholder')"
               />
-            </button>
-            <p v-show="openFaqId === faq.id" :id="`faq-a-${faq.id}`" class="faq-a">
-              {{ t(faq.answerKey) }}
-            </p>
-          </li>
-        </ul>
-        <div v-else class="faq-empty" role="status">
-          <p>{{ t('supportResident.faqNoResults') }}</p>
-          <p class="faq-suggest">
-            <span>{{ t('supportResident.faqSuggestions') }}</span>
+              <button
+                v-if="faqQuery"
+                type="button"
+                class="help-search__clear"
+                :aria-label="t('supportResident.faqClear')"
+                @click="faqQuery = ''"
+              >
+                <i class="pi pi-times" aria-hidden="true" />
+              </button>
+            </div>
+
+            <div class="topic-chips" role="group" :aria-label="t('supportResident.topicsAria')">
+              <button
+                v-for="topic in FAQ_TOPICS"
+                :key="topic.id"
+                type="button"
+                class="topic-chip"
+                :class="{ 'is-active': activeTopic === topic.id }"
+                :aria-pressed="activeTopic === topic.id"
+                @click="toggleTopic(topic.id)"
+              >
+                <i class="pi" :class="topic.icon" aria-hidden="true" />
+                {{ t(topic.labelKey) }}
+              </button>
+            </div>
+          </div>
+          <svg class="help-hero__art" viewBox="0 0 160 120" aria-hidden="true" focusable="false">
+            <rect x="8" y="14" width="96" height="60" rx="18" fill="#ffffff" />
+            <path d="M30 74 L26 92 L48 74 Z" fill="#ffffff" />
+            <rect x="26" y="32" width="54" height="8" rx="4" fill="#c7d4f5" />
+            <rect x="26" y="48" width="36" height="8" rx="4" fill="#c7d4f5" />
+            <rect x="70" y="50" width="82" height="52" rx="16" fill="#1e3a8a" />
+            <path d="M132 102 L138 116 L118 102 Z" fill="#1e3a8a" />
+            <circle cx="94" cy="76" r="4.5" fill="#ffffff" />
+            <circle cx="111" cy="76" r="4.5" fill="#ffffff" />
+            <circle cx="128" cy="76" r="4.5" fill="#ffffff" />
+          </svg>
+        </section>
+
+        <div class="help-grid">
+          <aside class="assistant-card" aria-labelledby="assistant-heading">
+            <div class="assistant-card__head">
+              <span class="bot-avatar bot-avatar--lg" aria-hidden="true">
+                <i class="pi pi-sparkles" />
+              </span>
+              <div>
+                <h2 id="assistant-heading" class="assistant-card__name">{{ t('supportResident.assistantName') }}</h2>
+                <p class="assistant-card__status">
+                  <span class="online-dot" aria-hidden="true" />
+                  {{ t('supportResident.assistantStatus') }}
+                </p>
+              </div>
+            </div>
+            <p class="assistant-card__intro">{{ t('supportResident.assistantIntro') }}</p>
+            <p class="assistant-card__label">{{ t('supportResident.assistantTryLabel') }}</p>
+            <ul class="ask-list" role="list">
+              <li v-for="key in ASSISTANT_SUGGESTIONS" :key="key">
+                <button
+                  type="button"
+                  class="ask-chip"
+                  :disabled="aiSending || !residentId"
+                  @click="askFromHelp(key)"
+                >
+                  <span>{{ t(`supportResident.${key}`) }}</span>
+                  <i class="pi pi-arrow-up-right" aria-hidden="true" />
+                </button>
+              </li>
+            </ul>
+            <div class="assistant-card__actions">
+              <button
+                type="button"
+                class="btn btn--primary"
+                :disabled="creatingBlank || !residentId"
+                @click="startChatFromHelp"
+              >
+                <i class="pi pi-comments" aria-hidden="true" />
+                {{ t('supportResident.startChat') }}
+              </button>
+              <button
+                type="button"
+                class="btn btn--secondary"
+                :disabled="aiSending || !residentId"
+                @click="talkToAdminFromHelp"
+              >
+                <i class="pi pi-user" aria-hidden="true" />
+                {{ t('supportResident.talkToAdmin') }}
+              </button>
+            </div>
+          </aside>
+
+          <section class="faq" aria-labelledby="faq-heading">
+            <div class="faq__head">
+              <h2 id="faq-heading" class="faq__title">{{ t('supportResident.faqTitle') }}</h2>
+              <span v-if="faqFiltered" class="faq__count" role="status">
+                {{ t('supportResident.faqResultsCount', { n: filteredFaqs.length }, filteredFaqs.length) }}
+              </span>
+            </div>
+
+            <ul v-if="filteredFaqs.length" class="faq-list" role="list">
+              <li
+                v-for="faq in filteredFaqs"
+                :key="faq.id"
+                class="faq-card"
+                :class="[{ 'is-open': openFaqId === faq.id }, faq.topic ? `topic-${faq.topic}` : 'topic-general']"
+              >
+                <button
+                  :id="`faq-q-${faq.id}`"
+                  type="button"
+                  class="faq-card__q"
+                  :aria-expanded="openFaqId === faq.id"
+                  :aria-controls="`faq-a-${faq.id}`"
+                  @click="toggleFaq(faq.id)"
+                >
+                  <span class="faq-card__icon" aria-hidden="true">
+                    <i class="pi" :class="faqIcon(faq)" />
+                  </span>
+                  <span class="faq-card__text">{{ t(faq.questionKey) }}</span>
+                  <i class="pi pi-chevron-down faq-card__chev" aria-hidden="true" />
+                </button>
+                <div
+                  v-show="openFaqId === faq.id"
+                  :id="`faq-a-${faq.id}`"
+                  class="faq-card__a"
+                  role="region"
+                  :aria-labelledby="`faq-q-${faq.id}`"
+                >
+                  <p>{{ t(faq.answerKey) }}</p>
+                </div>
+              </li>
+            </ul>
+
+            <div v-else class="faq-empty" role="status">
+              <span class="faq-empty__icon" aria-hidden="true"><i class="pi pi-search" /></span>
+              <p class="faq-empty__title">{{ t('supportResident.faqNoResults') }}</p>
+              <div class="faq-empty__suggest">
+                <span>{{ t('supportResident.faqSuggestions') }}</span>
+                <button
+                  v-for="term in faqSuggestions"
+                  :key="term"
+                  type="button"
+                  class="suggest-chip"
+                  @click="applyFaqSuggestion(term)"
+                >
+                  {{ term }}
+                </button>
+              </div>
+              <div class="faq-empty__actions">
+                <button type="button" class="btn btn--primary btn--sm" @click="startChatFromHelp">
+                  <i class="pi pi-comments" aria-hidden="true" />
+                  {{ t('supportResident.faqContactSupport') }}
+                </button>
+                <button type="button" class="btn btn--ghost btn--sm" @click="clearFaqFilters">
+                  {{ t('supportResident.faqClearFilters') }}
+                </button>
+              </div>
+            </div>
+
+            <div v-if="filteredFaqs.length" class="faq-contact">
+              <span>{{ t('supportResident.faqNotFound') }}</span>
+              <button type="button" class="link-btn" @click="startChatFromHelp">
+                {{ t('supportResident.faqContactSupport') }}
+              </button>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- Chat con el asistente / administración -->
+      <div v-else class="chat-shell" :class="{ 'has-list': hasHistory }">
+        <aside
+          v-if="hasHistory"
+          id="chat-conversations"
+          class="chat-list"
+          :class="{ 'is-open': showConversations }"
+          :aria-label="t('common.chatHistoryAria')"
+        >
+          <div class="chat-list__head">
+            <h2 class="chat-list__title">{{ t('supportResident.conversationsTitle') }}</h2>
             <button
-              v-for="term in faqSuggestions"
-              :key="term"
               type="button"
-              class="faq-chip"
-              @click="applyFaqSuggestion(term)"
+              class="icon-btn"
+              :disabled="creatingBlank"
+              :aria-label="t('supportResident.aiNewChat')"
+              :title="t('supportResident.aiNewChat')"
+              @click="newChatFromList"
             >
-              {{ term }}
+              <i class="pi pi-plus" aria-hidden="true" />
             </button>
-          </p>
-        </div>
-
-        <div class="faq-contact">
-          <span>{{ t('supportResident.faqNotFound') }}</span>
-          <button type="button" class="faq-link" @click="openChatView">
-            {{ t('supportResident.faqContactSupport') }}
-          </button>
-        </div>
-      </section>
-
-      <div v-else class="ai-shell">
-        <aside class="ai-sidebar" :aria-label="t('common.chatHistoryAria')">
-          <button type="button" class="ai-back" @click="view = 'faq'">
-            <i class="pi pi-question-circle" aria-hidden="true" />
-            {{ t('supportResident.aiBackToFaqs') }}
-          </button>
-          <button type="button" class="ai-new" @click="startAiChat">
-            <i class="pi pi-plus" aria-hidden="true" />
-            {{ t('supportResident.aiNewChat') }}
-          </button>
-          <p class="ai-recents-label">{{ t('supportResident.aiRecents') }}</p>
-          <ul class="ai-recent-list" role="list">
+          </div>
+          <ul class="chat-list__items" role="list">
             <li v-for="chat in aiChats" :key="chat.id">
               <button
                 type="button"
-                class="ai-recent"
+                class="conv"
                 :class="{ 'is-active': chat.id === activeAiChatId }"
-                @click="openAiChat(chat.id)"
+                :aria-current="chat.id === activeAiChatId ? 'true' : undefined"
+                @click="selectConversation(chat.id)"
               >
-                {{ chat.title }}
+                <span class="conv__title">{{ chat.title || t('supportResident.aiNewChat') }}</span>
+                <span class="conv__meta">
+                  <span v-if="chat.status === 'derived'" class="mini-pill mini-pill--amber">
+                    {{ t('supportResident.labelAdmin') }}
+                  </span>
+                  <span v-else-if="chat.status === 'closed'" class="mini-pill">
+                    {{ t('supportAdmin.statusClosed') }}
+                  </span>
+                  <span class="conv__when">{{ chatWhen(chat) }}</span>
+                </span>
               </button>
             </li>
           </ul>
         </aside>
 
-        <section class="ai-main" aria-labelledby="ai-prompt-heading">
-          <div v-if="!hasAiMessages" class="ai-stage">
-            <h2 id="ai-prompt-heading" class="ai-heading">{{ t('supportResident.aiPrompt') }}</h2>
-            <div class="ai-composer">
-              <span class="ai-composer__plus" aria-hidden="true">
-                <i class="pi pi-plus" />
+        <section class="chat-main" aria-labelledby="chat-heading">
+          <header class="chat-head">
+            <button
+              type="button"
+              class="icon-btn chat-head__back"
+              :aria-label="t('supportResident.backToFaqAria')"
+              :title="t('supportResident.backToFaqAria')"
+              @click="view = 'faq'"
+            >
+              <i class="pi pi-arrow-left" aria-hidden="true" />
+            </button>
+            <span class="bot-avatar" aria-hidden="true"><i class="pi pi-sparkles" /></span>
+            <div class="chat-head__text">
+              <h1 id="chat-heading" class="chat-head__name">{{ t('supportResident.assistantName') }}</h1>
+              <p class="chat-head__status">
+                <span class="online-dot" aria-hidden="true" />
+                {{ t('supportResident.assistantStatus') }}
+              </p>
+            </div>
+            <button
+              v-if="hasHistory"
+              type="button"
+              class="pill-btn chat-head__convs"
+              :aria-expanded="showConversations"
+              aria-controls="chat-conversations"
+              :aria-label="t('supportResident.conversationsToggleAria')"
+              @click="showConversations = !showConversations"
+            >
+              <i class="pi pi-history" aria-hidden="true" />
+              <span class="chat-head__convs-text">
+                {{ t('supportResident.conversationsCount', { n: aiChats.length }, aiChats.length) }}
               </span>
-              <input
-                v-model="aiInput"
-                type="text"
-                :placeholder="t('supportResident.aiAskPlaceholder')"
-                :aria-label="t('supportResident.aiAskPlaceholder')"
+              <span class="chat-head__convs-n" aria-hidden="true">{{ aiChats.length }}</span>
+            </button>
+            <button type="button" class="pill-btn chat-head__faq" @click="view = 'faq'">
+              <i class="pi pi-question-circle" aria-hidden="true" />
+              {{ t('supportResident.aiBackToFaqs') }}
+            </button>
+          </header>
+
+          <div v-if="activeAiChat?.status === 'derived'" class="banner banner--amber" role="status">
+            <i class="pi pi-users" aria-hidden="true" />
+            <div>
+              <strong>{{ t('supportResident.derivedBanner') }}</strong>
+              <span>{{ t('supportResident.derivedBannerHint') }}</span>
+            </div>
+          </div>
+          <div v-else-if="activeAiChat?.status === 'closed'" class="banner banner--gray" role="status">
+            <i class="pi pi-lock" aria-hidden="true" />
+            <div>
+              <strong>{{ t('supportResident.statusClosed') }}</strong>
+              <span>{{ t('supportResident.closedBannerHint') }}</span>
+            </div>
+          </div>
+
+          <div v-if="!hasAiMessages" class="chat-empty">
+            <span class="bot-avatar bot-avatar--xl" aria-hidden="true"><i class="pi pi-sparkles" /></span>
+            <h2 class="chat-empty__title">{{ t('supportResident.aiGreeting') }}</h2>
+            <p class="chat-empty__sub">{{ t('supportResident.assistantIntro') }}</p>
+            <div class="chat-empty__chips">
+              <button
+                v-for="key in ASSISTANT_SUGGESTIONS"
+                :key="key"
+                type="button"
+                class="ask-chip ask-chip--inline"
                 :disabled="aiSending"
-                @keydown.enter.prevent="sendAiMessage()"
-              />
+                @click="sendAiMessage(t(`supportResident.${key}`))"
+              >
+                {{ t(`supportResident.${key}`) }}
+              </button>
               <button
                 type="button"
-                class="ai-composer__send"
-                :disabled="aiSending || !aiInput.trim()"
-                :aria-label="t('supportResident.send')"
-                @click="sendAiMessage()"
+                class="ask-chip ask-chip--inline ask-chip--admin"
+                :disabled="aiSending"
+                @click="onAiSuggestion('admin')"
               >
-                <i class="pi pi-arrow-up" aria-hidden="true" />
-              </button>
-            </div>
-            <div class="ai-suggestions">
-              <button type="button" class="ai-suggestion" @click="onAiSuggestion('aiSuggestionFees')">
-                <i class="pi pi-credit-card" aria-hidden="true" />
-                {{ t('supportResident.aiSuggestionFees') }}
-              </button>
-              <button type="button" class="ai-suggestion" @click="onAiSuggestion('aiSuggestionSpaces')">
-                <i class="pi pi-building" aria-hidden="true" />
-                {{ t('supportResident.aiSuggestionSpaces') }}
-              </button>
-              <button type="button" class="ai-suggestion" @click="onAiSuggestion('admin')">
                 <i class="pi pi-user" aria-hidden="true" />
                 {{ t('supportResident.aiSuggestionAdmin') }}
               </button>
             </div>
           </div>
 
-          <template v-else>
-            <div ref="aiMessagesEl" class="ai-thread" role="log" aria-live="polite">
-              <div
-                v-for="m in displayMessages"
-                :key="m.id"
-                class="ai-msg"
-                :class="{
-                  'ai-msg--user': m.role === 'user',
-                  'ai-msg--ai': m.role === 'ai',
-                  'ai-msg--admin': m.role === 'admin',
-                  'ai-msg--pending': m.pending,
-                }"
-              >
-                <span class="ai-msg__who">{{ m.pending ? t('supportResident.aiPending') : messageWho(m.role) }}</span>
-                <p>{{ m.body }}</p>
-                <p v-if="m.citedSource" class="ai-msg__source">
+          <div
+            v-else
+            ref="aiMessagesEl"
+            class="thread"
+            role="log"
+            aria-live="polite"
+            :aria-label="t('supportResident.threadAria')"
+          >
+            <div
+              v-for="m in displayMessages"
+              :key="m.id"
+              class="msg"
+              :class="{
+                'msg--user': m.role === 'user',
+                'msg--ai': m.role === 'ai',
+                'msg--admin': m.role === 'admin',
+                'is-pending': m.pending,
+              }"
+            >
+              <span v-if="m.role === 'ai'" class="bot-avatar bot-avatar--sm" aria-hidden="true">
+                <i class="pi pi-sparkles" />
+              </span>
+              <span v-else-if="m.role === 'admin'" class="admin-avatar" aria-hidden="true">
+                <i class="pi pi-user" />
+              </span>
+              <div class="msg__col">
+                <span v-if="m.role === 'admin'" class="msg__label">{{ t('supportResident.labelAdmin') }}</span>
+                <span v-else class="sr-only">{{ messageWho(m.role) }}:</span>
+                <div class="msg__bubble">
+                  <p>{{ m.body }}</p>
+                </div>
+                <span v-if="m.citedSource" class="source-pill">
                   <i class="pi pi-file" aria-hidden="true" />
                   {{ t('supportResident.sourceLabel') }}: {{ m.citedSource }}
-                </p>
+                </span>
+                <span class="msg__meta">
+                  {{ m.pending ? t('supportResident.aiPending') : messageTime(m) }}
+                </span>
               </div>
-              <div v-if="aiSending" class="ai-msg ai-msg--ai ai-msg--typing">
-                <span class="ai-msg__who">{{ t('supportResident.aiLabel') }}</span>
-                <p>{{ t('supportResident.aiTyping') }}</p>
+            </div>
+
+            <div v-if="aiSending" class="msg msg--ai msg--typing">
+              <span class="bot-avatar bot-avatar--sm" aria-hidden="true"><i class="pi pi-sparkles" /></span>
+              <div class="msg__col">
+                <div class="msg__bubble">
+                  <span class="typing" aria-hidden="true"><span /><span /><span /></span>
+                  <span class="sr-only">{{ t('supportResident.aiTyping') }}</span>
+                </div>
               </div>
-              <div v-if="sendFailure" class="ai-alert ai-alert--error" role="alert">
+            </div>
+
+            <div v-if="sendFailure" class="notice notice--red" role="alert">
+              <i class="pi pi-exclamation-circle" aria-hidden="true" />
+              <div class="notice__body">
                 <p>{{ sendFailure.message }}</p>
-                <div class="ai-alert__actions">
+                <div class="notice__actions">
                   <button
                     v-if="sendFailure.retryable"
                     type="button"
-                    class="ai-alert__btn"
+                    class="btn btn--danger btn--sm"
                     :disabled="aiSending"
                     @click="retryFailedMessage"
                   >
@@ -567,7 +864,7 @@ function onAiSuggestion(kind) {
                   <button
                     v-if="sendFailure.offerAdmin"
                     type="button"
-                    class="ai-alert__btn ai-alert__btn--ghost"
+                    class="btn btn--ghost-danger btn--sm"
                     :disabled="aiSending"
                     @click="askForAdmin"
                   >
@@ -575,34 +872,39 @@ function onAiSuggestion(kind) {
                   </button>
                 </div>
               </div>
-              <p v-if="aiNotice" class="ai-alert ai-alert--info" role="status">{{ aiNotice }}</p>
             </div>
-            <p v-if="activeStatusNote" class="ai-status-note">{{ activeStatusNote }}</p>
-            <div class="ai-dock">
-              <div class="ai-composer">
-                <span class="ai-composer__plus" aria-hidden="true">
-                  <i class="pi pi-plus" />
-                </span>
-                <input
-                  v-model="aiInput"
-                  type="text"
-                  :placeholder="t('supportResident.aiAskPlaceholder')"
-                  :aria-label="t('supportResident.aiAskPlaceholder')"
-                  :disabled="aiSending"
-                  @keydown.enter.prevent="sendAiMessage()"
-                />
-                <button
-                  type="button"
-                  class="ai-composer__send"
-                  :disabled="aiSending || !aiInput.trim()"
-                  :aria-label="t('supportResident.send')"
-                  @click="sendAiMessage()"
-                >
-                  <i class="pi pi-arrow-up" aria-hidden="true" />
-                </button>
-              </div>
+            <div v-if="aiNotice" class="notice notice--amber" role="status">
+              <i class="pi pi-info-circle" aria-hidden="true" />
+              <div class="notice__body"><p>{{ aiNotice }}</p></div>
             </div>
-          </template>
+          </div>
+
+          <div class="composer-dock">
+            <div class="composer">
+              <label class="sr-only" for="resident-composer">{{ t('supportResident.composerLabel') }}</label>
+              <textarea
+                id="resident-composer"
+                ref="composerEl"
+                v-model="aiInput"
+                rows="1"
+                :placeholder="t('supportResident.aiAskPlaceholder')"
+                :disabled="aiSending"
+                aria-describedby="resident-composer-hint"
+                @input="onComposerInput"
+                @keydown="onComposerKeydown"
+              />
+              <button
+                type="button"
+                class="composer__send"
+                :disabled="aiSending || !aiInput.trim()"
+                :aria-label="t('supportResident.send')"
+                @click="sendAiMessage()"
+              >
+                <i class="pi pi-arrow-up" aria-hidden="true" />
+              </button>
+            </div>
+            <p id="resident-composer-hint" class="composer-hint">{{ t('supportResident.composerHint') }}</p>
+          </div>
         </section>
       </div>
     </div>
@@ -610,51 +912,36 @@ function onAiSuggestion(kind) {
 </template>
 
 <style scoped>
-/* Page shell — aligned with AppFinanceView */
+/* Visual language: AppDashboardView / AppFinanceView — solid soft tints, white cards, pills, no gradients. */
 .app-view {
-  padding: 1.75rem 1.5rem 2.5rem;
-  max-width: 72rem;
+  --navy: #1e3a8a;
+  --navy-hover: #172554;
+  --ink: #0f172a;
+  --muted: #6e6e73;
+  --line: rgba(15, 23, 42, 0.07);
+  --tint-blue: #e8eefc;
+  --tint-green: #e3f4e8;
+  --tint-orange: #fdeee2;
+  --tint-amber: #fdf3dc;
+  --tint-red: #fde4e4;
+  --soft: #f4f6fa;
+  padding: 1.25rem 1.5rem 1.5rem;
+  width: 100%;
+  max-width: 88rem;
+  box-sizing: border-box;
 }
 
 .app-view--ai {
-  max-width: 88rem;
   flex: 1;
   min-height: 0;
   height: 100%;
   max-height: 100%;
-  padding: 1rem 1.5rem;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-sizing: border-box;
 }
 
-.app-view__title {
-  margin: 0;
-  font-size: 1.75rem;
-  font-weight: 600;
-  letter-spacing: -0.035em;
-  line-height: 1.15;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.app-view__subtitle {
-  margin: 0.5rem 0 0;
-  max-width: 42rem;
-  font-size: 0.875rem;
-  font-weight: 400;
-  line-height: 1.45;
-  letter-spacing: -0.015em;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.support-session-hint {
-  margin-top: 0.35rem;
-  color: #b42318;
-}
-
-.finance-page {
-  margin-top: 0;
+.support-page {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -662,444 +949,283 @@ function onAiSuggestion(kind) {
   gap: 0.75rem;
 }
 
-.ai-shell {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 16.75rem minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-}
-
-.ai-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 0.7rem;
-  min-height: 0;
-  overflow: hidden;
-  padding: 0.9rem 0.75rem 1rem;
-  background: var(--apple-bg-secondary, #f5f5f7);
-  border-right: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.ai-new {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.58rem 0.8rem;
-  border: none;
-  border-radius: 12px;
-  background: #fff;
-  color: var(--apple-text, #1d1d1f);
-  font-size: 0.875rem;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-}
-
-.ai-new:hover {
-  color: var(--apple-blue, #1e3a8a);
-}
-
-.ai-recents-label {
-  flex-shrink: 0;
-  margin: 0.35rem 0.35rem 0;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--apple-text-secondary, #86868b);
-}
-
-.ai-recent-list {
-  list-style: none;
+.support-hint {
   margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-
-.ai-recent {
-  width: 100%;
-  text-align: left;
-  padding: 0.52rem 0.7rem;
-  border: none;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--apple-text, #1d1d1f);
-  font-size: 0.8125rem;
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ai-recent:hover {
-  background: rgba(255, 255, 255, 0.8);
-}
-
-.ai-recent.is-active {
-  background: #fff;
-  color: var(--apple-blue, #1e3a8a);
-  font-weight: 600;
-}
-
-.ai-main {
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  background: #fff;
-}
-
-.ai-stage {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 2rem 1.5rem 2.25rem;
-}
-
-.ai-heading {
-  margin: 0 0 1.5rem;
-  font-size: 1.75rem;
-  font-weight: 600;
-  letter-spacing: -0.04em;
-  color: var(--apple-text, #1d1d1f);
-  text-align: center;
-}
-
-.ai-composer {
-  width: min(40rem, 100%);
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.4rem 0.4rem 0.4rem 0.85rem;
-  border: 1px solid var(--apple-border-hairline, #d2d2d7);
-  border-radius: 980px;
-  background: #fff;
-  box-shadow: var(--apple-shadow-md, 0 4px 24px rgba(0, 0, 0, 0.06));
-}
-
-.ai-composer:focus-within {
-  border-color: var(--apple-blue, #1e3a8a);
-  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.16);
-}
-
-.ai-composer__plus {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.6rem;
-  color: var(--apple-text-secondary, #86868b);
+  padding: 0.6rem 0.9rem;
+  border-radius: 12px;
+  background: var(--tint-red);
+  color: #b42318;
   font-size: 0.85rem;
 }
 
-.ai-composer input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  font: inherit;
-  font-size: 0.95rem;
-  color: var(--apple-text, #1d1d1f);
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-.ai-composer__send {
-  display: flex;
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.35rem;
-  height: 2.35rem;
-  border: none;
-  border-radius: 50%;
-  background: var(--apple-blue, #1e3a8a);
-  color: #fff;
+  gap: 0.45rem;
+  padding: 0.68rem 1.1rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
   cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.ai-composer__send:hover:not(:disabled) {
-  background: var(--apple-blue-hover, #172554);
+.btn--sm {
+  padding: 0.45rem 0.9rem;
+  font-size: 0.8125rem;
 }
 
-.ai-composer__send:disabled {
-  opacity: 0.35;
+.btn--primary {
+  background: var(--navy);
+  color: #fff;
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--navy-hover);
+}
+
+.btn--secondary {
+  background: #fff;
+  border-color: rgba(30, 58, 138, 0.22);
+  color: var(--navy);
+}
+
+.btn--secondary:hover:not(:disabled) {
+  background: var(--tint-blue);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--navy);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--tint-blue);
+}
+
+.btn--danger {
+  background: #b42318;
+  color: #fff;
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: #912018;
+}
+
+.btn--ghost-danger {
+  background: #fff;
+  border-color: #f4b8b3;
+  color: #b42318;
+}
+
+.btn:disabled {
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
-.ai-suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.35rem 1.35rem;
-  margin-top: 1.35rem;
+.btn:focus-visible,
+.icon-btn:focus-visible,
+.pill-btn:focus-visible,
+.topic-chip:focus-visible,
+.ask-chip:focus-visible,
+.suggest-chip:focus-visible,
+.faq-card__q:focus-visible,
+.conv:focus-visible,
+.link-btn:focus-visible,
+.help-search__clear:focus-visible,
+.composer__send:focus-visible {
+  outline: 2px solid var(--navy);
+  outline-offset: 2px;
 }
 
-.ai-suggestion {
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--tint-blue);
+  color: var(--navy);
+}
+
+.icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pill-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  border: none;
-  background: none;
-  color: var(--apple-text-tertiary, #6e6e73);
-  font-size: 0.875rem;
-  font-weight: 500;
-  cursor: pointer;
-  padding: 0.3rem 0;
-}
-
-.ai-suggestion:hover {
-  color: var(--apple-blue, #1e3a8a);
-}
-
-.ai-thread {
-  flex: 1 1 0;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-  width: 100%;
-  margin: 0;
-  padding: 1.5rem max(1.5rem, calc(50% - 22rem)) 0.75rem;
-}
-
-.ai-msg {
-  max-width: 86%;
-  padding: 0.8rem 1rem;
-  border-radius: 16px;
-}
-
-.ai-msg p {
-  margin: 0;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.ai-msg__who {
-  display: block;
-  margin-bottom: 0.3rem;
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--apple-text-secondary, #86868b);
-}
-
-.ai-msg--ai {
-  align-self: flex-start;
-  background: var(--apple-bg-secondary, #f5f5f7);
-  color: var(--apple-text, #1d1d1f);
-}
-
-.ai-msg--user {
-  align-self: flex-end;
-  background: rgba(30, 58, 138, 0.1);
-  color: var(--apple-blue, #1e3a8a);
-}
-
-.ai-msg--admin {
-  align-self: flex-start;
-  background: rgba(10, 132, 255, 0.12);
-  color: var(--apple-text, #1d1d1f);
-  border: 1px solid rgba(10, 132, 255, 0.2);
-}
-
-.ai-msg--typing p {
-  color: var(--apple-text-secondary, #86868b);
-}
-
-.ai-msg--pending {
-  opacity: 0.6;
-}
-
-.ai-msg__source {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin-top: 0.5rem !important;
-  font-size: 0.75rem !important;
-  font-weight: 600;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.ai-alert {
-  align-self: stretch;
-  margin: 0;
-  padding: 0.75rem 0.9rem;
-  border-radius: 12px;
-  font-size: 0.85rem;
-  line-height: 1.45;
-}
-
-.ai-alert p {
-  margin: 0;
-}
-
-.ai-alert--error {
-  background: #fef3f2;
-  border: 1px solid #fecdca;
-  color: #b42318;
-}
-
-.ai-alert--info {
-  background: rgba(30, 58, 138, 0.06);
-  border: 1px solid rgba(30, 58, 138, 0.18);
-  color: var(--apple-blue, #1e3a8a);
-}
-
-.ai-alert__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.55rem;
-}
-
-.ai-alert__btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.38rem 0.8rem;
-  border: none;
-  border-radius: 980px;
-  background: #b42318;
-  color: #fff;
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.ai-alert__btn--ghost {
+  flex-shrink: 0;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
   background: #fff;
-  color: #b42318;
-  border: 1px solid #fecdca;
-}
-
-.ai-alert__btn:disabled {
-  opacity: 0.55;
-  cursor: wait;
-}
-
-.ai-status-note {
-  flex-shrink: 0;
-  margin: 0;
-  padding: 0.35rem 1.25rem 0;
-  text-align: center;
-  font-size: 0.75rem;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.ai-back {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  width: 100%;
-  padding: 0.35rem 0.5rem;
-  border: none;
-  background: none;
-  color: var(--apple-text-secondary, #6e6e73);
+  color: var(--ink);
+  font: inherit;
   font-size: 0.8125rem;
   font-weight: 600;
   cursor: pointer;
-  text-align: left;
 }
 
-.ai-back:hover {
-  color: var(--apple-blue, #1e3a8a);
+.pill-btn:hover {
+  background: var(--tint-blue);
+  color: var(--navy);
 }
 
-/* FAQ — Soporte Técnico (RF008 / RF009) */
-.faq-panel {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 1.5rem 1.5rem 2rem;
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-}
-
-.faq-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.faq-title {
-  margin: 0;
-  font-size: 1.5rem;
-  font-weight: 600;
-  letter-spacing: -0.035em;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.faq-sub {
-  margin: 0.35rem 0 0;
-  font-size: 0.875rem;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.faq-cta {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.6rem 1.05rem;
+.link-btn {
   border: none;
-  border-radius: 980px;
-  background: var(--apple-blue, #1e3a8a);
-  color: #fff;
-  font-size: 0.875rem;
+  background: none;
+  padding: 0;
+  color: var(--navy);
+  font: inherit;
   font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
   cursor: pointer;
 }
 
-.faq-cta:hover {
-  background: var(--apple-blue-hover, #172554);
+/* ---------- Avatars ---------- */
+.bot-avatar,
+.admin-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  background: var(--navy);
+  color: #fff;
+  font-size: 1rem;
 }
 
-.faq-search {
+.bot-avatar--lg {
+  width: 3rem;
+  height: 3rem;
+  font-size: 1.2rem;
+}
+
+.bot-avatar--xl {
+  width: 3.5rem;
+  height: 3.5rem;
+  font-size: 1.35rem;
+}
+
+.bot-avatar--sm,
+.admin-avatar {
+  width: 1.85rem;
+  height: 1.85rem;
+  font-size: 0.78rem;
+}
+
+.admin-avatar {
+  background: var(--tint-green);
+  color: #146c43;
+}
+
+.online-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: #22a559;
+  flex-shrink: 0;
+}
+
+/* ---------- Help (FAQ) ---------- */
+.help {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-bottom: 0.5rem;
+}
+
+.help-hero {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
-  max-width: 40rem;
-  margin-top: 1.25rem;
-  padding: 0.55rem 0.85rem;
-  border: 1px solid var(--apple-border-hairline, #d2d2d7);
-  border-radius: 980px;
-  color: var(--apple-text-secondary, #86868b);
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 1.75rem 2rem;
+  border-radius: 18px;
+  background: var(--tint-blue);
 }
 
-.faq-search:focus-within {
-  border-color: var(--apple-blue, #1e3a8a);
+.help-hero__body {
+  flex: 1;
+  min-width: 0;
+  max-width: 44rem;
+}
+
+.help-hero__title {
+  margin: 0;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+
+.help-hero__sub {
+  margin: 0.3rem 0 0;
+  font-size: 0.9rem;
+  color: #4b5563;
+}
+
+.help-hero__art {
+  flex-shrink: 0;
+  width: 10rem;
+  height: auto;
+}
+
+.help-search {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1.1rem;
+  padding: 0.7rem 0.9rem 0.7rem 1.1rem;
+  border: 1px solid rgba(30, 58, 138, 0.12);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+}
+
+.help-search:focus-within {
+  border-color: var(--navy);
   box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.16);
 }
 
-.faq-search input {
+.help-search input {
   flex: 1;
   min-width: 0;
   border: none;
@@ -1107,92 +1233,248 @@ function onAiSuggestion(kind) {
   background: transparent;
   font: inherit;
   font-size: 0.95rem;
-  color: var(--apple-text, #1d1d1f);
+  color: var(--ink);
 }
 
-.faq-search__clear {
+.help-search__clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
   border: none;
-  background: none;
-  color: inherit;
+  border-radius: 50%;
+  background: var(--soft);
+  color: var(--muted);
   cursor: pointer;
 }
 
-.faq-section-title {
-  margin: 1.5rem 0 0.6rem;
-  font-size: 0.7rem;
+.topic-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+}
+
+.topic-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid rgba(30, 58, 138, 0.14);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.topic-chip .pi {
+  font-size: 0.8rem;
+  color: var(--navy);
+}
+
+.topic-chip:hover {
+  border-color: rgba(30, 58, 138, 0.35);
+}
+
+.topic-chip.is-active {
+  background: var(--navy);
+  border-color: var(--navy);
+  color: #fff;
+}
+
+.topic-chip.is-active .pi {
+  color: #fff;
+}
+
+.help-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22rem;
+  grid-template-areas: 'faq assistant';
+  gap: 1rem;
+  align-items: start;
+}
+
+/* FAQ list */
+.faq {
+  grid-area: faq;
+  min-width: 0;
+}
+
+.faq__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0.25rem 0.15rem 0.65rem;
+}
+
+.faq__title {
+  margin: 0;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.05rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--apple-text-secondary, #86868b);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.faq__count {
+  font-size: 0.8rem;
+  color: var(--muted);
 }
 
 .faq-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-width: 48rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
-.faq-item {
-  border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+.faq-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
 }
 
-.faq-q {
+.faq-card.is-open {
+  border-color: rgba(30, 58, 138, 0.18);
+}
+
+.faq-card__q {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  gap: 0.8rem;
   width: 100%;
-  padding: 0.9rem 0.25rem;
+  padding: 0.8rem 1rem;
   border: none;
   background: none;
   text-align: left;
-  font-size: 0.95rem;
+  font: inherit;
+  font-size: 0.92rem;
   font-weight: 600;
-  color: var(--apple-text, #1d1d1f);
+  color: var(--ink);
   cursor: pointer;
 }
 
-.faq-item.is-open .faq-q,
-.faq-q:hover {
-  color: var(--apple-blue, #1e3a8a);
+.faq-card__q:hover .faq-card__text {
+  color: var(--navy);
 }
 
-.faq-a {
+.faq-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 50%;
+  font-size: 0.85rem;
+  background: var(--soft);
+  color: #475467;
+}
+
+.topic-payments .faq-card__icon { background: var(--tint-blue); color: var(--navy); }
+.topic-bookings .faq-card__icon { background: var(--tint-green); color: #146c43; }
+.topic-incidents .faq-card__icon { background: var(--tint-orange); color: #b54708; }
+.topic-guests .faq-card__icon { background: var(--tint-amber); color: #8a5a00; }
+.topic-account .faq-card__icon { background: var(--tint-red); color: #b42318; }
+
+.faq-card__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.faq-card__chev {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  transition: transform 0.2s ease;
+}
+
+.faq-card.is-open .faq-card__chev {
+  transform: rotate(180deg);
+  color: var(--navy);
+}
+
+.faq-card__a {
+  padding: 0 1.1rem 1rem 3.9rem;
+}
+
+.faq-card__a p {
   margin: 0;
-  padding: 0 0.25rem 1rem;
   font-size: 0.9rem;
   line-height: 1.55;
-  color: var(--apple-text-secondary, #424245);
+  color: #424245;
+  white-space: pre-line;
 }
 
 .faq-empty {
-  max-width: 48rem;
-  padding: 1rem 0;
-  font-size: 0.9rem;
-  color: var(--apple-text-secondary, #6e6e73);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 2rem 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fff;
+  text-align: center;
 }
 
-.faq-empty p {
-  margin: 0 0 0.5rem;
+.faq-empty__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  background: var(--tint-blue);
+  color: var(--navy);
 }
 
-.faq-suggest {
+.faq-empty__title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.faq-empty__suggest {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
   gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--muted);
 }
 
-.faq-chip {
-  padding: 0.25rem 0.7rem;
-  border: 1px solid rgba(30, 58, 138, 0.25);
-  border-radius: 980px;
-  background: rgba(30, 58, 138, 0.06);
-  color: var(--apple-blue, #1e3a8a);
-  font-size: 0.8rem;
+.faq-empty__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.suggest-chip {
+  padding: 0.3rem 0.8rem;
+  border: none;
+  border-radius: 999px;
+  background: var(--tint-blue);
+  color: var(--navy);
+  font: inherit;
+  font-size: 0.8125rem;
   font-weight: 600;
   cursor: pointer;
+}
+
+.suggest-chip:hover {
+  background: #d9e3fa;
 }
 
 .faq-contact {
@@ -1200,60 +1482,763 @@ function onAiSuggestion(kind) {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
-  margin-top: 1.5rem;
+  margin: 1rem 0.15rem 0;
   font-size: 0.875rem;
-  color: var(--apple-text-secondary, #6e6e73);
+  color: var(--muted);
 }
 
-.faq-link {
-  border: none;
-  background: none;
-  padding: 0;
-  color: var(--apple-blue, #1e3a8a);
-  font: inherit;
+/* Assistant card */
+.assistant-card {
+  grid-area: assistant;
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1.35rem;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fff;
+}
+
+.assistant-card__head {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.assistant-card__name {
+  margin: 0;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.assistant-card__status {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0.15rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.assistant-card__status .online-dot {
+  margin-top: 0.3rem;
+}
+
+.assistant-card__intro {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #424245;
+}
+
+.assistant-card__label {
+  margin: 0.15rem 0 -0.35rem;
+  font-size: 0.75rem;
   font-weight: 600;
-  text-decoration: underline;
+  color: var(--muted);
+}
+
+.ask-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.ask-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.6rem 0.9rem;
+  border: none;
+  border-radius: 14px;
+  background: var(--soft);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-align: left;
   cursor: pointer;
 }
 
-.ai-dock {
+.ask-chip .pi {
   flex-shrink: 0;
-  padding: 0.75rem 1.25rem 1.35rem;
-  display: flex;
+  font-size: 0.7rem;
+  color: var(--navy);
+}
+
+.ask-chip:hover:not(:disabled) {
+  background: var(--tint-blue);
+  color: var(--navy);
+}
+
+.ask-chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ask-chip--inline {
+  width: auto;
   justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fff;
 }
 
-@media (max-width: 860px) {
-  .ai-shell {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
+.ask-chip--admin {
+  background: var(--tint-green);
+  border-color: transparent;
+  color: #146c43;
+}
+
+.ask-chip--admin .pi {
+  color: #146c43;
+}
+
+.assistant-card__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+/* ---------- Chat ---------- */
+.chat-shell {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.chat-shell.has-list {
+  grid-template-columns: 16rem minmax(0, 1fr);
+}
+
+.chat-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+  background: #fafbfd;
+}
+
+.chat-list__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 1rem 0.85rem 0.6rem 1.1rem;
+}
+
+.chat-list__title {
+  margin: 0;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.chat-list__items {
+  list-style: none;
+  margin: 0;
+  padding: 0 0.6rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.conv {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  width: 100%;
+  padding: 0.6rem 0.7rem;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.conv:hover {
+  background: #f0f3f9;
+}
+
+.conv.is-active {
+  background: var(--tint-blue);
+}
+
+.conv__title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conv.is-active .conv__title {
+  color: var(--navy);
+}
+
+.conv__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.mini-pill {
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: #eef0f4;
+  color: #475467;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.mini-pill--amber {
+  background: var(--tint-amber);
+  color: #8a5a00;
+}
+
+.chat-main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.chat-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.chat-head__back,
+.chat-head__convs,
+.chat-head__convs-n {
+  display: none;
+}
+
+.chat-head__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-head__name {
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.chat-head__status {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.1rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin: 0.75rem 1.25rem 0;
+  padding: 0.7rem 0.95rem;
+  border-radius: 14px;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.banner .pi {
+  margin-top: 0.15rem;
+}
+
+.banner div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.4rem;
+}
+
+.banner--amber {
+  background: var(--tint-amber);
+  color: #7a4f00;
+}
+
+.banner--gray {
+  background: #eef0f4;
+  color: #475467;
+}
+
+.chat-empty {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 2rem 1.5rem;
+  text-align: center;
+}
+
+.chat-empty__title {
+  margin: 0.4rem 0 0;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--ink);
+}
+
+.chat-empty__sub {
+  margin: 0;
+  max-width: 30rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.chat-empty__chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.45rem;
+  max-width: 40rem;
+  margin-top: 0.6rem;
+}
+
+.thread {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 1.25rem max(1.25rem, calc(50% - 25rem)) 0.75rem;
+}
+
+.msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  max-width: 82%;
+}
+
+.msg__col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.msg__bubble {
+  padding: 0.7rem 0.95rem;
+  border-radius: 18px 18px 18px 6px;
+  background: var(--soft);
+  color: var(--ink);
+}
+
+.msg__bubble p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msg__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #146c43;
+}
+
+.msg__meta {
+  padding: 0 0.3rem;
+  font-size: 0.7rem;
+  color: #8e8e93;
+}
+
+.msg--user {
+  align-self: flex-end;
+}
+
+.msg--user .msg__col {
+  align-items: flex-end;
+}
+
+.msg--user .msg__bubble {
+  border-radius: 18px 18px 6px 18px;
+  background: var(--navy);
+  color: #fff;
+}
+
+.msg--ai {
+  align-self: flex-start;
+}
+
+.msg--admin .admin-avatar {
+  margin-top: 1.3rem;
+}
+
+.msg--admin {
+  align-self: flex-start;
+}
+
+.msg--admin .msg__bubble {
+  background: var(--tint-green);
+}
+
+.msg.is-pending .msg__bubble {
+  opacity: 0.6;
+}
+
+.source-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  padding: 0.22rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: #475467;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source-pill .pi {
+  font-size: 0.7rem;
+  color: var(--navy);
+}
+
+.typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 1.35rem;
+  padding: 0 0.1rem;
+}
+
+.typing span {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: #98a2b3;
+  animation: typing-bounce 1.2s infinite ease-in-out;
+}
+
+.typing span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.55; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .typing span {
+    animation: none;
+  }
+}
+
+.notice {
+  align-self: stretch;
+  display: flex;
+  gap: 0.65rem;
+  padding: 0.75rem 0.95rem;
+  border-radius: 14px;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.notice > .pi {
+  margin-top: 0.2rem;
+}
+
+.notice__body p {
+  margin: 0;
+}
+
+.notice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
+.notice--red {
+  background: var(--tint-red);
+  color: #b42318;
+}
+
+.notice--amber {
+  background: var(--tint-amber);
+  color: #7a4f00;
+}
+
+.composer-dock {
+  flex-shrink: 0;
+  padding: 0.6rem max(1.25rem, calc(50% - 25rem)) 0.9rem;
+}
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  padding: 0.35rem 0.35rem 0.35rem 1.1rem;
+  border: 1px solid #dde2ea;
+  border-radius: 26px;
+  background: #fff;
+}
+
+.composer:focus-within {
+  border-color: var(--navy);
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.14);
+}
+
+.composer textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 2.5rem;
+  max-height: 140px;
+  padding: 0.6rem 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  resize: none;
+  font: inherit;
+  font-size: 0.92rem;
+  line-height: 1.35;
+  color: var(--ink);
+  box-sizing: border-box;
+}
+
+.composer textarea:disabled {
+  color: var(--muted);
+}
+
+.composer__send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: none;
+  border-radius: 50%;
+  background: var(--navy);
+  color: #fff;
+  cursor: pointer;
+}
+
+.composer__send:hover:not(:disabled) {
+  background: var(--navy-hover);
+}
+
+.composer__send:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.composer-hint {
+  margin: 0.35rem 0 0;
+  text-align: center;
+  font-size: 0.7rem;
+  color: #8e8e93;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 1100px) {
+  .help-grid {
+    grid-template-columns: minmax(0, 1fr) 19rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .help-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'assistant' 'faq';
   }
 
-  .ai-sidebar {
+  .assistant-card {
+    position: static;
+  }
+
+  .help-hero__art {
+    display: none;
+  }
+
+  .chat-shell,
+  .chat-shell.has-list {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .chat-main {
+    flex: 1;
+  }
+
+  .chat-list {
+    display: none;
     border-right: none;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    border-bottom: 1px solid var(--line);
   }
 
-  .ai-recent-list {
-    max-height: 8rem;
+  .chat-list.is-open {
+    display: flex;
+  }
+
+  .chat-list__items {
+    max-height: 13rem;
+  }
+
+  .chat-head__convs {
+    display: inline-flex;
   }
 }
 
-/* Phone (stacked app nav, see AppShellView): the page scrolls and the conversation keeps a usable height. */
+/* Phone (stacked app nav, see AppShellView): the page scrolls; the chat keeps a usable height. */
 @media (max-width: 720px) {
+  .app-view {
+    padding: 1rem 1rem 1.5rem;
+  }
+
   .app-view--ai {
     height: auto;
     max-height: none;
     overflow: visible;
   }
 
-  .finance-page {
+  .support-page,
+  .help {
     flex: none;
+    overflow: visible;
   }
 
-  .ai-shell {
+  .help-hero {
+    padding: 1.25rem 1.1rem;
+  }
+
+  .help-hero__title {
+    font-size: 1.35rem;
+  }
+
+  .assistant-card {
+    padding: 1.1rem;
+  }
+
+  .faq-card__a {
+    padding-left: 1rem;
+  }
+
+  .chat-shell {
     flex: none;
-    grid-template-rows: auto minmax(30rem, 75vh);
+    height: calc(100dvh - 2rem);
+    min-height: 32rem;
+  }
+
+  .chat-head {
+    gap: 0.55rem;
+    padding: 0.7rem 0.8rem;
+  }
+
+  .chat-head__back {
+    display: inline-flex;
+  }
+
+  .chat-head__faq {
+    display: none;
+  }
+
+  .chat-head .bot-avatar {
+    width: 2.1rem;
+    height: 2.1rem;
+    font-size: 0.85rem;
+  }
+
+  .chat-head__convs {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.75rem;
+  }
+
+  .chat-head__convs-text {
+    display: none;
+  }
+
+  .chat-head__convs-n {
+    display: inline;
+  }
+
+  .chat-head__status {
+    white-space: normal;
+  }
+
+  .banner {
+    margin: 0.6rem 0.8rem 0;
+  }
+
+  .thread {
+    padding: 1rem 0.8rem 0.5rem;
+  }
+
+  .msg {
+    max-width: 92%;
+  }
+
+  .composer-dock {
+    padding: 0.5rem 0.8rem 0.8rem;
+  }
+
+  .composer-hint {
+    display: none;
   }
 }
 </style>

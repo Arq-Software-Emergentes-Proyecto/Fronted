@@ -73,37 +73,54 @@ export function resolveActor(config) {
   return { id: ownerId, role: SessionRoles.ADMIN, email: '', ownerAdminId: ownerId }
 }
 
+/** Demo assistant: canned reply + the building document it "cites" (like the real RAG reply). */
 function hardcodedAiReply(userText, locale = 'es') {
   const text = String(userText ?? '').toLowerCase()
   const es = !String(locale).toLowerCase().startsWith('en')
+  const rules = es ? 'Reglamento interno.pdf' : 'Internal rules.pdf'
   if (shouldEscalateToAdmin(userText)) {
-    return es
-      ? 'Listo, derivé tu consulta a administración. Te responderán por este mismo chat.'
-      : 'Done, I forwarded your request to management. They will reply in this same chat.'
+    return {
+      body: es
+        ? 'Listo, derivé tu consulta a administración. Te responderán por este mismo chat.'
+        : 'Done, I forwarded your request to management. They will reply in this same chat.',
+    }
   }
   if (/admin|administraci|human|persona|hablar/.test(text)) {
-    return es
-      ? 'Puedo ayudarte con eso. Si prefieres hablar con administración, escribe “quiero hablar con un administrador” y te conectamos.'
-      : 'I can help with that. If you prefer a human from management, say “I want to talk to an admin” and we will connect you.'
+    return {
+      body: es
+        ? 'Puedo ayudarte con eso. Si prefieres hablar con administración, escribe “quiero hablar con un administrador” y te conectamos.'
+        : 'I can help with that. If you prefer a human from management, say “I want to talk to an admin” and we will connect you.',
+    }
   }
   if (/pago|recibo|cuota|deuda|bill|payment|fee/.test(text)) {
-    return es
-      ? 'Tus recibos y pagos están en Finanzas. Los pendientes aparecen con estado “Por pagar”. Si un cargo no cuadra, avísame el mes y el monto.'
-      : 'Your bills and payments are under Finance. Pending ones show as unpaid. If a charge looks wrong, tell me the month and amount.'
+    return {
+      body: es
+        ? 'La cuota de mantenimiento vence el día 5 de cada mes. Tus recibos están en Finanzas: los pendientes aparecen como “Por pagar” y puedes pagarlos con tarjeta o Mercado Pago. Si un cargo no cuadra, avísame el mes y el monto.'
+        : 'The maintenance fee is due on the 5th of each month. Your bills are under Finance: pending ones show as unpaid and you can pay them by card or Mercado Pago. If a charge looks wrong, tell me the month and amount.',
+      citedSource: rules,
+    }
   }
-  if (/reserva|espacio|piscina|guest|invitad|qr/.test(text)) {
-    return es
-      ? 'Para reservar un espacio común ve a Servicios, elige el espacio, la fecha y el horario. Luego, en Generación, agrega a tus invitados (máx. 5) y comparte el enlace o el QR.'
-      : 'To book a common space go to Services and pick the space, date and time. Then, under Generation, add your guests (max 5) and share the link or QR code.'
+  if (/reserva|espacio|piscina|guest|invitad|qr|book|pool/.test(text)) {
+    return {
+      body: es
+        ? 'La piscina abre de 7:00 a 21:00 y cada reserva admite hasta 5 invitados. Reserva en Servicios eligiendo espacio, fecha y horario; luego, en Generación, agrega a tus invitados y comparte el enlace o el QR.'
+        : 'The pool is open 7:00–21:00 and each booking allows up to 5 guests. Book under Services by picking the space, date and time; then, under Generation, add your guests and share the link or QR code.',
+      citedSource: rules,
+    }
   }
-  if (/incidencia|incidente|fuga|ascensor|incident/.test(text)) {
-    return es
-      ? 'Puedes reportar una incidencia en la sección Incidencias. Describe el problema y, si sabes, el área del edificio.'
-      : 'You can report an issue under Incidents. Describe the problem and the area of the building if you know it.'
+  if (/incidencia|incidente|fuga|ascensor|incident|leak/.test(text)) {
+    return {
+      body: es
+        ? 'Repórtala en la sección Incidencias con una foto y el área del edificio. Según el acuerdo de junta, las fugas de agua se atienden con prioridad dentro de 24 horas.'
+        : 'Report it under Incidents with a photo and the area of the building. Per the board agreement, water leaks are handled as a priority within 24 hours.',
+      citedSource: es ? 'Acta de junta – agosto 2026.pdf' : 'Board minutes – August 2026.pdf',
+    }
   }
-  return es
-    ? 'Soy el asistente demo de BuildingFlex. Puedo orientarte sobre pagos, reservas, incidencias y contacto con administración. ¿En qué te ayudo?'
-    : 'I am the BuildingFlex demo assistant. I can help with payments, reservations, incidents, and reaching management. How can I help?'
+  return {
+    body: es
+      ? 'Soy el asistente demo de BuildingFex. Puedo orientarte sobre pagos, reservas, incidencias y contacto con administración. ¿En qué te ayudo?'
+      : 'I am the BuildingFex demo assistant. I can help with payments, reservations, incidents, and reaching management. How can I help?',
+  }
 }
 
 function shouldEscalateToAdmin(userText) {
@@ -818,15 +835,22 @@ function handleV1(config, method, parts) {
       let title = chat.title || chat.topic
 
       if (chat.kind === 'ai') {
+        const answer = hardcodedAiReply(text, body.locale)
         const reply = {
           id: `msg-${Date.now() + 1}`,
           role: 'ai',
           authorRole: 'assistant',
           authorName: 'Asistente BuildingFlex',
-          body: hardcodedAiReply(text, body.locale),
+          body: answer.body,
+          ...(answer.citedSource ? { citedSource: answer.citedSource } : {}),
           createdAt: now(),
         }
         messages.push(reply)
+
+        if (!chat.titleSummarized && messages.filter((m) => m.authorRole === 'resident' || m.role === 'user').length === 1) {
+          topic = text.slice(0, 48)
+          title = topic
+        }
 
         if (!escalatedChatId && shouldEscalateToAdmin(text)) {
           const adminChat = insertRow('supportChats', {
@@ -868,10 +892,6 @@ function handleV1(config, method, parts) {
           linkedChatId = adminChat.id
         }
 
-        if (!chat.titleSummarized && messages.filter((m) => m.authorRole === 'resident' || m.role === 'user').length === 1) {
-          topic = text.slice(0, 48)
-          title = topic
-        }
       }
 
       // Estados (Resident Care): admin responde → answered; residente escribe → open; IA derivada → derived.
@@ -1281,6 +1301,10 @@ export async function localMockAdapter(config) {
   const parts = pathParts(config)
 
   try {
+    // Demo realism: the assistant takes a moment to answer (shows the typing indicator).
+    if (method === 'POST' && /\/support\/chats\/[^/]+\/messages$/.test(String(config.url ?? ''))) {
+      await new Promise((resolve) => setTimeout(resolve, 900))
+    }
     const operation = await handleOperations(config, method, parts)
     if (operation) return operation
 
