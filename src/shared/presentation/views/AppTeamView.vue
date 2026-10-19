@@ -1235,6 +1235,18 @@ onMounted(loadWorkers)
   .tm-card {
     padding: 1rem 0.85rem;
   }
+  .tm-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.3rem;
+  }
+  .tm-tab {
+    justify-content: center;
+    gap: 0.3rem;
+    padding: 0.45rem 0.4rem;
+    font-size: 0.78rem;
+    min-width: 0;
+  }
   .tm-workers {
     grid-template-columns: minmax(0, 1fr);
   }
