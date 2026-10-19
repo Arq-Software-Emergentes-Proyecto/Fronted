@@ -9,6 +9,8 @@ import router from '@/shared/presentation/router'
 import '@/shared/presentation/assets/main.css'
 import 'primeicons/primeicons.css'
 import '@/shared/presentation/assets/bf-feedback.css'
+import '@/shared/presentation/assets/bf-segmented.css'
+import { vBfSeg } from '@/shared/presentation/directives/segmented.js'
 import { syncDocumentLocale } from '@/shared/application/syncDocumentLocale.js'
 import { storeLocale } from '@/shared/infrastructure/i18n/localePreference.js'
 import { startFirebaseAnalytics } from '@/iam/infrastructure/firebaseApp.js'
@@ -29,6 +31,7 @@ app.use(PrimeVue, {
 })
 app.use(ToastService)
 app.use(ConfirmationService)
+app.directive('bf-seg', vBfSeg)
 
 hydratePreviewMockFromBrowser().finally(() => {
   app.mount('#app')

@@ -240,7 +240,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <div class="tm-filters" role="group" :aria-label="t('teamMgmt.tasks.filterAria')">
+    <div class="tm-filters" v-bf-seg role="group" :aria-label="t('teamMgmt.tasks.filterAria')">
       <button
         v-for="option in statusFilterOptions"
         :key="option.value ?? 'all'"

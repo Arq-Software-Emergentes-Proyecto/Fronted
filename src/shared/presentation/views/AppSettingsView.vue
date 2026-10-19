@@ -805,7 +805,7 @@ watch(admissionRuleNotice, (msg) => {
 
     <div class="st-layout">
       <nav class="st-nav" :aria-label="t('app.settingsSectionsNav')">
-        <div class="st-nav__list" role="tablist" aria-orientation="vertical" :aria-label="t('app.settingsSectionsNav')">
+        <div class="st-nav__list" v-bf-seg role="tablist" aria-orientation="vertical" :aria-label="t('app.settingsSectionsNav')">
           <button
             v-for="(tab, index) in settingsTabs"
             :id="`settings-tab-${tab.id}`"
@@ -1483,7 +1483,7 @@ watch(admissionRuleNotice, (msg) => {
           </div>
           <div class="st-group">
             <h3 id="settings-lang-label" class="st-group__title">{{ t('app.settingsPrefsLanguage') }}</h3>
-            <div class="st-lang" role="radiogroup" aria-labelledby="settings-lang-label">
+            <div class="st-lang" v-bf-seg role="radiogroup" aria-labelledby="settings-lang-label">
               <button
                 v-for="option in languageOptions"
                 :id="`settings-lang-${option.code}`"
@@ -1877,6 +1877,9 @@ watch(admissionRuleNotice, (msg) => {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+  padding: 4px;
+  border-radius: 20px;
+  background: rgba(15, 23, 42, 0.06);
 }
 
 .st-nav__item {
@@ -1888,12 +1891,13 @@ watch(admissionRuleNotice, (msg) => {
   border: none;
   border-radius: 999px;
   background: transparent;
-  color: #334155;
+  color: #64748b;
   font: inherit;
   font-size: 0.85rem;
   font-weight: 600;
   text-align: left;
   cursor: pointer;
+  transition: color 0.28s ease;
 }
 
 .st-nav__item .pi {
@@ -1904,16 +1908,16 @@ watch(admissionRuleNotice, (msg) => {
 }
 
 .st-nav__item:hover:not(.is-active) {
-  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .st-nav__item.is-active {
-  background: #1e3a8a;
-  color: #fff;
+  background: transparent;
+  color: #0f172a;
 }
 
 .st-nav__item.is-active .pi {
-  color: #fff;
+  color: #1e3a8a;
 }
 
 .st-content {
@@ -2396,7 +2400,10 @@ watch(admissionRuleNotice, (msg) => {
 .st-lang {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 20px;
+  background: rgba(15, 23, 42, 0.06);
 }
 
 .st-lang__option {
@@ -2405,8 +2412,8 @@ watch(admissionRuleNotice, (msg) => {
   gap: 0.75rem;
   padding: 0.8rem 0.95rem;
   border-radius: 16px;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  background: #fff;
+  border: 1px solid transparent;
+  background: transparent;
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -2414,12 +2421,12 @@ watch(admissionRuleNotice, (msg) => {
 }
 
 .st-lang__option:hover:not(.is-active) {
-  background: #f8fafc;
+  background: rgba(255, 255, 255, 0.45);
 }
 
 .st-lang__option.is-active {
-  border-color: #1e3a8a;
-  background: #e8eefc;
+  border-color: transparent;
+  background: transparent;
 }
 
 .st-lang__code {
@@ -2514,12 +2521,7 @@ watch(admissionRuleNotice, (msg) => {
   .st-nav__item {
     width: auto;
     padding: 0.45rem 0.9rem;
-    border: 1px solid rgba(15, 23, 42, 0.1);
-    background: #fff;
     font-size: 0.8rem;
-  }
-  .st-nav__item.is-active {
-    border-color: #1e3a8a;
   }
 }
 

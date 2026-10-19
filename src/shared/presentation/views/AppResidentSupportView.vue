@@ -511,7 +511,7 @@ function onAiSuggestion(kind) {
               </button>
             </div>
 
-            <div class="topic-chips" role="group" :aria-label="t('supportResident.topicsAria')">
+            <div class="topic-chips" v-bf-seg role="group" :aria-label="t('supportResident.topicsAria')">
               <button
                 v-for="topic in FAQ_TOPICS"
                 :key="topic.id"
@@ -1252,8 +1252,14 @@ function onAiSuggestion(kind) {
 .topic-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.45rem;
+  gap: 2px;
   margin-top: 0.85rem;
+  padding: 4px;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
+  border-radius: 20px;
+  background: rgba(15, 23, 42, 0.06);
 }
 
 .topic-chip {
@@ -1261,10 +1267,11 @@ function onAiSuggestion(kind) {
   align-items: center;
   gap: 0.4rem;
   padding: 0.45rem 0.9rem;
-  border: 1px solid rgba(30, 58, 138, 0.14);
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: #fff;
-  color: var(--ink);
+  background: transparent;
+  color: #64748b;
+  transition: color 0.28s ease;
   font: inherit;
   font-size: 0.8125rem;
   font-weight: 600;
@@ -1277,17 +1284,17 @@ function onAiSuggestion(kind) {
 }
 
 .topic-chip:hover {
-  border-color: rgba(30, 58, 138, 0.35);
+  color: #0f172a;
 }
 
 .topic-chip.is-active {
-  background: var(--navy);
-  border-color: var(--navy);
-  color: #fff;
+  background: transparent;
+  border-color: transparent;
+  color: #0f172a;
 }
 
 .topic-chip.is-active .pi {
-  color: #fff;
+  color: var(--navy);
 }
 
 .help-grid {

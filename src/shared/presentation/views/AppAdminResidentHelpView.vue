@@ -426,7 +426,7 @@ async function sendReply() {
       <div class="help-shell" :class="{ 'has-selection': !!selected }">
         <aside class="inbox" :aria-label="t('supportAdmin.inboxHeading')">
           <div class="inbox__tools">
-            <div class="filter-pills" role="group" :aria-label="t('supportAdmin.filterAria')">
+            <div class="filter-pills" v-bf-seg role="group" :aria-label="t('supportAdmin.filterAria')">
               <button
                 v-for="opt in filterOptions"
                 :key="opt.id"
@@ -981,7 +981,13 @@ async function sendReply() {
   min-width: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 4px;
+  gap: 2px;
+  border-radius: 999px;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .filter-pill {
@@ -989,18 +995,19 @@ async function sendReply() {
   align-items: center;
   gap: 0.35rem;
   padding: 0.38rem 0.7rem;
-  border: 1px solid rgba(15, 23, 42, 0.1);
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: #fff;
-  color: var(--ink);
+  background: transparent;
+  color: #64748b;
   font: inherit;
   font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
+  transition: color 0.28s ease;
 }
 
 .filter-pill:hover {
-  border-color: rgba(30, 58, 138, 0.3);
+  color: #0f172a;
 }
 
 .filter-pill__count {
@@ -1025,14 +1032,14 @@ async function sendReply() {
 }
 
 .filter-pill.is-active {
-  background: var(--navy);
-  border-color: var(--navy);
-  color: #fff;
+  background: transparent;
+  border-color: transparent;
+  color: #0f172a;
 }
 
 .filter-pill.is-active .filter-pill__count {
-  background: #fff;
-  color: var(--navy);
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .inbox__search-row {

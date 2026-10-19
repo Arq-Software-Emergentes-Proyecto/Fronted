@@ -282,7 +282,7 @@ onMounted(fetchAnnouncements)
 
       <section class="inf-card">
         <div class="inf-toolbar">
-          <div class="inf-filters" role="group" :aria-label="t('information.statusFilterAria')">
+          <div class="inf-filters" v-bf-seg role="group" :aria-label="t('information.statusFilterAria')">
             <button
               v-for="filter in statusFilters"
               :key="filter.id"
@@ -296,7 +296,7 @@ onMounted(fetchAnnouncements)
               <span class="inf-filter__count">{{ filter.count }}</span>
             </button>
           </div>
-          <div class="inf-priority" role="group" :aria-label="t('information.priorityFilterAria')">
+          <div class="inf-priority" v-bf-seg role="group" :aria-label="t('information.priorityFilterAria')">
             <span class="inf-priority__label" aria-hidden="true">{{ t('information.priorityFilterLabel') }}</span>
             <button
               v-for="filter in priorityFilters"
@@ -646,8 +646,14 @@ onMounted(fetchAnnouncements)
 
 .inf-filters {
   display: flex;
-  gap: 0.4rem;
   flex-wrap: wrap;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 4px;
+  gap: 2px;
+  border-radius: 999px;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .inf-filter {
@@ -656,18 +662,19 @@ onMounted(fetchAnnouncements)
   gap: 0.45rem;
   padding: 0.4rem 0.5rem 0.4rem 0.85rem;
   border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  background: #fff;
-  color: #334155;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #64748b;
   font: inherit;
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: color 0.28s ease;
 }
 
 .inf-filter:hover:not(.is-active) {
-  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .inf-filter__count {
@@ -682,14 +689,14 @@ onMounted(fetchAnnouncements)
 }
 
 .inf-filter.is-active {
-  background: #1e3a8a;
-  border-color: #1e3a8a;
-  color: #fff;
+  background: transparent;
+  border-color: transparent;
+  color: #0f172a;
 }
 
 .inf-filter.is-active .inf-filter__count {
-  background: #fff;
-  color: #1e3a8a;
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .inf-filter--active:not(.is-active) .inf-filter__count {
@@ -710,7 +717,7 @@ onMounted(fetchAnnouncements)
   flex-wrap: wrap;
   padding: 0.2rem;
   border-radius: 999px;
-  background: #f1f5f9;
+  background: rgba(15, 23, 42, 0.06);
 }
 
 .inf-priority__label {
@@ -741,9 +748,8 @@ onMounted(fetchAnnouncements)
 }
 
 .inf-seg.is-active {
-  background: #fff;
+  background: transparent;
   color: #0f172a;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
 .inf-seg__dot {
@@ -858,16 +864,7 @@ onMounted(fetchAnnouncements)
     padding-inline: 0.5rem;
   }
   .inf-priority {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    border-radius: 14px;
-  }
-  .inf-priority__label {
-    grid-column: 1 / -1;
-    padding: 0.2rem 0.5rem 0.1rem;
-  }
-  .inf-seg {
-    justify-content: center;
+    max-width: 100%;
   }
 }
 

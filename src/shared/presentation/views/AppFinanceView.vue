@@ -864,7 +864,7 @@ const getStatusBadgeClass = (status) => {
       </div>
 
       <div class="fin-toolbar">
-        <div class="fin-filters" role="group" :aria-label="t('financeAdmin.filterAria')">
+        <div class="fin-filters" v-bf-seg role="group" :aria-label="t('financeAdmin.filterAria')">
           <button
             v-for="option in filterOptions"
             :key="option.key"
@@ -1747,8 +1747,14 @@ const getStatusBadgeClass = (status) => {
 
 .fin-filters {
   display: flex;
-  gap: 0.4rem;
   flex-wrap: wrap;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 4px;
+  gap: 2px;
+  border-radius: 999px;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .fin-filter {
@@ -1757,18 +1763,19 @@ const getStatusBadgeClass = (status) => {
   gap: 0.45rem;
   padding: 0.4rem 0.5rem 0.4rem 0.85rem;
   border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  background: #fff;
-  color: #334155;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #64748b;
   font: inherit;
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: color 0.28s ease;
 }
 
 .fin-filter:hover:not(.is-active) {
-  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .fin-filter__count {
@@ -1783,14 +1790,14 @@ const getStatusBadgeClass = (status) => {
 }
 
 .fin-filter.is-active {
-  background: #1e3a8a;
-  border-color: #1e3a8a;
-  color: #fff;
+  background: transparent;
+  border-color: transparent;
+  color: #0f172a;
 }
 
 .fin-filter.is-active .fin-filter__count {
-  background: #fff;
-  color: #1e3a8a;
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .fin-filter--overdue:not(.is-active) .fin-filter__count {

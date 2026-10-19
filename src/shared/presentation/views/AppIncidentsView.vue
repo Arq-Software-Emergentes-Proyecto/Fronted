@@ -640,7 +640,7 @@ onBeforeUnmount(() => stopRealtime())
         </div>
 
         <div class="inc-toolbar">
-          <div class="inc-filters" role="group" :aria-label="t('incidentFlow.filterAria')">
+          <div class="inc-filters" v-bf-seg role="group" :aria-label="t('incidentFlow.filterAria')">
             <button
               v-for="filter in filters"
               :key="filter.id"
@@ -965,7 +965,7 @@ onBeforeUnmount(() => stopRealtime())
 
         <section class="incd-block" aria-labelledby="incd-status-title">
           <h3 id="incd-status-title" class="incd-block__title">{{ t('app.incidentStatus') }}</h3>
-          <div class="incd-segment" role="group" :aria-labelledby="'incd-status-title'">
+          <div class="incd-segment" v-bf-seg role="group" :aria-labelledby="'incd-status-title'">
             <button
               v-for="opt in statusOptions"
               :key="opt.value"
@@ -1371,8 +1371,14 @@ onBeforeUnmount(() => stopRealtime())
 
 .inc-filters {
   display: flex;
-  gap: 0.4rem;
   flex-wrap: wrap;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 4px;
+  gap: 2px;
+  border-radius: 999px;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .inc-filter {
@@ -1381,18 +1387,19 @@ onBeforeUnmount(() => stopRealtime())
   gap: 0.45rem;
   padding: 0.4rem 0.5rem 0.4rem 0.85rem;
   border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  background: #fff;
-  color: #334155;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #64748b;
   font: inherit;
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: color 0.28s ease;
 }
 
 .inc-filter:hover:not(.is-active) {
-  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .inc-filter__count {
@@ -1411,14 +1418,14 @@ onBeforeUnmount(() => stopRealtime())
 .inc-filter--resolved:not(.is-active) .inc-filter__count { background: #e3f4e8; color: #15803d; }
 
 .inc-filter.is-active {
-  background: #1e3a8a;
-  border-color: #1e3a8a;
-  color: #fff;
+  background: transparent;
+  border-color: transparent;
+  color: #0f172a;
 }
 
 .inc-filter.is-active .inc-filter__count {
-  background: #fff;
-  color: #1e3a8a;
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .inc-search {

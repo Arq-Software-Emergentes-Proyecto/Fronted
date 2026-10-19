@@ -663,7 +663,7 @@ watch(loginEmail, () => {
 
       <main id="main-content" class="auth-main" role="main" tabindex="-1">
         <div class="auth-shell" :class="{ 'auth-shell--wide': (isRegister && !onboardingStep) || completeProfileMode }">
-          <nav v-if="showRoleTabs" class="auth-roles" :aria-label="t('auth.roleTabsAria')" role="tablist">
+          <nav v-if="showRoleTabs" v-bf-seg="'.auth-role--active'" class="auth-roles" :aria-label="t('auth.roleTabsAria')" role="tablist">
             <RouterLink
               class="auth-role"
               role="tab"
@@ -1432,7 +1432,7 @@ watch(loginEmail, () => {
   gap: 0.25rem;
   padding: 0.25rem;
   border-radius: 999px;
-  background: #e8eefc;
+  background: rgba(15, 23, 42, 0.06);
 }
 
 .auth-role {
@@ -1443,11 +1443,11 @@ watch(loginEmail, () => {
   min-height: 2.5rem;
   padding: 0.4rem 0.75rem;
   border-radius: 999px;
-  color: var(--auth-navy);
+  color: #64748b;
   font-size: 0.875rem;
   font-weight: 600;
   text-decoration: none;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: color 0.28s ease;
 }
 
 .auth-role .pi {
@@ -1455,12 +1455,11 @@ watch(loginEmail, () => {
 }
 
 .auth-role:hover:not(.auth-role--active) {
-  background: rgba(255, 255, 255, 0.55);
+  color: #0f172a;
 }
 
 .auth-role--active {
-  background: var(--auth-navy);
-  color: #fff;
+  color: #0f172a;
 }
 
 .auth-role:focus-visible,

@@ -129,7 +129,7 @@ defineExpose({ submit })
 
       <fieldset class="annf__group">
         <legend>{{ t('information.priorityLabel') }}</legend>
-        <div class="annf__chips">
+        <div v-bf-seg class="annf__chips">
           <button
             v-for="item in priorities"
             :key="item.id"
@@ -148,7 +148,7 @@ defineExpose({ submit })
 
       <fieldset class="annf__group">
         <legend>{{ t('information.durationLabel') }}</legend>
-        <div class="annf__chips">
+        <div v-bf-seg class="annf__chips">
           <button
             v-for="days in durations"
             :key="days"
@@ -319,7 +319,13 @@ defineExpose({ submit })
 .annf__chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 2px;
+  padding: 4px;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
+  border-radius: 20px;
+  background: rgba(15, 23, 42, 0.06);
 }
 
 .annf-chip {
@@ -328,10 +334,11 @@ defineExpose({ submit })
   gap: 0.4rem;
   min-height: 2.2rem;
   padding: 0.4rem 0.8rem;
-  border: 1px solid rgba(15, 23, 42, 0.12);
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: #fff;
-  color: #334155;
+  background: transparent;
+  color: #64748b;
+  transition: color 0.28s ease;
   font: inherit;
   font-size: 0.8rem;
   font-weight: 600;
@@ -344,30 +351,24 @@ defineExpose({ submit })
 }
 
 .annf-chip:hover:not(.is-active):not(:disabled) {
-  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .annf-chip.is-active {
-  background: #1e3a8a;
-  border-color: #1e3a8a;
-  color: #fff;
+  background: transparent;
+  border-color: transparent;
+  color: #0f172a;
 }
 
 .annf-chip--urgent.is-active {
-  background: #fde4e4;
-  border-color: #b42318;
   color: #b42318;
 }
 
 .annf-chip--important.is-active {
-  background: #fdf3dc;
-  border-color: #b45309;
   color: #92400e;
 }
 
 .annf-chip--normal.is-active {
-  background: #e8eefc;
-  border-color: #1e3a8a;
   color: #1e3a8a;
 }
 

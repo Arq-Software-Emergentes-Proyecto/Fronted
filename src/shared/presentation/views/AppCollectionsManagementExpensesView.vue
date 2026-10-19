@@ -872,7 +872,7 @@ onMounted(async () => {
 
       <!-- 3. Records: expenses · shared utilities · fixed payouts -->
       <section class="cme-card">
-        <div class="cme-tabs" role="tablist" :aria-label="t('collectionsMgmt.tabsLabel')">
+        <div class="cme-tabs" v-bf-seg role="tablist" :aria-label="t('collectionsMgmt.tabsLabel')">
           <button
             v-for="tab in tabs"
             :id="`cme-tab-${tab.key}`"
@@ -1988,9 +1988,15 @@ onMounted(async () => {
 
 .cme-tabs {
   display: flex;
-  gap: 0.4rem;
   flex-wrap: wrap;
   margin-bottom: 0.9rem;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 4px;
+  gap: 2px;
+  border-radius: 999px;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .cme-tab {
@@ -1999,18 +2005,19 @@ onMounted(async () => {
   gap: 0.45rem;
   padding: 0.45rem 0.5rem 0.45rem 0.9rem;
   border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  background: #fff;
-  color: #334155;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #64748b;
   font: inherit;
   font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: color 0.28s ease;
 }
 
 .cme-tab:hover:not(.is-active) {
-  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .cme-tab__count {
@@ -2025,14 +2032,14 @@ onMounted(async () => {
 }
 
 .cme-tab.is-active {
-  background: #1e3a8a;
-  border-color: #1e3a8a;
-  color: #fff;
+  background: transparent;
+  border-color: transparent;
+  color: #0f172a;
 }
 
 .cme-tab.is-active .cme-tab__count {
-  background: #fff;
-  color: #1e3a8a;
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .cme-panel {

@@ -1020,7 +1020,7 @@ onMounted(loadList)
                 autocomplete="off"
               />
             </label>
-            <div class="imp-filters" role="group" :aria-label="t('importView.filterStatusLabel')">
+            <div class="imp-filters" v-bf-seg role="group" :aria-label="t('importView.filterStatusLabel')">
               <button
                 v-for="opt in statusFilterOptions"
                 :key="opt.key"
@@ -1034,7 +1034,7 @@ onMounted(loadList)
                 <span class="imp-filter__count">{{ opt.count }}</span>
               </button>
             </div>
-            <div class="imp-filters imp-filters--type" role="group" :aria-label="t('importView.filterTypeLabel')">
+            <div class="imp-filters imp-filters--type" v-bf-seg role="group" :aria-label="t('importView.filterTypeLabel')">
               <button
                 v-for="opt in typeFilterOptions"
                 :key="opt.key"
@@ -2067,7 +2067,13 @@ onMounted(loadList)
 .imp-filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 4px;
+  gap: 2px;
+  border-radius: 999px;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .imp-filter {
@@ -2076,14 +2082,15 @@ onMounted(loadList)
   gap: 0.4rem;
   padding: 0.4rem 0.45rem 0.4rem 0.8rem;
   border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  background: #fff;
-  color: #334155;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #64748b;
   font: inherit;
   font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: color 0.28s ease;
 }
 
 .imp-filter--soft {
@@ -2091,7 +2098,7 @@ onMounted(loadList)
 }
 
 .imp-filter:hover:not(.is-active) {
-  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .imp-filter__count {
@@ -2106,14 +2113,14 @@ onMounted(loadList)
 }
 
 .imp-filter.is-active {
-  background: #1e3a8a;
-  border-color: #1e3a8a;
-  color: #fff;
+  background: transparent;
+  border-color: transparent;
+  color: #0f172a;
 }
 
 .imp-filter.is-active .imp-filter__count {
-  background: #fff;
-  color: #1e3a8a;
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .imp-list {

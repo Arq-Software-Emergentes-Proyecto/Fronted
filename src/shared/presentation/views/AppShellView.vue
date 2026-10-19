@@ -752,7 +752,8 @@ function toggleAppLocale() {
   z-index: 0;
   height: var(--nav-item-height);
   border-radius: 12px;
-  background: #e8eefc;
+  background: #ffffff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.07);
   pointer-events: none;
   opacity: 1;
   transform: translateY(calc((var(--nav-item-height) + var(--nav-gap)) * var(--nav-pill-index)));
@@ -800,13 +801,14 @@ function toggleAppLocale() {
 }
 
 .app-shell__nav-link--active {
-  color: #1e3a8a;
+  color: var(--shell-text);
   font-weight: 700;
 }
 
 /* Lista simple (sin pill deslizante): el activo lleva su propio fondo. */
 .app-shell__nav-track--simple .app-shell__nav-link--active {
-  background: #e8eefc;
+  background: #ffffff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.07);
 }
 
 .app-shell__nav-link-icon {
@@ -819,7 +821,7 @@ function toggleAppLocale() {
 }
 
 .app-shell__nav-link--active .app-shell__nav-link-icon {
-  color: #1e3a8a;
+  color: var(--shell-text);
 }
 
 /* Tarjeta de usuario (pie del menú) */
@@ -896,10 +898,15 @@ function toggleAppLocale() {
   transition: color 0.15s ease, background 0.15s ease;
 }
 
-.app-shell__user-action:hover,
+.app-shell__user-action:hover {
+  color: var(--shell-text);
+  background: rgba(0, 0, 0, 0.06);
+}
+
 .app-shell__user-action--active {
-  color: #1e3a8a;
-  background: #e8eefc;
+  color: var(--shell-text);
+  background: #ffffff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.07);
 }
 
 .app-shell__user-action--danger {
