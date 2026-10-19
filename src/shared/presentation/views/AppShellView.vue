@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import Toast from 'primevue/toast'
 import { useToast } from 'primevue/usetoast'
 import SkipLink from '../components/SkipLink.vue'
+import BfConfirmDialog from '../components/BfConfirmDialog.vue'
 import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import { useSession } from '@/iam/application/sessionStore.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
@@ -174,12 +175,30 @@ onMounted(() => {
       summary: t('incidentFlow.newIncidentToast'),
       detail: [payload?.title, payload?.residentName].filter(Boolean).join(' · '),
       life: 6000,
+      bfAction: 'incidents',
     })
   })
   connectIncidentRealtime()
 })
 
 onBeforeUnmount(() => stopIncidentToasts())
+
+const toastIcons = {
+  success: 'pi pi-check',
+  info: 'pi pi-info-circle',
+  warn: 'pi pi-exclamation-triangle',
+  error: 'pi pi-exclamation-circle',
+}
+
+function toastIcon(message) {
+  if (message.bfAction === 'incidents') return 'pi pi-flag'
+  return toastIcons[message.severity] ?? toastIcons.info
+}
+
+function openIncidentsFromToast(message) {
+  toast.remove(message)
+  router.push({ name: AppRouteNames.APP_INCIDENTS })
+}
 
 watch(
   () => route.name,
@@ -206,7 +225,30 @@ function toggleAppLocale() {
 <template>
   <div class="app-shell" :class="{ 'app-shell--chat': lockChatPageScroll }">
     <SkipLink />
-    <Toast v-if="!isResident" group="incidents" position="top-right" />
+    <Toast
+      v-if="!isResident"
+      group="incidents"
+      position="top-right"
+      :close-button-props="{ 'aria-label': t('common.closeNotification') }"
+    >
+      <template #message="{ message }">
+        <span class="p-toast-message-icon" aria-hidden="true"><i :class="toastIcon(message)" /></span>
+        <div class="p-toast-message-text">
+          <span class="p-toast-summary">{{ message.summary }}</span>
+          <div v-if="message.detail" class="p-toast-detail">{{ message.detail }}</div>
+          <button
+            v-if="message.bfAction === 'incidents'"
+            type="button"
+            class="bf-toast-action"
+            @click.stop="openIncidentsFromToast(message)"
+          >
+            {{ t('incidentFlow.viewIncidentToast') }}
+            <i class="pi pi-arrow-right" aria-hidden="true" />
+          </button>
+        </div>
+      </template>
+    </Toast>
+    <BfConfirmDialog />
     <aside class="app-shell__sidebar">
       <header class="app-shell__top">
         <RouterLink 

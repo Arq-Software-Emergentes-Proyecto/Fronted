@@ -190,9 +190,11 @@ defineExpose({ reload: loadCatalog })
           <div class="plan-card__header">
             <h3 :id="`plan-${plan.id}-name`" class="plan-card__name">{{ plan.name }}</h3>
             <span v-if="isCurrent(plan)" class="plan-card__badge plan-card__badge--current">
-              {{ t('billing.plans.currentBadge') }}
+              <i class="pi pi-check-circle" aria-hidden="true" />
+              {{ t('billing.plans.currentPlanPill') }}
             </span>
             <span v-else-if="recommendedPlanId === plan.id" class="plan-card__badge plan-card__badge--recommended">
+              <i class="pi pi-star" aria-hidden="true" />
               {{ t('billing.plans.recommendedBadge') }}
             </span>
             <span v-else-if="plan.highlighted" class="plan-card__badge">
@@ -252,7 +254,7 @@ defineExpose({ reload: loadCatalog })
           <button
             type="button"
             class="plan-card__btn"
-            :class="plan.highlighted || recommendedPlanId === plan.id ? 'plan-card__btn--primary' : 'plan-card__btn--ghost'"
+            :class="!isCurrent(plan) && (plan.highlighted || recommendedPlanId === plan.id) ? 'plan-card__btn--primary' : 'plan-card__btn--ghost'"
             :disabled="isButtonDisabled(plan)"
             :aria-busy="busyPlanId === plan.id"
             @click="onSelect(plan)"
@@ -272,6 +274,7 @@ defineExpose({ reload: loadCatalog })
             aria-controls="bf-compare-table"
             @click="showComparison = !showComparison"
           >
+            <i class="pi" :class="showComparison ? 'pi-chevron-up' : 'pi-chevron-down'" aria-hidden="true" />
             {{ showComparison ? t('billing.compare.hide') : t('billing.compare.show') }}
           </button>
         </div>
@@ -289,7 +292,13 @@ defineExpose({ reload: loadCatalog })
                   scope="col"
                   :class="{ 'is-current': isCurrent(plan), 'is-recommended': recommendedPlanId === plan.id }"
                 >
-                  {{ plan.name }}
+                  <span class="bf-compare__plan">{{ plan.name }}</span>
+                  <span v-if="isCurrent(plan)" class="bf-compare__tag bf-compare__tag--current">
+                    {{ t('billing.plans.currentPlanPill') }}
+                  </span>
+                  <span v-else-if="recommendedPlanId === plan.id" class="bf-compare__tag bf-compare__tag--recommended">
+                    {{ t('billing.plans.recommendedBadge') }}
+                  </span>
                 </th>
               </tr>
             </thead>
@@ -298,7 +307,7 @@ defineExpose({ reload: loadCatalog })
                 <th scope="row">
                   {{ t('billing.compare.price') }}
                 </th>
-                <td v-for="plan in plans" :key="plan.id">{{ priceCell(plan) }}</td>
+                <td v-for="plan in plans" :key="plan.id" :class="{ 'is-current': isCurrent(plan) }">{{ priceCell(plan) }}</td>
               </tr>
               <tr>
                 <th scope="row">
@@ -311,7 +320,7 @@ defineExpose({ reload: loadCatalog })
                     :aria-label="t('billing.compare.departmentsHelp')"
                   ><i class="pi pi-question-circle" aria-hidden="true" /></span>
                 </th>
-                <td v-for="plan in plans" :key="plan.id">{{ rangeLabel(plan) }}</td>
+                <td v-for="plan in plans" :key="plan.id" :class="{ 'is-current': isCurrent(plan) }">{{ rangeLabel(plan) }}</td>
               </tr>
               <tr>
                 <th scope="row">
@@ -324,7 +333,7 @@ defineExpose({ reload: loadCatalog })
                     :aria-label="t('billing.compare.aiQueriesHelp')"
                   ><i class="pi pi-question-circle" aria-hidden="true" /></span>
                 </th>
-                <td v-for="plan in plans" :key="plan.id">
+                <td v-for="plan in plans" :key="plan.id" :class="{ 'is-current': isCurrent(plan) }">
                   {{ t('billing.compare.aiQueriesValue', { count: formatNumber(plan.monthlyAiQueries) }) }}
                 </td>
               </tr>
@@ -339,7 +348,7 @@ defineExpose({ reload: loadCatalog })
                     :aria-label="t('billing.compare.supportHelp')"
                   ><i class="pi pi-question-circle" aria-hidden="true" /></span>
                 </th>
-                <td v-for="plan in plans" :key="plan.id">{{ supportLabel(plan.support) }}</td>
+                <td v-for="plan in plans" :key="plan.id" :class="{ 'is-current': isCurrent(plan) }">{{ supportLabel(plan.support) }}</td>
               </tr>
               <tr class="bf-compare__section">
                 <th scope="rowgroup" :colspan="plans.length + 1">{{ t('billing.compare.modules') }}</th>
@@ -355,7 +364,7 @@ defineExpose({ reload: loadCatalog })
                     :aria-label="moduleHelp(key)"
                   ><i class="pi pi-question-circle" aria-hidden="true" /></span>
                 </th>
-                <td v-for="plan in plans" :key="plan.id" class="bf-compare__mark">
+                <td v-for="plan in plans" :key="plan.id" class="bf-compare__mark" :class="{ 'is-current': isCurrent(plan) }">
                   <i
                     v-if="plan.modules.includes(key)"
                     class="pi pi-check bf-compare__yes"
@@ -373,22 +382,37 @@ defineExpose({ reload: loadCatalog })
 </template>
 
 <style scoped>
+.bf-plans {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.bf-plans *,
+.bf-plans *::before,
+.bf-plans *::after {
+  box-sizing: border-box;
+}
+
 .bf-plans__state {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 0.6rem;
-  padding: 1rem 1.1rem;
+  padding: 0.85rem 1rem;
   border-radius: 14px;
-  background: rgba(0, 0, 0, 0.03);
-  font-size: 0.875rem;
-  color: var(--apple-text-secondary, #6e6e73);
+  background: #f8fafc;
+  font-size: 0.85rem;
+  color: #6e6e73;
 }
 
 .bf-plans__state--error {
-  background: #fff4f2;
+  background: #fde4e4;
+  color: #7f1d1d;
+}
+
+.bf-plans__state--error > .pi {
   color: #b42318;
-  border: 1px solid rgba(180, 35, 24, 0.2);
 }
 
 .bf-plans__retry {
@@ -396,98 +420,103 @@ defineExpose({ reload: loadCatalog })
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.45rem 0.9rem;
-  border-radius: 980px;
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
   border: none;
-  background: #b42318;
-  color: #fff;
-  font-weight: 600;
-  font-size: 0.8125rem;
+  background: #fff;
+  color: #b42318;
+  font: inherit;
+  font-weight: 650;
+  font-size: 0.78rem;
   cursor: pointer;
 }
 
+.bf-plans__retry:hover {
+  text-decoration: underline;
+}
+
 .bf-plans__currency-note {
-  margin: 0 0 0.85rem;
+  margin: 0 0 0.75rem;
   font-size: 0.75rem;
-  color: var(--apple-text-secondary, #6e6e73);
+  color: #6e6e73;
 }
 
 .plans-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(13.5rem, 1fr));
+  gap: 0.85rem;
   align-items: stretch;
 }
 
 .plan-card {
   display: flex;
   flex-direction: column;
-  padding: 1.35rem 1.25rem 1.25rem;
-  border-radius: 16px;
+  min-width: 0;
+  padding: 1.1rem 1.1rem 1.05rem;
+  border-radius: 18px;
   background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .plan-card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-  transform: translateY(-2px);
-}
-
-.plan-card--highlighted {
-  border-color: #0a84ff;
-  box-shadow: 0 0 0 1px #0a84ff, 0 4px 16px rgba(10, 132, 255, 0.12);
-}
-
-.plan-card--free {
-  border-color: rgba(52, 199, 89, 0.4);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
 }
 
 .plan-card--recommended {
-  border-color: #34c759;
-  box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.55), 0 4px 16px rgba(52, 199, 89, 0.12);
+  border-color: #15803d;
+  box-shadow: 0 0 0 1px #15803d;
 }
 
 .plan-card--selected {
-  box-shadow: 0 0 0 2px #0a84ff, 0 4px 16px rgba(10, 132, 255, 0.12);
+  border-color: #1e3a8a;
+  box-shadow: 0 0 0 1px #1e3a8a;
+  background: #fbfcff;
 }
 
 .plan-card__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.85rem;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.5rem;
+  margin-bottom: 0.75rem;
 }
 
 .plan-card__name {
   margin: 0;
+  font-family: var(--bf-font-heading, inherit);
   font-size: 1rem;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: var(--apple-text, #1d1d1f);
+  color: #0f172a;
 }
 
 .plan-card__badge {
-  display: inline-block;
-  padding: 0.2rem 0.6rem;
-  border-radius: 980px;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  background: #0a84ff;
-  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 650;
+  background: #fdf3dc;
+  color: #92400e;
   white-space: nowrap;
 }
 
+.plan-card__badge .pi {
+  font-size: 0.65rem;
+}
+
 .plan-card__badge--current {
-  background: rgba(10, 132, 255, 0.12);
-  color: #0060c0;
+  background: #1e3a8a;
+  color: #fff;
 }
 
 .plan-card__badge--recommended {
-  background: #248a3d;
+  background: #e3f4e8;
+  color: #166534;
 }
 
 .plan-card__price {
@@ -495,50 +524,53 @@ defineExpose({ reload: loadCatalog })
   align-items: baseline;
   flex-wrap: wrap;
   gap: 0.25rem;
-  margin-bottom: 0.4rem;
+  margin-bottom: 0.35rem;
 }
 
 .plan-card__amount {
-  font-size: 1.75rem;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.6rem;
   font-weight: 700;
   letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.plan-card--highlighted .plan-card__amount {
-  color: #0a84ff;
+  color: #0f172a;
 }
 
 .plan-card__period {
-  font-size: 0.8125rem;
-  color: var(--apple-text-secondary, #6e6e73);
+  font-size: 0.78rem;
+  color: #6e6e73;
 }
 
 .plan-card__range {
   margin: 0 0 0.2rem;
-  font-size: 0.8125rem;
+  font-size: 0.8rem;
   font-weight: 600;
-  color: var(--apple-text, #1d1d1f);
+  color: #0f172a;
 }
 
 .plan-card__billing {
-  margin: 0 0 1rem;
-  font-size: 0.75rem;
-  color: var(--apple-text-secondary, #6e6e73);
+  margin: 0 0 0.9rem;
+  font-size: 0.74rem;
+  color: #6e6e73;
   line-height: 1.45;
+}
+
+.plan-card__billing strong {
+  color: #1e3a8a;
+  font-weight: 650;
 }
 
 .plan-card__features {
   flex: 1;
   list-style: none;
-  margin: 0 0 1.25rem;
-  padding: 0;
+  margin: 0 0 1.05rem;
+  padding: 0.85rem 0 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.07);
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  font-size: 0.8125rem;
-  color: var(--apple-text, #1d1d1f);
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  color: #334155;
   line-height: 1.4;
 }
 
@@ -549,31 +581,33 @@ defineExpose({ reload: loadCatalog })
 }
 
 .plan-card__features .pi {
-  color: #34c759;
-  font-size: 0.75rem;
-  margin-top: 0.15rem;
+  color: #15803d;
+  font-size: 0.72rem;
+  margin-top: 0.18rem;
   flex-shrink: 0;
 }
 
 .plan-card__features .pi-sparkles,
 .plan-card__features .pi-headphones {
-  color: #0a84ff;
+  color: #1e3a8a;
 }
 
 .plan-card__features-base {
-  font-weight: 600;
-  color: var(--apple-text-secondary, #6e6e73);
+  font-weight: 650;
+  color: #6e6e73;
 }
 
 .plan-card__btn {
   width: 100%;
-  padding: 0.6rem 1rem;
-  border-radius: 980px;
-  font-size: 0.875rem;
+  min-height: 2.45rem;
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
-  border: none;
-  transition: background 0.15s ease, opacity 0.15s ease;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
   margin-top: auto;
 }
 
@@ -582,55 +616,85 @@ defineExpose({ reload: loadCatalog })
   cursor: not-allowed;
 }
 
+.plan-card__btn:focus-visible,
+.bf-compare__toggle:focus-visible,
+.bf-plans__retry:focus-visible {
+  outline: 2px solid #1e3a8a;
+  outline-offset: 2px;
+}
+
 .plan-card__btn--primary {
-  background: #0a84ff;
+  background: #1e3a8a;
+  border-color: #1e3a8a;
   color: #fff;
 }
 
 .plan-card__btn--primary:hover:not(:disabled) {
-  background: #0071e3;
+  background: #172554;
+  border-color: #172554;
 }
 
 .plan-card__btn--ghost {
-  background: rgba(0, 0, 0, 0.05);
-  color: var(--apple-text, #1d1d1f);
+  background: #fff;
+  color: #1e3a8a;
 }
 
 .plan-card__btn--ghost:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.09);
+  background: #e8eefc;
+  border-color: transparent;
 }
 
 .bf-compare {
-  margin-top: 1.75rem;
+  margin-top: 1.5rem;
+  min-width: 0;
 }
 
 .bf-compare__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
 }
 
 .bf-compare__title {
   margin: 0;
-  font-size: 1.0625rem;
-  font-weight: 600;
-  color: var(--apple-text, #1d1d1f);
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: #0f172a;
 }
 
 .bf-compare__toggle {
-  border: none;
-  background: none;
-  color: #0a84ff;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.1rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  color: #1e3a8a;
+  font: inherit;
   font-weight: 600;
-  font-size: 0.8125rem;
+  font-size: 0.78rem;
   cursor: pointer;
+}
+
+.bf-compare__toggle .pi {
+  font-size: 0.7rem;
+}
+
+.bf-compare__toggle:hover {
+  background: #e8eefc;
+  border-color: transparent;
 }
 
 .bf-compare__hint {
   margin: 0.25rem 0 0.75rem;
   font-size: 0.75rem;
-  color: var(--apple-text-secondary, #6e6e73);
+  color: #6e6e73;
 }
 
 /* US005: horizontal scroll on mobile instead of squeezing columns. */
@@ -638,12 +702,12 @@ defineExpose({ reload: loadCatalog })
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   border-radius: 14px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(15, 23, 42, 0.08);
   background: #fff;
 }
 
 .bf-compare__scroll:focus-visible {
-  outline: 2px solid #0a84ff;
+  outline: 2px solid #1e3a8a;
   outline-offset: 2px;
 }
 
@@ -651,31 +715,63 @@ defineExpose({ reload: loadCatalog })
   width: 100%;
   min-width: 720px;
   border-collapse: collapse;
-  font-size: 0.8125rem;
-  color: var(--apple-text, #1d1d1f);
+  font-size: 0.8rem;
+  color: #0f172a;
 }
 
 .bf-compare__table th,
 .bf-compare__table td {
   padding: 0.6rem 0.75rem;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
   text-align: center;
   vertical-align: middle;
+}
+
+.bf-compare__table tbody tr:last-child th,
+.bf-compare__table tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .bf-compare__table thead th {
   position: sticky;
   top: 0;
-  background: #f7f7f9;
+  background: #f8fafc;
+  font-size: 0.8rem;
   font-weight: 700;
+  vertical-align: top;
+}
+
+.bf-compare__plan {
+  display: block;
+}
+
+.bf-compare__tag {
+  display: inline-block;
+  margin-top: 0.3rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.64rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.bf-compare__tag--current {
+  background: #1e3a8a;
+  color: #fff;
+}
+
+.bf-compare__tag--recommended {
+  background: #e3f4e8;
+  color: #166534;
+}
+
+.bf-compare__table thead th.is-current,
+.bf-compare__table td.is-current {
+  background: #eef3fd;
 }
 
 .bf-compare__table thead th.is-current {
-  color: #0060c0;
-}
-
-.bf-compare__table thead th.is-recommended {
-  color: #248a3d;
+  color: #1e3a8a;
 }
 
 .bf-compare__table tbody th {
@@ -694,39 +790,39 @@ defineExpose({ reload: loadCatalog })
 }
 
 .bf-compare__table thead .bf-compare__feature-col {
-  background: #f7f7f9;
+  background: #f8fafc;
   z-index: 2;
+  font-weight: 600;
+  color: #6e6e73;
 }
 
 .bf-compare__section th {
-  background: #f7f7f9;
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--apple-text-secondary, #6e6e73);
+  background: #f8fafc;
+  font-size: 0.74rem;
+  font-weight: 650;
+  color: #475569;
   text-align: left;
 }
 
 .bf-compare__help {
   display: inline-flex;
   margin-left: 0.35rem;
-  color: var(--apple-text-secondary, #6e6e73);
+  color: #94a3b8;
   cursor: help;
   border-radius: 50%;
 }
 
 .bf-compare__help:focus-visible {
-  outline: 2px solid #0a84ff;
+  outline: 2px solid #1e3a8a;
   outline-offset: 2px;
 }
 
 .bf-compare__yes {
-  color: #34c759;
+  color: #15803d;
 }
 
 .bf-compare__no {
-  color: rgba(0, 0, 0, 0.3);
+  color: #cbd5e1;
 }
 
 .visually-hidden {
@@ -739,5 +835,18 @@ defineExpose({ reload: loadCatalog })
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+@media (max-width: 720px) {
+  .plans-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plan-card,
+  .plan-card__btn {
+    transition: none;
+  }
 }
 </style>

@@ -93,6 +93,10 @@ export const financesApi = {
         residentId: receipt.residentId,
         month: monthName || "Mes Actual",
         amount: Number(receipt.amount) + Number(receipt.lateFee || 0) + Number(receipt.extraCharges || 0),
+        // Breakdown of `amount` (resident finance shows cuota / mora / cargos extra).
+        baseAmount: Number(receipt.amount) || 0,
+        lateFee: Number(receipt.lateFee) || 0,
+        extraCharges: Number(receipt.extraCharges) || 0,
         dueDate: receipt.dueDate,
         status: receipt.status === 'Paid' ? 'Pagado' : 'Pendiente',
         concept: receipt.concept || "Mantenimiento",

@@ -354,13 +354,26 @@ function columnLabel(column) {
   align-items: center;
   gap: 0.35rem;
   padding: 0.4rem 0.75rem;
-  border-radius: 980px;
-  border: 1px solid rgba(10, 132, 255, 0.35);
-  background: rgba(10, 132, 255, 0.06);
-  color: #0060c0;
-  font-size: 0.8125rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  color: #1e3a8a;
+  font: inherit;
+  font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
+}
+
+.bf-import__link-btn:hover:not(:disabled) {
+  background: #e8eefc;
+  border-color: transparent;
+}
+
+.bf-import__link-btn:focus-visible,
+.bf-import__primary:focus-visible,
+.bf-import__copy:focus-visible {
+  outline: 2px solid #1e3a8a;
+  outline-offset: 2px;
 }
 
 .bf-import__link-btn:disabled {
@@ -375,8 +388,9 @@ function columnLabel(column) {
   align-items: center;
   gap: 0.35rem;
   padding: 1.25rem 1rem;
-  border: 2px dashed rgba(0, 0, 0, 0.18);
+  border: 1px dashed rgba(15, 23, 42, 0.22);
   border-radius: 14px;
+  background: #f8fafc;
   text-align: center;
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
@@ -384,18 +398,26 @@ function columnLabel(column) {
 
 .bf-import__drop:focus-within,
 .bf-import__drop.is-dragging {
-  border-color: #0a84ff;
-  background: rgba(10, 132, 255, 0.05);
+  border-color: #1e3a8a;
+  background: #e8eefc;
 }
 
 .bf-import__drop.has-file {
   border-style: solid;
-  border-color: #34c759;
+  border-color: #15803d;
+  background: #e3f4e8;
 }
 
 .bf-import__drop .pi-upload {
-  font-size: 1.4rem;
-  color: #0a84ff;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  color: #1e3a8a;
 }
 
 .bf-import__drop small {
@@ -423,13 +445,21 @@ function columnLabel(column) {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.6rem 1.2rem;
-  border-radius: 980px;
-  border: none;
-  background: #0a84ff;
+  min-height: 2.45rem;
+  padding: 0.5rem 1.1rem;
+  border-radius: 999px;
+  border: 1px solid #1e3a8a;
+  background: #1e3a8a;
   color: #fff;
+  font: inherit;
+  font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
+}
+
+.bf-import__primary:hover:not(:disabled) {
+  background: #172554;
+  border-color: #172554;
 }
 
 .bf-import__primary:disabled {
@@ -446,13 +476,11 @@ function columnLabel(column) {
 }
 
 .bf-import__report--error {
-  background: #fff4f2;
-  border: 1px solid rgba(180, 35, 24, 0.2);
+  background: #fde4e4;
 }
 
 .bf-import__report--ok {
-  background: #f1fbf3;
-  border: 1px solid rgba(36, 138, 61, 0.25);
+  background: #e3f4e8;
 }
 
 .bf-import__report-title {
@@ -469,7 +497,7 @@ function columnLabel(column) {
 }
 
 .bf-import__report--ok .bf-import__report-title {
-  color: #1d6b31;
+  color: #14532d;
 }
 
 .bf-import__file-error,
@@ -491,8 +519,8 @@ function columnLabel(column) {
   align-items: center;
   gap: 0.35rem;
   padding: 0.45rem 0.9rem;
-  border-radius: 980px;
-  background: #0a84ff;
+  border-radius: 999px;
+  background: #1e3a8a;
   color: #fff;
   font-weight: 600;
   font-size: 0.8125rem;
@@ -502,9 +530,8 @@ function columnLabel(column) {
 .bf-import__table-wrap {
   max-height: 260px;
   overflow: auto;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .bf-import__table {
@@ -524,7 +551,10 @@ function columnLabel(column) {
 .bf-import__table thead th {
   position: sticky;
   top: 0;
-  background: #f7f7f9;
+  background: #f8fafc;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #6e6e73;
 }
 
 .bf-import__row-num {
@@ -571,19 +601,30 @@ function columnLabel(column) {
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  padding: 0.4rem 0.55rem;
-  border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  font: inherit;
   font-size: 0.75rem;
+  color: #334155;
   background: #fff;
 }
 
 .bf-import__copy {
-  border: none;
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 8px;
-  padding: 0.45rem 0.55rem;
+  width: 2.1rem;
+  height: 2.1rem;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+  color: #1e3a8a;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
+}
+
+.bf-import__copy:hover {
+  background: #e8eefc;
 }
 
 @media (max-width: 520px) {

@@ -283,6 +283,18 @@ export function createSeedDb() {
         expiresAt: `${ymd(20)}T23:59:59.000Z`,
         ownerAdminId: owner,
       },
+      {
+        id: 'ann-4',
+        title: 'Fumigación de áreas comunes',
+        body: 'Se fumigaron pasillos, estacionamiento y depósitos. Mantén las mascotas en casa durante la mañana.',
+        priority: 'important',
+        duration: 7,
+        authorId: owner,
+        authorName: 'Admin demo',
+        createdAt: isoHoursAgo(24 * 12),
+        expiresAt: `${ymd(-5)}T23:59:59.000Z`,
+        ownerAdminId: owner,
+      },
     ],
     receipts: [
       {

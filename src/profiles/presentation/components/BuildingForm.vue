@@ -14,6 +14,8 @@ const props = defineProps({
   submitLabel: { type: String, default: '' },
   showSkip: { type: Boolean, default: false },
   compact: { type: Boolean, default: false },
+  /** Two-column layout (name | address, units below) with a bordered footer — used in Ajustes. */
+  columns: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['saved', 'skip'])
@@ -128,7 +130,12 @@ async function onSubmit() {
 </script>
 
 <template>
-  <form class="bf-building-form" :class="{ 'bf-building-form--compact': compact }" novalidate @submit.prevent="onSubmit">
+  <form
+    class="bf-building-form"
+    :class="{ 'bf-building-form--compact': compact, 'bf-building-form--columns': columns }"
+    novalidate
+    @submit.prevent="onSubmit"
+  >
     <div class="bf-building-form__field" :class="{ 'is-invalid': fieldError('name') }">
       <label :for="`${uid}-name`">
         {{ t('buildings.form.name') }} <span class="bf-building-form__req" aria-hidden="true">*</span>
@@ -239,44 +246,64 @@ async function onSubmit() {
   text-align: left;
 }
 
+.bf-building-form--columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem 1rem;
+}
+
+.bf-building-form--columns .bf-building-form__required-note,
+.bf-building-form--columns .bf-building-form__submit-error,
+.bf-building-form--columns .bf-building-form__actions {
+  grid-column: 1 / -1;
+}
+
+.bf-building-form--columns .bf-building-form__actions {
+  padding-top: 1rem;
+  border-top: 1px solid rgba(15, 23, 42, 0.07);
+}
+
 .bf-building-form__field {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  min-width: 0;
 }
 
 .bf-building-form__field label {
   font-size: 0.8125rem;
   font-weight: 600;
-  color: var(--apple-text, #1d1d1f);
+  color: #475569;
 }
 
 .bf-building-form__req {
-  color: #d70015;
+  color: #b42318;
 }
 
 .bf-building-form__field input {
   width: 100%;
   box-sizing: border-box;
-  padding: 0.65rem 0.8rem;
-  border-radius: 10px;
-  border: 1px solid rgba(0, 0, 0, 0.16);
-  font-size: 0.9375rem;
+  min-height: 2.6rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  font: inherit;
+  font-size: 0.9rem;
   background: #fff;
-  color: var(--apple-text, #1d1d1f);
+  color: #0f172a;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .bf-building-form__field input:focus {
   outline: none;
-  border-color: #0a84ff;
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.18);
+  border-color: #1e3a8a;
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.15);
 }
 
 .bf-building-form__field.is-invalid input {
-  border-color: #d70015;
-  background: #fff6f6;
-  box-shadow: 0 0 0 3px rgba(215, 0, 21, 0.12);
+  border-color: #b42318;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.12);
 }
 
 .bf-building-form__field.is-invalid label {
@@ -294,15 +321,15 @@ async function onSubmit() {
 .bf-building-form__required-note {
   margin: 0;
   font-size: 0.75rem;
-  color: var(--apple-text-secondary, #6e6e73);
+  color: #6e6e73;
 }
 
 .bf-building-form__submit-error {
   margin: 0;
-  padding: 0.6rem 0.8rem;
-  border-radius: 10px;
-  background: #fff4f2;
-  color: #b42318;
+  padding: 0.6rem 0.85rem;
+  border-radius: 14px;
+  background: #fde4e4;
+  color: #7f1d1d;
   font-size: 0.8125rem;
 }
 
@@ -318,22 +345,31 @@ async function onSubmit() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.4rem;
-  padding: 0.65rem 1.25rem;
-  border-radius: 980px;
-  font-size: 0.875rem;
+  gap: 0.45rem;
+  min-height: 2.45rem;
+  padding: 0.5rem 1.15rem;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.85rem;
   font-weight: 600;
-  border: none;
+  border: 1px solid transparent;
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .bf-building-form__submit {
-  background: #0a84ff;
+  background: #1e3a8a;
+  border-color: #1e3a8a;
   color: #fff;
 }
 
+.bf-building-form__submit:hover:not(:disabled) {
+  background: #172554;
+  border-color: #172554;
+}
+
 .bf-building-form__submit.is-blocked {
-  opacity: 0.55;
+  opacity: 0.6;
 }
 
 .bf-building-form__submit:disabled {
@@ -342,8 +378,26 @@ async function onSubmit() {
 }
 
 .bf-building-form__skip {
-  background: rgba(0, 0, 0, 0.05);
-  color: var(--apple-text, #1d1d1f);
+  background: #fff;
+  border-color: rgba(15, 23, 42, 0.12);
+  color: #1e3a8a;
+}
+
+.bf-building-form__skip:hover:not(:disabled) {
+  background: #e8eefc;
+  border-color: transparent;
+}
+
+.bf-building-form__submit:focus-visible,
+.bf-building-form__skip:focus-visible {
+  outline: 2px solid #1e3a8a;
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .bf-building-form--columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 480px) {
@@ -354,6 +408,14 @@ async function onSubmit() {
   .bf-building-form__submit,
   .bf-building-form__skip {
     width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bf-building-form__field input,
+  .bf-building-form__submit,
+  .bf-building-form__skip {
+    transition: none;
   }
 }
 </style>

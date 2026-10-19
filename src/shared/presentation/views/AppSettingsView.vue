@@ -126,10 +126,9 @@ const planSaveNotice = ref('')
 const planError = ref('')
 const planLoading = ref(false)
 const planCheckoutPlanId = ref(null)
+const ALL_TAB_IDS = ['profile', 'building', 'plans', 'finance', 'admission', 'providers', 'security', 'preferences']
 const activeTab = ref(
-  ['profile', 'plans', 'finance', 'admission', 'providers'].includes(String(route.query.tab ?? ''))
-    ? String(route.query.tab)
-    : 'profile',
+  ALL_TAB_IDS.includes(String(route.query.tab ?? '')) ? String(route.query.tab) : 'profile',
 )
 
 watch(
@@ -186,13 +185,168 @@ const trialBanner = computed(() => {
   return null
 })
 
-const settingsTabs = computed(() => [
-  { id: 'profile', label: t('app.settingsTabProfile'), icon: 'pi pi-user' },
-  { id: 'plans', label: t('app.settingsTabPlans'), icon: 'pi pi-id-card' },
-  { id: 'finance', label: t('app.settingsTabFinance'), icon: 'pi pi-wallet' },
-  { id: 'admission', label: t('app.settingsTabAdmission'), icon: 'pi pi-calendar' },
-  { id: 'providers', label: t('app.settingsTabProviders'), icon: 'pi pi-wrench' },
+const settingsTabs = computed(() => {
+  const profile = { id: 'profile', label: t('app.settingsTabProfile'), icon: 'pi pi-user' }
+  const preferences = { id: 'preferences', label: t('app.settingsTabPreferences'), icon: 'pi pi-globe' }
+  if (isAdmin.value) {
+    return [
+      profile,
+      { id: 'building', label: t('app.settingsTabBuilding'), icon: 'pi pi-building' },
+      { id: 'plans', label: t('app.settingsTabPlanBilling'), icon: 'pi pi-credit-card' },
+      { id: 'finance', label: t('app.settingsTabFinance'), icon: 'pi pi-wallet' },
+      { id: 'admission', label: t('app.settingsTabAdmission'), icon: 'pi pi-calendar' },
+      { id: 'providers', label: t('app.settingsTabProviders'), icon: 'pi pi-wrench' },
+      preferences,
+    ]
+  }
+  if (isResident.value) {
+    return [profile, { id: 'security', label: t('app.settingsTabSecurity'), icon: 'pi pi-lock' }, preferences]
+  }
+  return [profile, preferences]
+})
+
+/** Section actually shown: a tab id that does not exist for the current role falls back to Perfil. */
+const currentTab = computed(() =>
+  settingsTabs.value.some((item) => item.id === activeTab.value) ? activeTab.value : 'profile',
+)
+
+function selectTab(id) {
+  if (activeTab.value === id) return
+  activeTab.value = id
+  router.replace({ query: { ...route.query, tab: id } }).catch(() => {})
+}
+
+/** Vertical (desktop) / horizontal (mobile) tablist: arrows, Home and End move between sections. */
+function onTabKeydown(event, index) {
+  const list = settingsTabs.value
+  let next = null
+  if (['ArrowDown', 'ArrowRight'].includes(event.key)) next = (index + 1) % list.length
+  else if (['ArrowUp', 'ArrowLeft'].includes(event.key)) next = (index - 1 + list.length) % list.length
+  else if (event.key === 'Home') next = 0
+  else if (event.key === 'End') next = list.length - 1
+  if (next == null) return
+  event.preventDefault()
+  selectTab(list[next].id)
+  document.getElementById(`settings-tab-${list[next].id}`)?.focus()
+}
+
+const intlLocale = computed(() => (locale.value === 'en' ? 'en-US' : 'es-PE'))
+
+/** yyyy-mm-dd is read as a local calendar day (no timezone shift); other values go through Date. */
+function parseDateValue(value) {
+  if (!value) return null
+  const raw = String(value)
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
+  const date = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(raw)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function formatLongDate(value) {
+  const date = parseDateValue(value)
+  if (!date) return ''
+  return new Intl.DateTimeFormat(intlLocale.value, { day: 'numeric', month: 'long', year: 'numeric' }).format(date)
+}
+
+function formatPen(value) {
+  return new Intl.NumberFormat(intlLocale.value, {
+    style: 'currency',
+    currency: 'PEN',
+    currencyDisplay: 'narrowSymbol',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(Number(value) || 0)
+}
+
+function initialsOf(name) {
+  const parts = String(name ?? '').trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return '?'
+  const first = parts[0][0] ?? ''
+  const last = parts.length > 1 ? parts[parts.length - 1][0] ?? '' : ''
+  return `${first}${last}`.toUpperCase()
+}
+
+const accountInitials = computed(() => initialsOf(display.value.name || display.value.email))
+const roleLabel = computed(() =>
+  isAdmin.value ? t('app.settingsRoleAdmin') : isResident.value ? t('app.settingsRoleResident') : '',
+)
+const residentUnitLabel = computed(() => {
+  const { floor, code } = display.value
+  const hasFloor = floor != null && floor !== ''
+  const hasCode = code != null && code !== ''
+  return hasFloor || hasCode ? t('app.residentFloorApt', { floor: hasFloor ? floor : '—', code: hasCode ? code : '—' }) : ''
+})
+
+/** Brand names of the plans (Free, Essential, Standard, Scale, Portafolio). */
+const planDisplayName = computed(() => {
+  const id = String(subscription.value?.planId ?? selectedPlanId.value ?? SubscriptionPlanId.FREE)
+  return id.charAt(0).toUpperCase() + id.slice(1)
+})
+
+/** Status pill of the subscription: label + soft tint (blue / green / amber / red). */
+const planStatus = computed(() => {
+  const sub = subscription.value
+  if (!sub) return null
+  if (sub.trialExpired) return { tone: 'red', label: t('app.settingsPlanStatusTrialExpired') }
+  if (sub.status === 'SUSPENDED') return { tone: 'red', label: t('app.settingsPlanStatusSuspended') }
+  if (sub.status === 'CANCELLED') return { tone: 'red', label: t('app.settingsPlanStatusCancelled') }
+  if (sub.status === 'PAYMENT_FAILED') return { tone: 'amber', label: t('app.settingsPlanStatusPaymentFailed') }
+  if (sub.status === 'TRIAL') {
+    if (sub.trialDaysLeft == null) return { tone: 'blue', label: t('app.settingsPlanStatusTrialNoDays') }
+    const days = Math.max(0, Number(sub.trialDaysLeft) || 0)
+    return { tone: days <= 7 ? 'amber' : 'blue', label: t('app.settingsPlanStatusTrial', { days }, days) }
+  }
+  const until = formatLongDate(sub.paidUntil)
+  return {
+    tone: 'green',
+    label: until ? t('app.settingsPlanStatusActiveUntil', { date: until }) : t('app.settingsPlanStatusActive'),
+    short: t('app.settingsPlanStatusActive'),
+  }
+})
+
+const planStatusHint = computed(() => {
+  const sub = subscription.value
+  if (!sub) return ''
+  if (sub.status === 'TRIAL' || sub.trialExpired) {
+    const ends = formatLongDate(sub.trialEndsAt)
+    return ends ? t('app.settingsPlanSummaryTrialEnds', { date: ends }) : t('app.settingsPlanSummaryNoDate')
+  }
+  const until = formatLongDate(sub.paidUntil)
+  return until ? t('app.settingsPlanSummaryPaidUntil', { date: until }) : t('app.settingsPlanSummaryNoDate')
+})
+
+const planPriceLabel = computed(() => {
+  const price = Number(subscription.value?.monthlyPricePen ?? 0)
+  return price > 0 ? t('billing.plans.pricePerMonth', { price: formatPen(price) }) : t('app.settingsPlanSummaryFree')
+})
+
+const residentUsagePercent = computed(() => {
+  const max = Number(activeResidentLimit.value) || 0
+  if (max <= 0) return 0
+  return Math.min(100, Math.round((Number(residentsCount.value) / max) * 100))
+})
+
+/** Idioma y preferencias: same global locale the sidebar ES/EN switch drives (persisted from main.js). */
+const languageOptions = computed(() => [
+  { code: 'es', label: t('app.settingsPrefsLanguageEs'), hint: t('app.settingsPrefsLanguageEsHint'), short: 'ES' },
+  { code: 'en', label: t('app.settingsPrefsLanguageEn'), hint: t('app.settingsPrefsLanguageEnHint'), short: 'EN' },
 ])
+
+function setLocale(code) {
+  if (locale.value !== code) locale.value = code
+}
+
+function onLanguageKeydown(event) {
+  if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'].includes(event.key)) return
+  event.preventDefault()
+  const next = locale.value === 'es' ? 'en' : 'es'
+  setLocale(next)
+  document.getElementById(`settings-lang-${next}`)?.focus()
+}
+
+const previewSample = computed(() => ({
+  date: new Intl.DateTimeFormat(intlLocale.value, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date()),
+  amount: formatPen(1250.5),
+}))
 
 const serviceProviders = ref([])
 const providersLoading = ref(false)
@@ -246,6 +400,10 @@ async function addServiceProvider() {
   } finally {
     providersSaving.value = false
   }
+}
+
+function focusProviderName() {
+  document.getElementById('settingsProviderName')?.focus()
 }
 
 async function removeServiceProvider(id) {
@@ -580,478 +738,784 @@ watch(admissionRuleNotice, (msg) => {
 </script>
 
 <template>
-  <div class="app-view app-view--ai">
-    <nav
-      v-if="isAdmin"
-      class="settings-tabs"
-      :aria-label="t('app.pageSettings')"
-    >
-      <button
-        v-for="tab in settingsTabs"
-        :key="tab.id"
-        type="button"
-        class="settings-tabs__item"
-        :class="{ 'is-active': activeTab === tab.id }"
-        @click="activeTab = tab.id"
-      >
-        <i :class="tab.icon" aria-hidden="true" />
-        {{ tab.label }}
-      </button>
-    </nav>
+  <div class="app-view st">
+    <header class="st-head">
+      <div class="st-head__text">
+        <h1 class="st-head__title">{{ t('app.pageSettings') }}</h1>
+        <p class="st-head__sub">
+          {{ isAdmin ? t('app.settingsPageSubtitleAdmin') : t('app.settingsPageSubtitleResident') }}
+        </p>
+      </div>
+    </header>
 
-    <div class="ai-shell">
-      <div class="settings-body">
-    <p v-if="isLoading" class="app-view__status">{{ t('app.settingsLoadingProfile') }}</p>
-    <p v-else-if="loadError" class="app-view__status app-view__status--warn">
-      {{ t('app.settingsProfileLoadError') }}
-    </p>
-
-    <section
-      v-if="isAdmin && activeTab === 'profile'"
-      class="settings-card"
-      aria-labelledby="settings-admin-heading"
-    >
-      <h2 id="settings-admin-heading" class="settings-card__title">
-        {{ t('app.settingsAdminProfileTitle') }}
-      </h2>
-      <ul class="settings-card__list" role="list">
-        <li v-if="display.name">
-          <strong>{{ t('auth.fullName') }}:</strong> {{ display.name }}
-        </li>
-        <li v-if="display.email">
-          <strong>{{ t('auth.email') }}:</strong> {{ display.email }}
-        </li>
-        <li v-if="display.dni">
-          <strong>{{ t('app.settingsAdminDniLabel') }}:</strong> {{ display.dni }}
-        </li>
-        <li v-if="display.address">
-          <strong>{{ t('app.settingsAdminAddressLabel') }}:</strong> {{ display.address }}
-        </li>
-        <li v-if="display.company">
-          <strong>{{ t('app.settingsAdminCompanyLabel') }}:</strong> {{ display.company }}
-        </li>
-        <li v-if="display.ruc">
-          <strong>{{ t('app.settingsAdminRucLabel') }}:</strong> {{ display.ruc }}
-        </li>
-      </ul>
+    <!-- Account summary -->
+    <section class="st-account" :aria-label="t('app.settingsSummaryAria')">
+      <span class="st-avatar st-avatar--lg" aria-hidden="true">{{ accountInitials }}</span>
+      <div class="st-account__main">
+        <div class="st-account__row">
+          <h2 class="st-account__name">{{ display.name || display.email || '—' }}</h2>
+          <span v-if="roleLabel" class="st-pill st-pill--navy">{{ roleLabel }}</span>
+        </div>
+        <ul class="st-account__meta" role="list">
+          <li v-if="display.email">
+            <i class="pi pi-envelope" aria-hidden="true" />
+            <span>{{ display.email }}</span>
+          </li>
+          <li v-if="isAdmin">
+            <i class="pi pi-building" aria-hidden="true" />
+            <span>{{ primaryBuilding?.name || (buildingLoading ? '…' : t('app.settingsNoBuilding')) }}</span>
+          </li>
+          <li v-else-if="residentUnitLabel">
+            <i class="pi pi-home" aria-hidden="true" />
+            <span>{{ residentUnitLabel }}</span>
+          </li>
+        </ul>
+      </div>
+      <div v-if="isAdmin && subscription" class="st-account__plan">
+        <span class="st-pill st-pill--blue">
+          <i class="pi pi-credit-card" aria-hidden="true" />
+          {{ t('app.settingsPlanPillLabel', { name: planDisplayName }) }}
+        </span>
+        <span v-if="planStatus" class="st-pill" :class="`st-pill--${planStatus.tone}`">{{ planStatus.label }}</span>
+      </div>
     </section>
 
-    <p
-      v-if="isAdmin && activeTab !== 'plans' && trialBanner && trialBanner.tone === 'error'"
-      class="billing-banner billing-banner--error"
+    <p v-if="isLoading" class="st-status" role="status">{{ t('app.settingsLoadingProfile') }}</p>
+    <p v-else-if="loadError" class="st-notice st-notice--warn" role="status">
+      <i class="pi pi-exclamation-circle" aria-hidden="true" />
+      <span>{{ t('app.settingsProfileLoadError') }}</span>
+    </p>
+
+    <div
+      v-if="isAdmin && currentTab !== 'plans' && trialBanner && trialBanner.tone === 'error'"
+      class="st-banner st-banner--error"
       role="alert"
     >
       <i class="pi pi-exclamation-triangle" aria-hidden="true" />
-      {{ trialBanner.text }}
-      <button type="button" class="billing-banner__action" @click="activeTab = 'plans'">
+      <p class="st-banner__text">{{ trialBanner.text }}</p>
+      <button type="button" class="st-banner__action" @click="selectTab('plans')">
         {{ t('billing.choosePlanCta') }}
       </button>
-    </p>
+    </div>
 
-    <section
-      v-if="isAdmin && activeTab === 'profile'"
-      class="settings-card"
-      aria-labelledby="settings-building-heading"
-    >
-      <h2 id="settings-building-heading" class="settings-card__title">
-        <i class="pi pi-building" aria-hidden="true" />
-        {{ t('buildings.cardTitle') }}
-      </h2>
-      <p v-if="buildingLoading" class="settings-card__status">{{ t('buildings.loading') }}</p>
-      <p v-else-if="buildingLoadError" class="settings-card__error" role="alert">
-        {{ t('buildings.loadError') }}
-        <button type="button" class="billing-banner__action" @click="loadBuildings">{{ t('billing.plans.retry') }}</button>
-      </p>
-      <template v-else-if="primaryBuilding && !isEditingBuilding">
-        <ul class="settings-card__list" role="list">
-          <li><strong>{{ t('buildings.form.name') }}:</strong> {{ primaryBuilding.name }}</li>
-          <li><strong>{{ t('buildings.form.address') }}:</strong> {{ primaryBuilding.address }}</li>
-          <li><strong>{{ t('buildings.form.departmentCount') }}:</strong> {{ primaryBuilding.departmentCount }}</li>
-        </ul>
-        <p v-if="buildings.length > 1" class="settings-card__hint">
-          {{ t('buildings.moreBuildings', { count: buildings.length - 1 }) }}
-        </p>
-        <p v-if="buildingNotice" class="settings-card__notice" role="status">{{ buildingNotice }}</p>
-        <button type="button" class="settings-card__save" @click="isEditingBuilding = true">
-          {{ t('buildings.edit') }}
-        </button>
-      </template>
-      <template v-else>
-        <p v-if="!primaryBuilding" class="settings-card__hint">{{ t('buildings.missingHint') }}</p>
-        <BuildingForm
-          :building="primaryBuilding"
-          :submit-label="primaryBuilding ? t('buildings.saveChanges') : t('buildings.form.submit')"
-          :show-skip="Boolean(primaryBuilding)"
-          @saved="onBuildingSaved"
-          @skip="isEditingBuilding = false"
-        />
-      </template>
-    </section>
-
-    <section
-      v-if="isAdmin && activeTab === 'finance'"
-      class="settings-card"
-      aria-labelledby="settings-late-fee-heading"
-    >
-      <h2 id="settings-late-fee-heading" class="settings-card__title">
-        {{ t('financeAdmin.lateFeePerDay') }}
-      </h2>
-      <p class="settings-card__hint">{{ t('financeAdmin.lateFeeHint') }}</p>
-      <p v-if="lateFeeLoading" class="settings-card__status">{{ t('financeAdmin.loading') }}</p>
-      <label class="settings-card__field" for="settingsLateFeePerDay">
-        <span>{{ t('financeAdmin.lateFeePerDay') }}</span>
-        <input
-          id="settingsLateFeePerDay"
-          v-model.number="lateFeePerDay"
-          type="number"
-          min="0"
-          step="0.01"
-          class="settings-card__input"
-        />
-      </label>
-      <p v-if="lateFeeNotice" class="settings-card__notice" role="status">{{ lateFeeNotice }}</p>
-      <p v-if="lateFeeError" class="settings-card__error" role="alert">{{ lateFeeError }}</p>
-      <button
-        type="button"
-        class="settings-card__save"
-        :disabled="isSavingLateFee || lateFeeLoading"
-        @click="onSaveLateFee"
-      >
-        {{ t('financeAdmin.saveLateFee') }}
-      </button>
-    </section>
-
-    <section
-      v-if="isAdmin && activeTab === 'admission'"
-      class="settings-card settings-card--admission"
-      aria-labelledby="settings-admission-rules-heading"
-    >
-      <h2 id="settings-admission-rules-heading" class="settings-card__title">
-        {{ t('financeAdmin.admissionRulesTitle') }}
-      </h2>
-      <p class="settings-card__hint">{{ t('financeAdmin.admissionRulesHint') }}</p>
-      <p v-if="lateFeeLoading" class="settings-card__status">{{ t('financeAdmin.loading') }}</p>
-      <div class="admission-range">
-        <label class="settings-card__field" for="settingsAdmissionPayFromDay">
-          <span>{{ t('financeAdmin.admissionRangeFrom') }}</span>
-          <input
-            id="settingsAdmissionPayFromDay"
-            v-model.number="admissionPayFromDay"
-            type="number"
-            min="1"
-            max="31"
-            step="1"
-            class="settings-card__input"
-          />
-        </label>
-        <label class="settings-card__field" for="settingsAdmissionPayToDay">
-          <span>{{ t('financeAdmin.admissionRangeTo') }}</span>
-          <input
-            id="settingsAdmissionPayToDay"
-            v-model.number="admissionPayToDay"
-            type="number"
-            min="1"
-            max="31"
-            step="1"
-            class="settings-card__input"
-          />
-        </label>
-      </div>
-      <p class="settings-card__hint">
-        {{
-          admissionRangePreview.admissionPayToDay >= 31
-            ? t('financeAdmin.admissionRangePreviewAll', {
-                from: admissionRangePreview.admissionPayFromDay,
-                to: admissionRangePreview.admissionPayToDay,
-              })
-            : t('financeAdmin.admissionRangePreview', {
-                from: admissionRangePreview.admissionPayFromDay,
-                to: admissionRangePreview.admissionPayToDay,
-                after: admissionRangePreview.admissionPayToDay + 1,
-              })
-        }}
-      </p>
-      <p v-if="admissionRuleNotice" class="settings-card__notice" role="status">
-        {{ admissionRuleNotice }}
-      </p>
-      <p v-if="admissionRuleError" class="settings-card__error" role="alert">
-        {{ admissionRuleError }}
-      </p>
-      <button
-        type="button"
-        class="settings-card__save"
-        :disabled="isSavingAdmissionRules || lateFeeLoading"
-        @click="onSaveAdmissionRules"
-      >
-        {{ t('financeAdmin.admissionRulesSave') }}
-      </button>
-
-      <h3 class="settings-card__subtitle">{{ t('financeAdmin.admissionResidentsTitle') }}</h3>
-      <p class="settings-card__hint">{{ t('financeAdmin.admissionResidentsHint') }}</p>
-      <label class="settings-card__field" for="settingsAdmissionResidentSearch">
-        <span class="visually-hidden">{{ t('financeAdmin.extraSearch') }}</span>
-        <input
-          id="settingsAdmissionResidentSearch"
-          v-model="admissionResidentSearch"
-          type="search"
-          class="settings-card__input"
-          :placeholder="t('financeAdmin.extraSearchPlaceholder')"
-        />
-      </label>
-      <ul class="admission-resident-list" role="list">
-        <li v-if="!financesStore.state.residents.length" class="admission-resident-list__empty">
-          {{ t('financeAdmin.admissionResidentsEmpty') }}
-        </li>
-        <li v-else-if="!admissionResidents.length" class="admission-resident-list__empty">
-          {{ t('financeAdmin.admissionResidentsNone') }}
-        </li>
-        <li v-for="resident in admissionResidents" :key="resident.id" class="admission-resident">
-          <div class="admission-resident__info">
-            <strong>{{ resident.name }}</strong>
-            <span>
-              {{ t('app.residentFloorApt', { floor: resident.floor, code: resident.code }) }}
-              <template v-if="resident.admissionDate">
-                · {{ t('app.residentAdmissionDate', { date: formatDayMonth(resident.admissionDate, locale) }) }}
-              </template>
-            </span>
-          </div>
+    <div class="st-layout">
+      <nav class="st-nav" :aria-label="t('app.settingsSectionsNav')">
+        <div class="st-nav__list" role="tablist" aria-orientation="vertical" :aria-label="t('app.settingsSectionsNav')">
           <button
+            v-for="(tab, index) in settingsTabs"
+            :id="`settings-tab-${tab.id}`"
+            :key="tab.id"
             type="button"
-            class="admission-resident__btn"
-            :class="{ 'is-on': resident.billFromNextMonth }"
-            :aria-pressed="resident.billFromNextMonth"
-            :disabled="Boolean(billingResidentId) || lateFeeLoading"
-            @click="onToggleBillFromNextMonth(resident)"
+            role="tab"
+            class="st-nav__item"
+            :class="{ 'is-active': currentTab === tab.id }"
+            :aria-selected="currentTab === tab.id"
+            :aria-controls="`settings-panel-${tab.id}`"
+            :tabindex="currentTab === tab.id ? 0 : -1"
+            @click="selectTab(tab.id)"
+            @keydown="onTabKeydown($event, index)"
           >
-            {{
-              resident.billFromNextMonth
-                ? t('app.billFromNextMonthOn')
-                : t('app.billFromNextMonthAction')
-            }}
+            <i :class="tab.icon" aria-hidden="true" />
+            <span>{{ tab.label }}</span>
           </button>
-        </li>
-      </ul>
-      <p v-if="billingResidentError" class="settings-card__error" role="alert">
-        {{ billingResidentError }}
-      </p>
-    </section>
+        </div>
+      </nav>
 
-    <section
-      v-if="isAdmin && activeTab === 'providers'"
-      class="settings-card settings-card--admission"
-      aria-labelledby="settings-providers-heading"
-    >
-      <h2 id="settings-providers-heading" class="settings-card__title">
-        {{ t('app.settingsProvidersTitle') }}
-      </h2>
-      <p class="settings-card__hint">{{ t('app.settingsProvidersHint') }}</p>
-      <p v-if="providersLoading" class="settings-card__status">
-        {{ t('app.settingsProvidersLoading') }}
-      </p>
-      <div class="settings-provider-fields">
-        <label class="settings-card__field" for="settingsProviderName">
-          <span>{{ t('app.settingsProvidersName') }}</span>
-          <input
-            id="settingsProviderName"
-            v-model="providerDraft.name"
-            type="text"
-            class="settings-card__input"
-            :placeholder="t('app.settingsProvidersNamePlaceholder')"
-            :disabled="providersSaving"
-            maxlength="80"
-            @keydown.enter.prevent="addServiceProvider"
-          />
-        </label>
-        <label class="settings-card__field" for="settingsProviderPhone">
-          <span>{{ t('app.settingsProvidersPhone') }}</span>
-          <input
-            id="settingsProviderPhone"
-            v-model="providerDraft.phone"
-            type="tel"
-            class="settings-card__input"
-            :placeholder="t('app.settingsProvidersPhonePlaceholder')"
-            :disabled="providersSaving"
-            maxlength="30"
-            @keydown.enter.prevent="addServiceProvider"
-          />
-        </label>
-        <label class="settings-card__field" for="settingsProviderSpecialty">
-          <span>{{ t('app.settingsProvidersSpecialty') }}</span>
-          <input
-            id="settingsProviderSpecialty"
-            v-model="providerDraft.specialty"
-            type="text"
-            class="settings-card__input"
-            :placeholder="t('app.settingsProvidersSpecialtyPlaceholder')"
-            :disabled="providersSaving"
-            maxlength="60"
-            @keydown.enter.prevent="addServiceProvider"
-          />
-        </label>
-      </div>
-      <p v-if="providersNotice" class="settings-card__notice" role="status">
-        {{ providersNotice }}
-      </p>
-      <p v-if="providersError" class="settings-card__error" role="alert">
-        {{ providersError }}
-      </p>
-      <button
-        type="button"
-        class="settings-card__save"
-        :disabled="providersSaving || providersLoading || !String(providerDraft.name || '').trim()"
-        @click="addServiceProvider"
-      >
-        {{ t('app.settingsProvidersAdd') }}
-      </button>
-
-      <ul class="admission-resident-list" role="list">
-        <li v-if="!providersLoading && !serviceProviders.length" class="admission-resident-list__empty">
-          {{ t('app.settingsProvidersEmpty') }}
-        </li>
-        <li v-for="provider in serviceProviders" :key="provider.id" class="admission-resident">
-          <div class="admission-resident__info">
-            <strong>{{ provider.name }}</strong>
-            <span>
-              <template v-if="provider.specialty">{{ provider.specialty }}</template>
-              <template v-if="provider.specialty && provider.phone"> · </template>
-              <template v-if="provider.phone">{{ provider.phone }}</template>
-            </span>
+      <div class="st-content">
+        <!-- Perfil (admin) -->
+        <section
+          v-if="isAdmin && currentTab === 'profile'"
+          id="settings-panel-profile"
+          class="st-card"
+          role="tabpanel"
+          aria-labelledby="settings-admin-heading"
+        >
+          <div class="st-card__head">
+            <h2 id="settings-admin-heading" class="st-card__title">{{ t('app.settingsAdminProfileTitle') }}</h2>
+            <p class="st-card__hint">{{ t('app.settingsProfileHint') }}</p>
           </div>
-          <button
-            type="button"
-            class="admission-resident__btn"
-            :disabled="Boolean(deletingProviderId) || providersSaving"
-            @click="removeServiceProvider(provider.id)"
+          <div class="st-group">
+            <h3 class="st-group__title">{{ t('app.settingsGroupPersonal') }}</h3>
+            <dl class="st-fields">
+              <div class="st-field">
+                <dt>{{ t('auth.fullName') }}</dt>
+                <dd :class="{ 'is-empty': !display.name }">{{ display.name || t('app.settingsNotProvided') }}</dd>
+              </div>
+              <div class="st-field">
+                <dt>{{ t('auth.email') }}</dt>
+                <dd :class="{ 'is-empty': !display.email }">{{ display.email || t('app.settingsNotProvided') }}</dd>
+              </div>
+              <div class="st-field">
+                <dt>{{ t('app.settingsAdminDniLabel') }}</dt>
+                <dd :class="{ 'is-empty': !display.dni }">{{ display.dni || t('app.settingsNotProvided') }}</dd>
+              </div>
+              <div class="st-field">
+                <dt>{{ t('app.settingsAdminAddressLabel') }}</dt>
+                <dd :class="{ 'is-empty': !display.address }">{{ display.address || t('app.settingsNotProvided') }}</dd>
+              </div>
+            </dl>
+          </div>
+          <div class="st-group">
+            <h3 class="st-group__title">{{ t('app.settingsGroupCompany') }}</h3>
+            <dl class="st-fields">
+              <div class="st-field">
+                <dt>{{ t('app.settingsAdminCompanyLabel') }}</dt>
+                <dd :class="{ 'is-empty': !display.company }">{{ display.company || t('app.settingsNotProvided') }}</dd>
+              </div>
+              <div class="st-field">
+                <dt>{{ t('app.settingsAdminRucLabel') }}</dt>
+                <dd :class="{ 'is-empty': !display.ruc }">{{ display.ruc || t('app.settingsNotProvided') }}</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+
+        <!-- Perfil (resident) -->
+        <section
+          v-if="!isAdmin && currentTab === 'profile'"
+          id="settings-panel-profile"
+          class="st-card"
+          role="tabpanel"
+          aria-labelledby="settings-resident-heading"
+        >
+          <div class="st-card__head">
+            <h2 id="settings-resident-heading" class="st-card__title">{{ t('app.settingsResidentProfileTitle') }}</h2>
+            <p class="st-card__hint">{{ t('app.settingsProfileHint') }}</p>
+          </div>
+          <div class="st-group">
+            <h3 class="st-group__title">{{ t('app.settingsGroupPersonal') }}</h3>
+            <dl class="st-fields">
+              <div class="st-field">
+                <dt>{{ t('app.residentNameLabel') }}</dt>
+                <dd :class="{ 'is-empty': !display.name }">{{ display.name || t('app.settingsNotProvided') }}</dd>
+              </div>
+              <div class="st-field">
+                <dt>{{ t('auth.email') }}</dt>
+                <dd :class="{ 'is-empty': !display.email }">{{ display.email || t('app.settingsNotProvided') }}</dd>
+              </div>
+            </dl>
+          </div>
+          <div class="st-group">
+            <h3 class="st-group__title">{{ t('app.settingsGroupHome') }}</h3>
+            <dl class="st-fields">
+              <div class="st-field">
+                <dt>{{ t('app.residentFloorLabel') }}</dt>
+                <dd :class="{ 'is-empty': display.floor == null || display.floor === '' }">
+                  {{ display.floor != null && display.floor !== '' ? display.floor : t('app.settingsNotProvided') }}
+                </dd>
+              </div>
+              <div class="st-field">
+                <dt>{{ t('app.residentCodeLabel') }}</dt>
+                <dd :class="{ 'is-empty': display.code == null || display.code === '' }">
+                  {{ display.code != null && display.code !== '' ? display.code : t('app.settingsNotProvided') }}
+                </dd>
+              </div>
+              <div v-if="display.admissionDate" class="st-field">
+                <dt>{{ t('app.settingsResidentAdmissionLabel') }}</dt>
+                <dd>{{ formatLongDate(display.admissionDate) || display.admissionDate }}</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+
+        <!-- Edificio (admin) -->
+        <section
+          v-if="isAdmin && currentTab === 'building'"
+          id="settings-panel-building"
+          class="st-card"
+          role="tabpanel"
+          aria-labelledby="settings-building-heading"
+        >
+          <div class="st-card__head">
+            <h2 id="settings-building-heading" class="st-card__title">{{ t('buildings.cardTitle') }}</h2>
+            <p class="st-card__hint">{{ t('app.settingsBuildingHint') }}</p>
+          </div>
+          <p v-if="buildingLoading" class="st-status" role="status">{{ t('buildings.loading') }}</p>
+          <div v-else-if="buildingLoadError" class="st-notice st-notice--error" role="alert">
+            <i class="pi pi-times-circle" aria-hidden="true" />
+            <span>{{ t('buildings.loadError') }}</span>
+            <button type="button" class="st-notice__action" @click="loadBuildings">{{ t('billing.plans.retry') }}</button>
+          </div>
+          <template v-else-if="primaryBuilding && !isEditingBuilding">
+            <dl class="st-fields">
+              <div class="st-field">
+                <dt>{{ t('buildings.form.name') }}</dt>
+                <dd>{{ primaryBuilding.name }}</dd>
+              </div>
+              <div class="st-field">
+                <dt>{{ t('buildings.form.departmentCount') }}</dt>
+                <dd>{{ primaryBuilding.departmentCount }}</dd>
+              </div>
+              <div class="st-field st-field--wide">
+                <dt>{{ t('buildings.form.address') }}</dt>
+                <dd>{{ primaryBuilding.address }}</dd>
+              </div>
+            </dl>
+            <p v-if="buildings.length > 1" class="st-card__hint st-card__hint--below">
+              {{ t('app.settingsMoreBuildings', { n: buildings.length - 1 }, buildings.length - 1) }}
+            </p>
+            <div class="st-card__foot">
+              <p v-if="buildingNotice" class="st-notice st-notice--ok" role="status">
+                <i class="pi pi-check-circle" aria-hidden="true" />
+                <span>{{ buildingNotice }}</span>
+              </p>
+              <button type="button" class="st-btn st-btn--primary" @click="isEditingBuilding = true">
+                <i class="pi pi-pencil" aria-hidden="true" />
+                {{ t('buildings.edit') }}
+              </button>
+            </div>
+          </template>
+          <template v-else>
+            <p v-if="!primaryBuilding" class="st-note">
+              <i class="pi pi-info-circle" aria-hidden="true" />
+              <span>{{ t('buildings.missingHint') }}</span>
+            </p>
+            <BuildingForm
+              :building="primaryBuilding"
+              :submit-label="primaryBuilding ? t('buildings.saveChanges') : t('buildings.form.submit')"
+              :show-skip="Boolean(primaryBuilding)"
+              columns
+              @saved="onBuildingSaved"
+              @skip="isEditingBuilding = false"
+            />
+          </template>
+        </section>
+
+        <!-- Plan y facturación (admin) -->
+        <section
+          v-if="isAdmin && currentTab === 'plans'"
+          id="settings-panel-plans"
+          class="st-card"
+          role="tabpanel"
+          aria-labelledby="settings-plans-heading"
+        >
+          <div class="st-card__head">
+            <h2 id="settings-plans-heading" class="st-card__title">{{ t('app.settingsPlansTitle') }}</h2>
+            <p class="st-card__hint">{{ t('billing.plans.subtitle') }}</p>
+          </div>
+
+          <div
+            v-if="trialBanner"
+            class="st-banner"
+            :class="`st-banner--${trialBanner.tone}`"
+            :role="trialBanner.tone === 'error' ? 'alert' : 'status'"
           >
-            {{ t('app.settingsProvidersDelete') }}
-          </button>
-        </li>
-      </ul>
-    </section>
+            <i class="pi" :class="trialBanner.tone === 'info' ? 'pi-clock' : 'pi-exclamation-triangle'" aria-hidden="true" />
+            <p class="st-banner__text">{{ trialBanner.text }}</p>
+          </div>
 
-    <!-- Subscriptions — solo visible para admin -->
-    <section
-      v-if="isAdmin && activeTab === 'plans'"
-      class="plans-section"
-      aria-labelledby="settings-plans-heading"
-    >
-      <h2 id="settings-plans-heading" class="plans-section__title">
-        {{ t('app.settingsPlansTitle') }}
-      </h2>
-      <p class="plans-section__subtitle">{{ t('billing.plans.subtitle') }}</p>
-      <p
-        v-if="trialBanner"
-        class="billing-banner"
-        :class="`billing-banner--${trialBanner.tone}`"
-        :role="trialBanner.tone === 'error' ? 'alert' : 'status'"
-      >
-        <i class="pi" :class="trialBanner.tone === 'info' ? 'pi-clock' : 'pi-exclamation-triangle'" aria-hidden="true" />
-        {{ trialBanner.text }}
-      </p>
-      <p class="plans-section__usage">
-        {{ t('app.settingsPlanUsageLine', { current: residentsCount, max: activeResidentLimit }) }}
-      </p>
-      <p v-if="planSaveNotice" class="plans-section__notice" role="status">
-        {{ planSaveNotice }}
-      </p>
-      <p v-if="planError" class="plans-section__error" role="alert">
-        {{ planError }}
-      </p>
-      <p v-if="planLoading" class="plans-section__loading">{{ t('app.settingsPlanLoading') }}</p>
+          <div class="st-stats">
+            <article class="st-stat st-stat--blue">
+              <div class="st-stat__head">
+                <h3 class="st-stat__label">{{ t('app.settingsPlanSummaryCurrent') }}</h3>
+                <span class="st-stat__icon st-stat__icon--blue"><i class="pi pi-credit-card" aria-hidden="true" /></span>
+              </div>
+              <p class="st-stat__value">{{ planDisplayName }}</p>
+              <p class="st-stat__hint">{{ planPriceLabel }}</p>
+            </article>
+            <article class="st-stat st-stat--green">
+              <div class="st-stat__head">
+                <h3 class="st-stat__label">{{ t('app.settingsPlanSummaryResidents') }}</h3>
+                <span class="st-stat__icon st-stat__icon--green"><i class="pi pi-users" aria-hidden="true" /></span>
+              </div>
+              <p class="st-stat__value">
+                {{ t('app.settingsPlanSummaryResidentsValue', { current: residentsCount, max: activeResidentLimit }) }}
+              </p>
+              <div
+                class="st-meter"
+                role="progressbar"
+                :aria-valuenow="residentUsagePercent"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                :aria-label="t('app.settingsPlanUsageLine', { current: residentsCount, max: activeResidentLimit })"
+              >
+                <span class="st-meter__fill" :style="{ width: `${residentUsagePercent}%` }" />
+              </div>
+              <p class="st-stat__hint">
+                {{ t('app.settingsPlanUsageLine', { current: residentsCount, max: activeResidentLimit }) }}
+              </p>
+            </article>
+            <article class="st-stat" :class="`st-stat--${planStatus?.tone === 'red' ? 'red' : planStatus?.tone === 'green' ? 'green' : 'amber'}`">
+              <div class="st-stat__head">
+                <h3 class="st-stat__label">{{ t('app.settingsPlanSummaryStatus') }}</h3>
+                <span
+                  class="st-stat__icon"
+                  :class="`st-stat__icon--${planStatus?.tone === 'red' ? 'red' : planStatus?.tone === 'green' ? 'green' : 'amber'}`"
+                >
+                  <i class="pi" :class="planStatus?.tone === 'green' ? 'pi-check' : planStatus?.tone === 'red' ? 'pi-exclamation-triangle' : 'pi-clock'" aria-hidden="true" />
+                </span>
+              </div>
+              <p class="st-stat__value st-stat__value--sm">{{ planStatus?.short || planStatus?.label || '—' }}</p>
+              <p class="st-stat__hint">{{ planStatusHint }}</p>
+            </article>
+          </div>
 
-      <SubscriptionPlansSection
-        :current-plan-id="selectedPlanId"
-        :subscription="subscription"
-        :busy-plan-id="planCheckoutPlanId"
-        :disabled="planLoading"
-        :suggested-plan-id="suggestedPlanId"
-        @select="selectPlan"
-      />
-    </section>
+          <p v-if="planSaveNotice" class="st-notice st-notice--ok" role="status">
+            <i class="pi pi-check-circle" aria-hidden="true" />
+            <span>{{ planSaveNotice }}</span>
+          </p>
+          <p v-if="planError" class="st-notice st-notice--error" role="alert">
+            <i class="pi pi-times-circle" aria-hidden="true" />
+            <span>{{ planError }}</span>
+          </p>
+          <p v-if="planLoading" class="st-status" role="status">{{ t('app.settingsPlanLoading') }}</p>
 
-    <section
-      v-if="isResident"
-      class="settings-card"
-      aria-labelledby="settings-resident-heading"
-    >
-      <h2 id="settings-resident-heading" class="settings-card__title">
-        {{ t('app.settingsResidentProfileTitle') }}
-      </h2>
-      <ul class="settings-card__list" role="list">
-        <li v-if="display.name">
-          <strong>{{ t('app.residentNameLabel') }}:</strong> {{ display.name }}
-        </li>
-        <li v-if="display.floor != null && display.floor !== ''">
-          <strong>{{ t('app.residentFloorLabel') }}:</strong> {{ display.floor }}
-        </li>
-        <li v-if="display.code != null && display.code !== ''">
-          <strong>{{ t('app.residentCodeLabel') }}:</strong> {{ display.code }}
-        </li>
-        <li v-if="display.email">
-          <strong>{{ t('auth.email') }}:</strong> {{ display.email }}
-        </li>
-        <li v-if="display.admissionDate">
-          <strong>{{ t('app.settingsResidentAdmissionLabel') }}:</strong>
-          {{ display.admissionDate }}
-        </li>
-      </ul>
-    </section>
-
-    <section
-      v-if="isResident"
-      class="settings-card"
-      aria-labelledby="settings-resident-password-heading"
-    >
-      <h2 id="settings-resident-password-heading" class="settings-card__title">
-        {{ t('app.settingsResidentPasswordTitle') }}
-      </h2>
-      <p class="settings-card__hint">{{ t('app.settingsResidentPasswordHint') }}</p>
-      <form class="settings-resident-password" @submit.prevent="onSaveResidentPassword">
-        <input
-          type="email"
-          name="username"
-          autocomplete="username"
-          class="visually-hidden"
-          :value="display.email || ''"
-          readonly
-          tabindex="-1"
-          aria-hidden="true"
-        />
-        <label class="settings-card__field" for="settingsResidentPassword">
-          <span>{{ t('auth.passwordPlaceholder') }}</span>
-          <input
-            id="settingsResidentPassword"
-            v-model="residentPassword"
-            type="password"
-            autocomplete="new-password"
-            minlength="6"
-            class="settings-card__input"
-            :disabled="residentPasswordSaving"
+          <SubscriptionPlansSection
+            :current-plan-id="selectedPlanId"
+            :subscription="subscription"
+            :busy-plan-id="planCheckoutPlanId"
+            :disabled="planLoading"
+            :suggested-plan-id="suggestedPlanId"
+            @select="selectPlan"
           />
-        </label>
-        <label class="settings-card__field" for="settingsResidentPasswordConfirm">
-          <span>{{ t('auth.passwordConfirmPlaceholder') }}</span>
-          <input
-            id="settingsResidentPasswordConfirm"
-            v-model="residentPasswordConfirm"
-            type="password"
-            autocomplete="new-password"
-            minlength="6"
-            class="settings-card__input"
-            :disabled="residentPasswordSaving"
-          />
-        </label>
-        <p v-if="residentPasswordNotice" class="settings-card__notice" role="status">
-          {{ residentPasswordNotice }}
-        </p>
-        <p v-if="residentPasswordError" class="settings-card__error" role="alert">
-          {{ residentPasswordError }}
-        </p>
-        <button type="submit" class="settings-card__save" :disabled="residentPasswordSaving">
-          {{ t('app.settingsResidentPasswordSave') }}
-        </button>
-      </form>
-    </section>
+        </section>
+
+        <!-- Ajustes de finanzas (admin) -->
+        <section
+          v-if="isAdmin && currentTab === 'finance'"
+          id="settings-panel-finance"
+          class="st-card"
+          role="tabpanel"
+          aria-labelledby="settings-late-fee-heading"
+        >
+          <div class="st-card__head">
+            <h2 id="settings-late-fee-heading" class="st-card__title">{{ t('app.settingsTabFinance') }}</h2>
+            <p class="st-card__hint">{{ t('app.settingsFinanceHint') }}</p>
+          </div>
+          <p v-if="lateFeeLoading" class="st-status" role="status">{{ t('financeAdmin.loading') }}</p>
+          <form class="st-form" novalidate @submit.prevent="onSaveLateFee">
+            <div class="st-form__grid">
+              <div class="st-input-field">
+                <label for="settingsLateFeePerDay">{{ t('financeAdmin.lateFeePerDay') }}</label>
+                <div class="st-affix">
+                  <span class="st-affix__prefix" aria-hidden="true">S/</span>
+                  <input
+                    id="settingsLateFeePerDay"
+                    v-model.number="lateFeePerDay"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputmode="decimal"
+                    class="st-input"
+                    aria-describedby="settingsLateFeeHint"
+                    :aria-invalid="Boolean(lateFeeError)"
+                  />
+                </div>
+                <p id="settingsLateFeeHint" class="st-input-field__hint">{{ t('financeAdmin.lateFeeHint') }}</p>
+              </div>
+            </div>
+            <div class="st-card__foot">
+              <p v-if="lateFeeNotice" class="st-notice st-notice--ok" role="status">
+                <i class="pi pi-check-circle" aria-hidden="true" />
+                <span>{{ lateFeeNotice }}</span>
+              </p>
+              <p v-if="lateFeeError" class="st-notice st-notice--error" role="alert">
+                <i class="pi pi-times-circle" aria-hidden="true" />
+                <span>{{ lateFeeError }}</span>
+              </p>
+              <button type="submit" class="st-btn st-btn--primary" :disabled="isSavingLateFee || lateFeeLoading">
+                <i class="pi" :class="isSavingLateFee ? 'pi-spin pi-spinner' : 'pi-check'" aria-hidden="true" />
+                {{ isSavingLateFee ? t('app.settingsSaving') : t('app.settingsSaveChanges') }}
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <!-- Admisión (admin) -->
+        <template v-if="isAdmin && currentTab === 'admission'">
+          <section
+            id="settings-panel-admission"
+            class="st-card"
+            role="tabpanel"
+            aria-labelledby="settings-admission-rules-heading"
+          >
+            <div class="st-card__head">
+              <h2 id="settings-admission-rules-heading" class="st-card__title">
+                {{ t('financeAdmin.admissionRulesTitle') }}
+              </h2>
+              <p class="st-card__hint">{{ t('financeAdmin.admissionRulesHint') }}</p>
+            </div>
+            <p v-if="lateFeeLoading" class="st-status" role="status">{{ t('financeAdmin.loading') }}</p>
+            <form class="st-form" novalidate @submit.prevent="onSaveAdmissionRules">
+              <div class="st-form__grid">
+                <div class="st-input-field">
+                  <label for="settingsAdmissionPayFromDay">{{ t('financeAdmin.admissionRangeFrom') }}</label>
+                  <input
+                    id="settingsAdmissionPayFromDay"
+                    v-model.number="admissionPayFromDay"
+                    type="number"
+                    min="1"
+                    max="31"
+                    step="1"
+                    inputmode="numeric"
+                    class="st-input"
+                  />
+                </div>
+                <div class="st-input-field">
+                  <label for="settingsAdmissionPayToDay">{{ t('financeAdmin.admissionRangeTo') }}</label>
+                  <input
+                    id="settingsAdmissionPayToDay"
+                    v-model.number="admissionPayToDay"
+                    type="number"
+                    min="1"
+                    max="31"
+                    step="1"
+                    inputmode="numeric"
+                    class="st-input"
+                  />
+                </div>
+              </div>
+              <p class="st-note" aria-live="polite">
+                <i class="pi pi-info-circle" aria-hidden="true" />
+                <span>
+                  {{
+                    admissionRangePreview.admissionPayToDay >= 31
+                      ? t('financeAdmin.admissionRangePreviewAll', {
+                          from: admissionRangePreview.admissionPayFromDay,
+                          to: admissionRangePreview.admissionPayToDay,
+                        })
+                      : t('financeAdmin.admissionRangePreview', {
+                          from: admissionRangePreview.admissionPayFromDay,
+                          to: admissionRangePreview.admissionPayToDay,
+                          after: admissionRangePreview.admissionPayToDay + 1,
+                        })
+                  }}
+                </span>
+              </p>
+              <div class="st-card__foot">
+                <p v-if="admissionRuleNotice" class="st-notice st-notice--ok" role="status">
+                  <i class="pi pi-check-circle" aria-hidden="true" />
+                  <span>{{ admissionRuleNotice }}</span>
+                </p>
+                <p v-if="admissionRuleError" class="st-notice st-notice--error" role="alert">
+                  <i class="pi pi-times-circle" aria-hidden="true" />
+                  <span>{{ admissionRuleError }}</span>
+                </p>
+                <button type="submit" class="st-btn st-btn--primary" :disabled="isSavingAdmissionRules || lateFeeLoading">
+                  <i class="pi" :class="isSavingAdmissionRules ? 'pi-spin pi-spinner' : 'pi-check'" aria-hidden="true" />
+                  {{ isSavingAdmissionRules ? t('app.settingsSaving') : t('app.settingsSaveChanges') }}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section class="st-card" aria-labelledby="settings-admission-residents-heading">
+            <div class="st-card__head st-card__head--row">
+              <div>
+                <h2 id="settings-admission-residents-heading" class="st-card__title">
+                  {{ t('financeAdmin.admissionResidentsTitle') }}
+                </h2>
+                <p class="st-card__hint">{{ t('financeAdmin.admissionResidentsHint') }}</p>
+              </div>
+              <span class="st-pill st-pill--soft">
+                {{ t('app.settingsAdmissionResidentsCount', { n: financesStore.state.residents.length }, financesStore.state.residents.length) }}
+              </span>
+            </div>
+            <label class="st-search" for="settingsAdmissionResidentSearch">
+              <span class="visually-hidden">{{ t('financeAdmin.extraSearch') }}</span>
+              <i class="pi pi-search" aria-hidden="true" />
+              <input
+                id="settingsAdmissionResidentSearch"
+                v-model="admissionResidentSearch"
+                type="search"
+                :placeholder="t('financeAdmin.extraSearchPlaceholder')"
+              />
+            </label>
+            <div v-if="!financesStore.state.residents.length" class="st-empty">
+              <span class="st-empty__icon"><i class="pi pi-users" aria-hidden="true" /></span>
+              <p class="st-empty__text">{{ t('financeAdmin.admissionResidentsEmpty') }}</p>
+            </div>
+            <div v-else-if="!admissionResidents.length" class="st-empty">
+              <span class="st-empty__icon"><i class="pi pi-search" aria-hidden="true" /></span>
+              <p class="st-empty__text">{{ t('financeAdmin.admissionResidentsNone') }}</p>
+              <button type="button" class="st-btn" @click="admissionResidentSearch = ''">
+                <i class="pi pi-times" aria-hidden="true" />
+                {{ t('app.settingsClearSearch') }}
+              </button>
+            </div>
+            <ul v-else class="st-list" role="list">
+              <li v-for="resident in admissionResidents" :key="resident.id" class="st-row">
+                <span class="st-avatar" aria-hidden="true">{{ initialsOf(resident.name) }}</span>
+                <div class="st-row__text">
+                  <strong>{{ resident.name }}</strong>
+                  <span>
+                    {{ t('app.residentFloorApt', { floor: resident.floor, code: resident.code }) }}
+                    <template v-if="resident.admissionDate">
+                      · {{ t('app.residentAdmissionDate', { date: formatDayMonth(resident.admissionDate, locale) }) }}
+                    </template>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  class="st-toggle"
+                  :aria-pressed="Boolean(resident.billFromNextMonth)"
+                  :disabled="Boolean(billingResidentId) || lateFeeLoading"
+                  @click="onToggleBillFromNextMonth(resident)"
+                >
+                  <span class="st-toggle__track" aria-hidden="true"><span class="st-toggle__knob" /></span>
+                  <span>
+                    {{ resident.billFromNextMonth ? t('app.billFromNextMonthOn') : t('app.billFromNextMonthAction') }}
+                  </span>
+                </button>
+              </li>
+            </ul>
+            <p v-if="billingResidentError" class="st-notice st-notice--error" role="alert">
+              <i class="pi pi-times-circle" aria-hidden="true" />
+              <span>{{ billingResidentError }}</span>
+            </p>
+          </section>
+        </template>
+
+        <!-- Proveedores (admin) -->
+        <template v-if="isAdmin && currentTab === 'providers'">
+          <section
+            id="settings-panel-providers"
+            class="st-card"
+            role="tabpanel"
+            aria-labelledby="settings-providers-heading"
+          >
+            <div class="st-card__head">
+              <h2 id="settings-providers-heading" class="st-card__title">{{ t('app.settingsProvidersTitle') }}</h2>
+              <p class="st-card__hint">{{ t('app.settingsProvidersHint') }}</p>
+            </div>
+            <form class="st-form" novalidate @submit.prevent="addServiceProvider">
+              <h3 class="st-group__title">{{ t('app.settingsProvidersAddTitle') }}</h3>
+              <div class="st-form__grid">
+                <div class="st-input-field st-input-field--wide">
+                  <label for="settingsProviderName">{{ t('app.settingsProvidersName') }}</label>
+                  <input
+                    id="settingsProviderName"
+                    v-model="providerDraft.name"
+                    type="text"
+                    class="st-input"
+                    :placeholder="t('app.settingsProvidersNamePlaceholder')"
+                    :disabled="providersSaving"
+                    maxlength="80"
+                    autocomplete="organization"
+                  />
+                </div>
+                <div class="st-input-field">
+                  <label for="settingsProviderPhone">{{ t('app.settingsProvidersPhone') }}</label>
+                  <input
+                    id="settingsProviderPhone"
+                    v-model="providerDraft.phone"
+                    type="tel"
+                    class="st-input"
+                    :placeholder="t('app.settingsProvidersPhonePlaceholder')"
+                    :disabled="providersSaving"
+                    maxlength="30"
+                    autocomplete="tel"
+                  />
+                </div>
+                <div class="st-input-field">
+                  <label for="settingsProviderSpecialty">{{ t('app.settingsProvidersSpecialty') }}</label>
+                  <input
+                    id="settingsProviderSpecialty"
+                    v-model="providerDraft.specialty"
+                    type="text"
+                    class="st-input"
+                    :placeholder="t('app.settingsProvidersSpecialtyPlaceholder')"
+                    :disabled="providersSaving"
+                    maxlength="60"
+                  />
+                </div>
+              </div>
+              <div class="st-card__foot">
+                <p v-if="providersNotice" class="st-notice st-notice--ok" role="status">
+                  <i class="pi pi-check-circle" aria-hidden="true" />
+                  <span>{{ providersNotice }}</span>
+                </p>
+                <p v-if="providersError" class="st-notice st-notice--error" role="alert">
+                  <i class="pi pi-times-circle" aria-hidden="true" />
+                  <span>{{ providersError }}</span>
+                </p>
+                <button
+                  type="submit"
+                  class="st-btn st-btn--primary"
+                  :disabled="providersSaving || providersLoading || !String(providerDraft.name || '').trim()"
+                >
+                  <i class="pi" :class="providersSaving ? 'pi-spin pi-spinner' : 'pi-plus'" aria-hidden="true" />
+                  {{ t('app.settingsProvidersAdd') }}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section class="st-card" aria-labelledby="settings-providers-list-heading" :aria-busy="providersLoading">
+            <div class="st-card__head st-card__head--row">
+              <h2 id="settings-providers-list-heading" class="st-card__title">{{ t('app.settingsProvidersListTitle') }}</h2>
+              <span class="st-pill st-pill--soft">
+                {{ t('app.settingsProvidersCount', { n: serviceProviders.length }, serviceProviders.length) }}
+              </span>
+            </div>
+            <p v-if="providersLoading" class="st-status" role="status">{{ t('app.settingsProvidersLoading') }}</p>
+            <div v-else-if="!serviceProviders.length" class="st-empty">
+              <span class="st-empty__icon"><i class="pi pi-wrench" aria-hidden="true" /></span>
+              <p class="st-empty__text">{{ t('app.settingsProvidersEmpty') }}</p>
+              <button
+                type="button"
+                class="st-btn st-btn--primary"
+                @click="focusProviderName"
+              >
+                <i class="pi pi-plus" aria-hidden="true" />
+                {{ t('app.settingsProvidersAdd') }}
+              </button>
+            </div>
+            <ul v-else class="st-list" role="list">
+              <li v-for="provider in serviceProviders" :key="provider.id" class="st-row">
+                <span class="st-avatar st-avatar--amber" aria-hidden="true">{{ initialsOf(provider.name) }}</span>
+                <div class="st-row__text">
+                  <strong>{{ provider.name }}</strong>
+                  <span v-if="provider.specialty || provider.phone">
+                    <template v-if="provider.specialty">{{ provider.specialty }}</template>
+                    <template v-if="provider.specialty && provider.phone"> · </template>
+                    <template v-if="provider.phone">{{ provider.phone }}</template>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  class="st-btn st-btn--danger st-btn--sm"
+                  :aria-label="t('app.settingsProvidersDeleteAria', { name: provider.name })"
+                  :disabled="Boolean(deletingProviderId) || providersSaving"
+                  @click="removeServiceProvider(provider.id)"
+                >
+                  <i
+                    class="pi"
+                    :class="deletingProviderId === String(provider.id) ? 'pi-spin pi-spinner' : 'pi-trash'"
+                    aria-hidden="true"
+                  />
+                  <span class="st-btn__label">{{ t('app.settingsProvidersDelete') }}</span>
+                </button>
+              </li>
+            </ul>
+          </section>
+        </template>
+
+        <!-- Seguridad (resident) -->
+        <section
+          v-if="isResident && currentTab === 'security'"
+          id="settings-panel-security"
+          class="st-card"
+          role="tabpanel"
+          aria-labelledby="settings-resident-password-heading"
+        >
+          <div class="st-card__head">
+            <h2 id="settings-resident-password-heading" class="st-card__title">
+              {{ t('app.settingsResidentPasswordTitle') }}
+            </h2>
+            <p class="st-card__hint">{{ t('app.settingsResidentPasswordHint') }}</p>
+          </div>
+          <form class="st-form settings-resident-password" @submit.prevent="onSaveResidentPassword">
+            <input
+              type="email"
+              name="username"
+              autocomplete="username"
+              class="visually-hidden"
+              :value="display.email || ''"
+              readonly
+              tabindex="-1"
+              aria-hidden="true"
+            />
+            <div class="st-form__grid">
+              <div class="st-input-field">
+                <label for="settingsResidentPassword">{{ t('auth.passwordPlaceholder') }}</label>
+                <input
+                  id="settingsResidentPassword"
+                  v-model="residentPassword"
+                  type="password"
+                  autocomplete="new-password"
+                  minlength="6"
+                  class="st-input"
+                  aria-describedby="settingsResidentPasswordRule"
+                  :aria-invalid="Boolean(residentPasswordError)"
+                  :disabled="residentPasswordSaving"
+                />
+              </div>
+              <div class="st-input-field">
+                <label for="settingsResidentPasswordConfirm">{{ t('auth.passwordConfirmPlaceholder') }}</label>
+                <input
+                  id="settingsResidentPasswordConfirm"
+                  v-model="residentPasswordConfirm"
+                  type="password"
+                  autocomplete="new-password"
+                  minlength="6"
+                  class="st-input"
+                  aria-describedby="settingsResidentPasswordRule"
+                  :aria-invalid="Boolean(residentPasswordError)"
+                  :disabled="residentPasswordSaving"
+                />
+              </div>
+            </div>
+            <p id="settingsResidentPasswordRule" class="st-input-field__hint">{{ t('app.settingsPasswordRule') }}</p>
+            <div class="st-card__foot">
+              <p v-if="residentPasswordNotice" class="st-notice st-notice--ok" role="status">
+                <i class="pi pi-check-circle" aria-hidden="true" />
+                <span>{{ residentPasswordNotice }}</span>
+              </p>
+              <p v-if="residentPasswordError" class="st-notice st-notice--error" role="alert">
+                <i class="pi pi-times-circle" aria-hidden="true" />
+                <span>{{ residentPasswordError }}</span>
+              </p>
+              <button type="submit" class="st-btn st-btn--primary" :disabled="residentPasswordSaving">
+                <i class="pi" :class="residentPasswordSaving ? 'pi-spin pi-spinner' : 'pi-lock'" aria-hidden="true" />
+                {{ residentPasswordSaving ? t('app.settingsSaving') : t('app.settingsResidentPasswordSave') }}
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <!-- Idioma y preferencias -->
+        <section
+          v-if="currentTab === 'preferences'"
+          id="settings-panel-preferences"
+          class="st-card"
+          role="tabpanel"
+          aria-labelledby="settings-prefs-heading"
+        >
+          <div class="st-card__head">
+            <h2 id="settings-prefs-heading" class="st-card__title">{{ t('app.settingsTabPreferences') }}</h2>
+            <p class="st-card__hint">{{ t('app.settingsPrefsHint') }}</p>
+          </div>
+          <div class="st-group">
+            <h3 id="settings-lang-label" class="st-group__title">{{ t('app.settingsPrefsLanguage') }}</h3>
+            <div class="st-lang" role="radiogroup" aria-labelledby="settings-lang-label">
+              <button
+                v-for="option in languageOptions"
+                :id="`settings-lang-${option.code}`"
+                :key="option.code"
+                type="button"
+                role="radio"
+                class="st-lang__option"
+                :class="{ 'is-active': locale === option.code }"
+                :aria-checked="locale === option.code"
+                :tabindex="locale === option.code ? 0 : -1"
+                :lang="option.code === 'es' ? 'es' : 'en'"
+                @click="setLocale(option.code)"
+                @keydown="onLanguageKeydown"
+              >
+                <span class="st-lang__code" aria-hidden="true">{{ option.short }}</span>
+                <span class="st-lang__text">
+                  <strong>{{ option.label }}</strong>
+                  <small>{{ option.hint }}</small>
+                </span>
+                <i class="pi st-lang__check" :class="locale === option.code ? 'pi-check-circle' : 'pi-circle'" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+          <div class="st-group">
+            <h3 class="st-group__title">{{ t('app.settingsPrefsPreview') }}</h3>
+            <dl class="st-fields">
+              <div class="st-field">
+                <dt>{{ t('app.settingsPrefsPreviewDate') }}</dt>
+                <dd>{{ previewSample.date }}</dd>
+              </div>
+              <div class="st-field">
+                <dt>{{ t('app.settingsPrefsPreviewAmount') }}</dt>
+                <dd>{{ previewSample.amount }}</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
       </div>
     </div>
   </div>
@@ -1059,123 +1523,945 @@ watch(admissionRuleNotice, (msg) => {
 
 <style scoped>
 .app-view {
-  padding: 1.75rem 1.5rem 2.5rem;
-  max-width: 72rem;
+  padding: 1.25rem 1.5rem 2.5rem;
+  width: 100%;
+  max-width: 88rem;
+  box-sizing: border-box;
 }
 
-.app-view--ai {
-  max-width: 88rem;
-  padding-top: 1rem;
+.st {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  min-width: 0;
 }
 
-.settings-tabs {
-  align-self: center;
+.st *,
+.st *::before,
+.st *::after {
+  box-sizing: border-box;
+}
+
+/* ---------- Header ---------- */
+.st-head {
   display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 0.15rem;
-  max-width: 100%;
-  padding: 0.3rem;
-  overflow-x: auto;
-  border-radius: 999px;
-  background: #eef0f3;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  flex-wrap: wrap;
 }
 
-.settings-tabs__item {
+.st-head__text {
+  min-width: 0;
+}
+
+.st-head__title {
+  margin: 0;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: #0f172a;
+}
+
+.st-head__sub {
+  margin: 0.25rem 0 0;
+  font-size: 0.88rem;
+  color: #6e6e73;
+}
+
+/* ---------- Buttons ---------- */
+.st-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 2.45rem;
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  color: #1e3a8a;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.st-btn .pi {
+  font-size: 0.78rem;
+}
+
+.st-btn:hover:not(:disabled) {
+  background: #e8eefc;
+  border-color: transparent;
+}
+
+.st-btn--primary {
+  background: #1e3a8a;
+  border-color: #1e3a8a;
+  color: #fff;
+}
+
+.st-btn--primary:hover:not(:disabled) {
+  background: #172554;
+  border-color: #172554;
+}
+
+.st-btn--danger {
+  color: #b42318;
+}
+
+.st-btn--danger:hover:not(:disabled) {
+  background: #fde4e4;
+}
+
+.st-btn--sm {
+  min-height: 2.1rem;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.78rem;
+}
+
+.st-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.st-btn:focus-visible,
+.st-nav__item:focus-visible,
+.st-toggle:focus-visible,
+.st-lang__option:focus-visible,
+.st-banner__action:focus-visible,
+.st-notice__action:focus-visible {
+  outline: 2px solid #1e3a8a;
+  outline-offset: 2px;
+}
+
+/* ---------- Pills ---------- */
+.st-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  white-space: nowrap;
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.st-pill .pi {
+  font-size: 0.7rem;
+}
+
+.st-pill--navy { background: #1e3a8a; color: #fff; }
+.st-pill--blue { background: #e8eefc; color: #1e3a8a; }
+.st-pill--green { background: #e3f4e8; color: #166534; }
+.st-pill--amber { background: #fdf3dc; color: #92400e; }
+.st-pill--red { background: #fde4e4; color: #b42318; }
+.st-pill--soft { background: #f1f5f9; color: #334155; }
+
+/* ---------- Account summary ---------- */
+.st-account {
+  display: flex;
+  align-items: center;
+  gap: 1rem 1.1rem;
+  flex-wrap: wrap;
+  padding: 1rem 1.25rem;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.st-account__main {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.st-account__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem 0.6rem;
+  flex-wrap: wrap;
+}
+
+.st-account__name {
+  margin: 0;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.st-account__meta {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.1rem;
+  font-size: 0.82rem;
+  color: #475569;
+}
+
+.st-account__meta li {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.st-account__meta .pi {
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.st-account__plan {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.st-avatar {
   flex-shrink: 0;
-  padding: 0.55rem 1.05rem;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #e8eefc;
+  color: #1e3a8a;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.st-avatar--lg {
+  width: 3.25rem;
+  height: 3.25rem;
+  font-size: 1rem;
+  background: #1e3a8a;
+  color: #fff;
+}
+
+.st-avatar--amber {
+  background: #fdf3dc;
+  color: #92400e;
+}
+
+/* ---------- Status / notices / banners ---------- */
+.st-status {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #6e6e73;
+}
+
+.st-notice {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0.55rem 0.9rem;
+  border-radius: 14px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.st-notice > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.st-notice--ok { background: #e3f4e8; color: #14532d; }
+.st-notice--ok > .pi { color: #15803d; }
+.st-notice--error { background: #fde4e4; color: #7f1d1d; }
+.st-notice--error > .pi { color: #b42318; }
+.st-notice--warn { background: #fdf3dc; color: #78350f; }
+.st-notice--warn > .pi { color: #b45309; }
+
+.st-notice__action,
+.st-banner__action {
+  flex-shrink: 0;
+  padding: 0.35rem 0.85rem;
   border: none;
   border-radius: 999px;
-  background: transparent;
-  color: #4b5563;
+  background: #fff;
+  color: inherit;
   font: inherit;
-  font-size: 0.875rem;
-  font-weight: 500;
-  letter-spacing: -0.015em;
+  font-size: 0.76rem;
+  font-weight: 650;
   cursor: pointer;
   white-space: nowrap;
 }
 
-.settings-tabs__item i {
-  font-size: 0.9rem;
+.st-notice__action:hover,
+.st-banner__action:hover {
+  text-decoration: underline;
 }
 
-.settings-tabs__item:hover:not(.is-active) {
-  color: #1d1d1f;
+.st-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.6rem 0.65rem 0.6rem 1rem;
+  border-radius: 16px;
+  font-size: 0.82rem;
+  line-height: 1.4;
 }
 
-.settings-tabs__item.is-active {
+.st-banner__text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.st-banner--info { background: #e8eefc; color: #1e3a8a; }
+.st-banner--warn { background: #fdf3dc; color: #78350f; }
+.st-banner--warn > .pi { color: #b45309; }
+.st-banner--error { background: #fde4e4; color: #7f1d1d; }
+.st-banner--error > .pi { color: #b42318; }
+
+.st-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: 14px;
+  background: #e8eefc;
+  color: #1e3a8a;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.st-note .pi {
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+}
+
+/* ---------- Layout: section nav + content ---------- */
+.st-layout {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.st-nav {
+  position: sticky;
+  top: 1rem;
+  padding: 0.5rem;
+  border-radius: 18px;
   background: #fff;
-  color: #1d1d1f;
-  font-weight: 600;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-.settings-tabs__item:focus-visible {
-  outline: 2px solid var(--apple-blue, #1e3a8a);
-  outline-offset: 2px;
-}
-
-.ai-shell {
+.st-nav__list {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 8.5rem);
+  gap: 0.15rem;
+}
+
+.st-nav__item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #334155;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.st-nav__item .pi {
+  width: 1rem;
+  font-size: 0.85rem;
+  color: #64748b;
+  text-align: center;
+}
+
+.st-nav__item:hover:not(.is-active) {
+  background: #f1f5f9;
+}
+
+.st-nav__item.is-active {
+  background: #1e3a8a;
+  color: #fff;
+}
+
+.st-nav__item.is-active .pi {
+  color: #fff;
+}
+
+.st-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+/* ---------- Section cards ---------- */
+.st-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  padding: 1.25rem 1.35rem;
+  border-radius: 18px;
   background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  min-width: 0;
 }
 
-.settings-body {
-  padding: 1.25rem 1.5rem 1.75rem;
+.st-card__head {
+  min-width: 0;
 }
 
-.app-view__status {
-  margin: 0 0 1rem;
+.st-card__head--row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  flex-wrap: wrap;
+}
+
+.st-card__title {
+  margin: 0;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+}
+
+.st-card__hint {
+  margin: 0.3rem 0 0;
+  max-width: 46rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #6e6e73;
+}
+
+.st-card__hint--below {
+  margin-top: -0.4rem;
+}
+
+.st-card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.6rem 0.75rem;
+  flex-wrap: wrap;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+.st-card__foot .st-notice {
+  flex: 1 1 16rem;
+  margin-right: auto;
+}
+
+/* Groups of read-only fields in two columns */
+.st-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.st-group + .st-group {
+  padding-top: 1.1rem;
+  border-top: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+.st-group__title {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: #0f172a;
+}
+
+.st-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 1rem;
+  margin: 0;
+}
+
+.st-field {
+  min-width: 0;
+  padding: 0.7rem 0.85rem;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.st-field--wide {
+  grid-column: 1 / -1;
+}
+
+.st-field dt {
+  margin: 0 0 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #6e6e73;
+}
+
+.st-field dd {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.st-field dd.is-empty {
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+/* Editable forms */
+.st-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.st-form__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem 1rem;
+}
+
+.st-input-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.st-input-field--wide {
+  grid-column: 1 / -1;
+}
+
+.st-input-field > label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.st-input-field__hint {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: #6e6e73;
+}
+
+.st-input {
+  width: 100%;
+  min-height: 2.6rem;
+  padding: 0 0.85rem;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 12px;
+  background: #fff;
+  font: inherit;
   font-size: 0.875rem;
-  color: var(--apple-text-secondary, #6e6e73);
+  color: #0f172a;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.app-view__status--warn {
-  color: #b42318;
+.st-input:focus {
+  outline: none;
+  border-color: #1e3a8a;
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.15);
 }
 
-/* ── Perfil card ── */
-.settings-card {
+.st-input:disabled {
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.st-input[aria-invalid='true'] {
+  border-color: #b42318;
+}
+
+.st-affix {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.st-affix__prefix {
+  position: absolute;
+  left: 0.85rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #64748b;
+  pointer-events: none;
+}
+
+.st-affix .st-input {
+  padding-left: 2.2rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Search */
+.st-search {
+  position: relative;
+  display: block;
+  max-width: 24rem;
+}
+
+.st-search .pi {
+  position: absolute;
+  left: 0.85rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.8rem;
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.st-search input {
+  width: 100%;
+  height: 2.4rem;
+  padding: 0 0.9rem 0 2.2rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #f8fafc;
+  font: inherit;
+  font-size: 0.84rem;
+  color: #0f172a;
+}
+
+.st-search input:focus {
+  outline: 2px solid #1e3a8a;
+  outline-offset: 1px;
   background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+/* Lists (residents, providers) */
+.st-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 26rem;
+  overflow-y: auto;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  border-radius: 14px;
+}
+
+.st-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 0.9rem;
+}
+
+.st-row + .st-row {
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.st-row__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.st-row__text strong {
+  font-size: 0.875rem;
+  font-weight: 650;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.st-row__text span {
+  font-size: 0.75rem;
+  color: #6e6e73;
+}
+
+/* Switch-like toggle (billFromNextMonth) */
+.st-toggle {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.8rem 0.35rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.st-toggle:hover:not(:disabled) {
+  background: #f8fafc;
+}
+
+.st-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.st-toggle[aria-pressed='true'] {
+  background: #e8eefc;
+  border-color: transparent;
+  color: #1e3a8a;
+}
+
+.st-toggle__track {
+  position: relative;
+  width: 1.9rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  background: #cbd5e1;
+  transition: background 0.15s ease;
+  flex-shrink: 0;
+}
+
+.st-toggle__knob {
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+
+.st-toggle[aria-pressed='true'] .st-toggle__track {
+  background: #1e3a8a;
+}
+
+.st-toggle[aria-pressed='true'] .st-toggle__knob {
+  transform: translateX(0.8rem);
+}
+
+/* Empty state */
+.st-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 1.75rem 1rem;
+  border-radius: 14px;
+  background: #f8fafc;
+  text-align: center;
+}
+
+.st-empty__icon {
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 50%;
+  background: #fff;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.05rem;
+}
+
+.st-empty__text {
+  margin: 0;
+  max-width: 28rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: #475569;
+}
+
+/* Plan summary tiles */
+.st-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.st-stat {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0.95rem 1.05rem 1rem;
   border-radius: 16px;
-  padding: 1.2rem 1.25rem;
-  max-width: 32rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-  margin-bottom: 1.5rem;
+  background: var(--stat-bg, #f1f5f9);
 }
 
-.settings-card--admission {
-  max-width: 40rem;
+.st-stat--blue { --stat-bg: #e8eefc; }
+.st-stat--green { --stat-bg: #e3f4e8; }
+.st-stat--amber { --stat-bg: #fdf3dc; }
+.st-stat--red { --stat-bg: #fde4e4; }
+
+.st-stat__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
 }
 
-.settings-card__title {
-  margin: 0 0 0.65rem;
-  font-size: 1.0625rem;
+.st-stat__label {
+  margin: 0;
+  font-size: 0.8rem;
   font-weight: 600;
-  letter-spacing: -0.02em;
-  color: var(--apple-text, #1d1d1f);
+  color: #475569;
 }
 
-.settings-card__subtitle {
-  margin: 1.25rem 0 0.45rem;
-  font-size: 0.9375rem;
-  font-weight: 600;
+.st-stat__icon {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  background: #fff;
+}
+
+.st-stat__icon--blue { color: #1e3a8a; }
+.st-stat__icon--green { color: #15803d; }
+.st-stat__icon--amber { color: #b45309; }
+.st-stat__icon--red { color: #b42318; }
+
+.st-stat__value {
+  margin: 0 0 0.35rem;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.45rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.st-stat__value--sm {
+  font-size: 1.1rem;
   letter-spacing: -0.02em;
-  color: var(--apple-text, #1d1d1f);
+}
+
+.st-stat__hint {
+  margin: auto 0 0;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.35;
+  color: #6e6e73;
+}
+
+.st-meter {
+  height: 0.4rem;
+  margin: 0.1rem 0 0.5rem;
+  border-radius: 999px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.st-meter__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #15803d;
+  transition: width 0.2s ease;
+}
+
+/* Language picker */
+.st-lang {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.st-lang__option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.8rem 0.95rem;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.st-lang__option:hover:not(.is-active) {
+  background: #f8fafc;
+}
+
+.st-lang__option.is-active {
+  border-color: #1e3a8a;
+  background: #e8eefc;
+}
+
+.st-lang__code {
+  flex-shrink: 0;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f1f5f9;
+  color: #1e3a8a;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.st-lang__option.is-active .st-lang__code {
+  background: #fff;
+}
+
+.st-lang__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.st-lang__text strong {
+  font-size: 0.9rem;
+  font-weight: 650;
+  color: #0f172a;
+}
+
+.st-lang__text small {
+  font-size: 0.74rem;
+  color: #6e6e73;
+}
+
+.st-lang__check {
+  flex-shrink: 0;
+  font-size: 1rem;
+  color: #cbd5e1;
+}
+
+.st-lang__option.is-active .st-lang__check {
+  color: #1e3a8a;
 }
 
 .visually-hidden {
@@ -1190,272 +2476,119 @@ watch(admissionRuleNotice, (msg) => {
   border: 0;
 }
 
-.settings-card__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  font-size: 0.875rem;
-  color: var(--apple-text, #1d1d1f);
+/* ---------- Responsive ---------- */
+@media (max-width: 1100px) {
+  .st-layout {
+    grid-template-columns: 13rem minmax(0, 1fr);
+  }
+  .st-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .st-stats .st-stat:last-child {
+    grid-column: 1 / -1;
+  }
 }
 
-.settings-card__hint {
-  margin: 0 0 0.85rem;
-  font-size: 0.8125rem;
-  line-height: 1.45;
-  color: var(--apple-text-secondary, #6e6e73);
+@media (max-width: 900px) {
+  .st-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.9rem;
+  }
+  .st-nav {
+    position: static;
+    padding: 0;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+  }
+  .st-nav__list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+  .st-nav__item {
+    width: auto;
+    padding: 0.45rem 0.9rem;
+    border: 1px solid rgba(15, 23, 42, 0.1);
+    background: #fff;
+    font-size: 0.8rem;
+  }
+  .st-nav__item.is-active {
+    border-color: #1e3a8a;
+  }
 }
 
-.settings-card__status {
-  margin: 0 0 0.75rem;
-  font-size: 0.8125rem;
-  color: var(--apple-text-secondary, #6e6e73);
+@media (max-width: 720px) {
+  .app-view {
+    padding: 1rem 1rem 2rem;
+  }
+  .st-head__title {
+    font-size: 1.35rem;
+  }
+  .st-account {
+    padding: 0.9rem 1rem;
+  }
+  .st-account__plan {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .st-card {
+    padding: 1rem 0.95rem;
+  }
+  .st-fields,
+  .st-form__grid,
+  .st-stats,
+  .st-lang {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .st-stats .st-stat:last-child {
+    grid-column: auto;
+  }
+  .st-card__foot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .st-card__foot .st-notice {
+    flex-basis: auto;
+    margin-right: 0;
+  }
+  .st-card__foot .st-btn {
+    width: 100%;
+  }
+  .st-banner {
+    flex-wrap: wrap;
+  }
+  .st-banner__action {
+    margin-left: auto;
+  }
+  .st-search {
+    max-width: none;
+  }
+  .st-row {
+    flex-wrap: wrap;
+  }
+  .st-row .st-toggle {
+    margin-left: 3.15rem;
+    white-space: normal;
+    text-align: left;
+  }
+  .st-btn__label {
+    display: none;
+  }
+  .st-row .st-btn--sm {
+    width: 2.25rem;
+    min-height: 2.25rem;
+    padding: 0;
+  }
 }
 
-.settings-card__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: #6e6e73;
-}
-
-.settings-provider-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-}
-
-.settings-card__input {
-  height: 2.75rem;
-  border: 1px solid #d2d2d7;
-  border-radius: 8px;
-  padding: 0 0.7rem;
-  font: inherit;
-  font-size: 0.875rem;
-  font-weight: 400;
-  color: #1d1d1f;
-  background: #fff;
-  box-sizing: border-box;
-}
-
-.settings-card__input:focus {
-  outline: none;
-  border-color: #0071e3;
-}
-
-.settings-card__notice {
-  margin: 0.65rem 0 0;
-  font-size: 0.8125rem;
-  color: #248a3d;
-}
-
-.settings-card__error {
-  margin: 0.65rem 0 0;
-  font-size: 0.8125rem;
-  color: #b42318;
-}
-
-.settings-resident-password .visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
-
-.settings-card__save {
-  margin-top: 0.85rem;
-  min-height: 1.7rem;
-  padding: 0.22rem 0.85rem;
-  border: none;
-  border-radius: 8px;
-  background: #0071e3;
-  color: #fff;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.settings-card__save:hover:not(:disabled) {
-  background: #0066cc;
-}
-
-.settings-card__save:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.admission-range {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem 1rem;
-  margin-bottom: 0.75rem;
-}
-
-.admission-resident-list {
-  list-style: none;
-  margin: 0.75rem 0 0;
-  padding: 0;
-  max-height: 20rem;
-  overflow: auto;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 12px;
-}
-
-.admission-resident-list__empty {
-  padding: 0.85rem 0.9rem;
-  font-size: 0.8125rem;
-  color: #6e6e73;
-}
-
-.admission-resident {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.7rem 0.85rem;
-}
-
-.admission-resident + .admission-resident {
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.admission-resident__info {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.admission-resident__info strong {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #1d1d1f;
-}
-
-.admission-resident__info span {
-  font-size: 0.75rem;
-  color: #6e6e73;
-}
-
-.admission-resident__btn {
-  flex-shrink: 0;
-  max-width: 11.5rem;
-  padding: 0.38rem 0.6rem;
-  border: 1px solid #d2d2d7;
-  border-radius: 8px;
-  background: #fff;
-  color: #1d1d1f;
-  font-size: 0.72rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.admission-resident__btn:hover:not(:disabled) {
-  border-color: #1e3a8a;
-  color: #1e3a8a;
-  background: #f4f7ff;
-}
-
-.admission-resident__btn.is-on {
-  border-color: #1e3a8a;
-  background: #eef3ff;
-  color: #1e3a8a;
-}
-
-.admission-resident__btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-/* ── Sección de planes ── */
-.plans-section {
-  margin-top: 0;
-}
-
-.plans-section__title {
-  margin: 0 0 0.25rem;
-  font-size: 1.375rem;
-  font-weight: 600;
-  letter-spacing: -0.03em;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.plans-section__subtitle {
-  margin: 0 0 0.5rem;
-  font-size: 0.875rem;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.plans-section__usage {
-  margin: 0 0 0.75rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.plans-section__notice {
-  margin: 0 0 1rem;
-  font-size: 0.875rem;
-  color: #248a3d;
-}
-
-.plans-section__error {
-  margin: 0 0 1rem;
-  font-size: 0.875rem;
-  color: #b42318;
-}
-
-.plans-section__loading {
-  margin: 0 0 1rem;
-  font-size: 0.875rem;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-/* ── Billing: trial / subscription banner (plan cards live in SubscriptionPlansSection) ── */
-.billing-banner {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin: 0 0 0.85rem;
-  padding: 0.7rem 0.9rem;
-  border-radius: 12px;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  line-height: 1.4;
-}
-
-.billing-banner--info {
-  background: rgba(10, 132, 255, 0.08);
-  color: #0060c0;
-}
-
-.billing-banner--warn {
-  background: #fff8e6;
-  color: #8a5300;
-}
-
-.billing-banner--error {
-  background: #fff4f2;
-  color: #b42318;
-  border: 1px solid rgba(180, 35, 24, 0.2);
-}
-
-.billing-banner__action {
-  margin-left: auto;
-  padding: 0.35rem 0.8rem;
-  border-radius: 980px;
-  border: none;
-  background: #0a84ff;
-  color: #fff;
-  font-size: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
+@media (prefers-reduced-motion: reduce) {
+  .st-btn,
+  .st-input,
+  .st-toggle__track,
+  .st-toggle__knob,
+  .st-meter__fill {
+    transition: none;
+  }
 }
 </style>

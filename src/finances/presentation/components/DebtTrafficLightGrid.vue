@@ -19,6 +19,8 @@ const props = defineProps({
   inline: { type: Boolean, default: false },
   /** Solo la leyenda (más carga/error); los puntos se pintan con `inline` en cada fila. */
   legendOnly: { type: Boolean, default: false },
+  /** Con `compact`: celdas tintadas por estado (verde/ámbar/rojo/azul) y rejilla 6 → 3 columnas. */
+  tinted: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
   error: { type: String, default: '' },
 })
@@ -114,11 +116,12 @@ const legend = computed(() => [
     <template v-else-if="legendOnly" />
     <p v-else-if="!residents.length" class="tl-empty">{{ t('financeOps.trafficEmpty') }}</p>
 
-    <div v-else-if="compact" class="tl-strip" role="list">
+    <div v-else-if="compact" class="tl-strip" :class="{ 'tl-strip--tinted': tinted }" role="list">
       <div
         v-for="month in months"
         :key="month"
         class="tl-strip__cell"
+        :class="tinted && `tl-strip__cell--${cellFor(residents[0], month).status}`"
         role="listitem"
         :title="cellTitle(residents[0], cellFor(residents[0], month))"
       >
@@ -344,6 +347,48 @@ thead .tl-table__resident {
 .tl-strip__status {
   font-size: 0.68rem;
   color: #6e6e73;
+}
+
+/* `tinted` (additive): soft solid status tints, fixed 6 / 3 column grid. */
+.tl-strip--tinted {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.tl-strip--tinted .tl-strip__cell {
+  padding: 0.8rem 0.35rem 0.75rem;
+  border-radius: 14px;
+  gap: 0.35rem;
+}
+
+.tl-strip--tinted .tl-strip__cell--paid { background: #e3f4e8; }
+.tl-strip--tinted .tl-strip__cell--dueSoon { background: #fdf3dc; }
+.tl-strip--tinted .tl-strip__cell--overdue { background: #fde4e4; }
+.tl-strip--tinted .tl-strip__cell--pending { background: #e8eefc; }
+.tl-strip--tinted .tl-strip__cell--none {
+  background: #fff;
+  border: 1px dashed rgba(15, 23, 42, 0.14);
+}
+
+.tl-strip--tinted .tl-strip__cell--paid .tl-strip__status { color: #15803d; }
+.tl-strip--tinted .tl-strip__cell--dueSoon .tl-strip__status { color: #92400e; }
+.tl-strip--tinted .tl-strip__cell--overdue .tl-strip__status { color: #b42318; }
+.tl-strip--tinted .tl-strip__cell--pending .tl-strip__status { color: #1e3a8a; }
+
+.tl-strip--tinted .tl-strip__month {
+  font-size: 0.8rem;
+  color: #0f172a;
+}
+
+.tl-strip--tinted .tl-strip__status {
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+@media (max-width: 720px) {
+  .tl-strip--tinted {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .visually-hidden {

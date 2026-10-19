@@ -1,99 +1,167 @@
 <script setup>
-import { useI18n } from 'vue-i18n'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  PRIORITY_META,
+  calendarDaysUntil,
+  initialsOf,
+  isAnnouncementExpired,
+  normalizePriority,
+  useAnnouncementFormat,
+} from '../composables/useAnnouncementFormat.js'
 
-const { t, locale } = useI18n()
-
-defineProps({
+const props = defineProps({
   announcements: { type: Array, required: true },
-  loading: { type: Boolean, default: false },
   canDelete: { type: Boolean, default: false },
+  canEdit: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['delete'])
+const emit = defineEmits(['delete', 'edit'])
 
-function formatWhen(iso) {
-  if (!iso) return ''
-  try {
-    return new Date(iso).toLocaleString(locale.value === 'es' ? 'es-PE' : 'en-US', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    })
-  } catch {
-    return String(iso)
+const { t, formatDate, formatDateTime, priorityLabel, expiryLabel } = useAnnouncementFormat()
+
+/** Bodies taller than the clamp get a "ver más" toggle. */
+const bodyEls = new Map()
+const overflowing = ref(new Set())
+const expanded = ref(new Set())
+let resizeObserver = null
+
+function setBodyEl(id, el) {
+  if (el) bodyEls.set(id, el)
+  else bodyEls.delete(id)
+}
+
+function measure() {
+  const next = new Set()
+  for (const [id, el] of bodyEls) {
+    if (expanded.value.has(id)) {
+      if (overflowing.value.has(id)) next.add(id)
+      continue
+    }
+    if (el.scrollHeight > el.clientHeight + 1) next.add(id)
   }
+  overflowing.value = next
 }
 
-function formatExpiry(iso) {
-  if (!iso) return ''
-  return new Date(iso).toLocaleDateString(locale.value === 'es' ? 'es-PE' : 'en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
+function toggle(id) {
+  const next = new Set(expanded.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expanded.value = next
 }
 
-function isExpired(iso) {
-  if (!iso) return false
-  return new Date() > new Date(iso)
-}
+const listEl = ref(null)
 
-function priorityLabel(priority) {
-  const map = {
-    normal: t('information.priorityNormal'),
-    important: t('information.priorityImportant'),
-    urgent: t('information.priorityUrgent'),
+onMounted(() => {
+  nextTick(measure)
+  if (typeof ResizeObserver !== 'undefined' && listEl.value) {
+    resizeObserver = new ResizeObserver(() => measure())
+    resizeObserver.observe(listEl.value)
   }
-  return map[priority] ?? map.normal
+})
+
+onBeforeUnmount(() => resizeObserver?.disconnect())
+
+watch(
+  () => props.announcements,
+  () => nextTick(measure),
+  { deep: true },
+)
+
+function expiryTone(ann) {
+  if (isAnnouncementExpired(ann)) return 'expired'
+  const days = calendarDaysUntil(ann.expiresAt)
+  if (days != null && days <= 7) return 'soon'
+  return 'ok'
 }
 
-function onDelete(id) {
-  if (!window.confirm(t('information.deleteConfirm'))) return
-  emit('delete', id)
+function bodyId(ann) {
+  return `ann-body-${ann.id}`
 }
 </script>
 
 <template>
-  <p v-if="loading" class="ann-status">{{ t('information.loading') }}</p>
-  <p v-else-if="!announcements.length" class="ann-status">{{ t('information.empty') }}</p>
-  <ul v-else class="ann-board" role="list">
-    <li v-for="ann in announcements" :key="ann.id">
+  <ul ref="listEl" class="annl" role="list" :aria-label="t('information.listAria')">
+    <li v-for="ann in announcements" :key="ann.id" class="annl__item">
       <article
-        class="ann-card"
-        :class="[
-          `ann-card--${ann.priority || 'normal'}`,
-          { 'is-expired': isExpired(ann.expiresAt) },
-        ]"
+        class="annl-card"
+        :class="{ 'is-expired': isAnnouncementExpired(ann) }"
+        :aria-labelledby="`ann-title-${ann.id}`"
       >
-        <header class="ann-card__head">
-          <div class="ann-card__badges">
-            <span class="ann-badge" :class="`ann-badge--${ann.priority || 'normal'}`">
-              {{ priorityLabel(ann.priority) }}
-            </span>
-            <span v-if="isExpired(ann.expiresAt)" class="ann-badge ann-badge--expired">
-              {{ t('information.expired') }}
-            </span>
-          </div>
+        <div class="annl-card__top">
+          <span class="annl-pill" :class="`annl-pill--${normalizePriority(ann.priority)}`">
+            <i :class="PRIORITY_META[normalizePriority(ann.priority)].icon" aria-hidden="true" />
+            {{ priorityLabel(ann.priority) }}
+          </span>
+          <span v-if="ann.expiresAt" class="annl-pill annl-pill--time" :class="`is-${expiryTone(ann)}`">
+            <i
+              class="pi"
+              :class="expiryTone(ann) === 'expired' ? 'pi-history' : 'pi-clock'"
+              aria-hidden="true"
+            />
+            {{ expiryLabel(ann) }}
+          </span>
+        </div>
+
+        <h3 :id="`ann-title-${ann.id}`" class="annl-card__title">{{ ann.title }}</h3>
+
+        <div class="annl-card__content">
+          <p
+            :id="bodyId(ann)"
+            :ref="(el) => setBodyEl(ann.id, el)"
+            class="annl-card__body"
+            :class="{ 'is-clamped': !expanded.has(ann.id) }"
+          >{{ ann.body }}</p>
           <button
-            v-if="canDelete"
+            v-if="overflowing.has(ann.id)"
             type="button"
-            class="ann-card__delete"
-            :aria-label="t('information.delete')"
-            @click="onDelete(ann.id)"
+            class="annl-more"
+            :aria-expanded="expanded.has(ann.id) ? 'true' : 'false'"
+            :aria-controls="bodyId(ann)"
+            @click="toggle(ann.id)"
           >
-            <i class="pi pi-trash" aria-hidden="true" />
+            {{ expanded.has(ann.id) ? t('information.seeLess') : t('information.seeMore') }}
+            <i class="pi" :class="expanded.has(ann.id) ? 'pi-chevron-up' : 'pi-chevron-down'" aria-hidden="true" />
           </button>
-        </header>
-        <h3 class="ann-card__title">{{ ann.title }}</h3>
-        <p class="ann-card__body">{{ ann.body }}</p>
-        <footer class="ann-card__meta">
-          <span>
-            <i class="pi pi-user" aria-hidden="true" />
-            {{ ann.authorName || t('information.pageTitle') }}
-          </span>
-          <time v-if="ann.createdAt" :datetime="ann.createdAt">{{ formatWhen(ann.createdAt) }}</time>
-          <span v-if="ann.expiresAt && !isExpired(ann.expiresAt)">
-            {{ t('information.expiresOn', { date: formatExpiry(ann.expiresAt) }) }}
-          </span>
+        </div>
+
+        <footer class="annl-card__foot">
+          <div class="annl-author">
+            <span class="annl-avatar" aria-hidden="true">
+              {{ initialsOf(ann.authorName || t('information.authorFallback')) }}
+            </span>
+            <div class="annl-author__text">
+              <strong>{{ ann.authorName || t('information.authorFallback') }}</strong>
+              <time
+                v-if="ann.publishedAt || ann.createdAt"
+                :datetime="ann.publishedAt || ann.createdAt"
+                :title="formatDateTime(ann.publishedAt || ann.createdAt)"
+              >
+                {{ t('information.publishedOn', { date: formatDate(ann.publishedAt || ann.createdAt) }) }}
+              </time>
+            </div>
+          </div>
+          <div v-if="canEdit || canDelete" class="annl-actions">
+            <button
+              v-if="canEdit"
+              type="button"
+              class="annl-action"
+              :aria-label="t('information.editAria', { title: ann.title })"
+              :data-tip="t('information.edit')"
+              @click="emit('edit', ann)"
+            >
+              <i class="pi pi-pencil" aria-hidden="true" />
+            </button>
+            <button
+              v-if="canDelete"
+              type="button"
+              class="annl-action annl-action--danger"
+              :aria-label="t('information.deleteAria', { title: ann.title })"
+              :data-tip="t('information.delete')"
+              @click="emit('delete', ann)"
+            >
+              <i class="pi pi-trash" aria-hidden="true" />
+            </button>
+          </div>
         </footer>
       </article>
     </li>
@@ -101,133 +169,263 @@ function onDelete(id) {
 </template>
 
 <style scoped>
-.ann-status {
-  margin: 0;
-  padding: 1.5rem 0.25rem;
-  font-size: 0.9rem;
-  line-height: 1.45;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.ann-board {
+.annl {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(18.5rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 21rem), 1fr));
   gap: 0.9rem;
 }
 
-.ann-card {
+.annl *,
+.annl *::before,
+.annl *::after {
+  box-sizing: border-box;
+}
+
+.annl__item {
+  min-width: 0;
+}
+
+.annl-card {
   height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
-  padding: 1.05rem 1.1rem 1.1rem;
-  border-radius: 16px;
+  gap: 0.6rem;
+  padding: 1rem 1.1rem 0.9rem;
+  border-radius: 18px;
   background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  min-width: 0;
 }
 
-.ann-card.is-expired {
-  opacity: 0.72;
+.annl-card.is-expired {
+  background: #fbfcfd;
 }
 
-.ann-card__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.65rem;
+.annl-card.is-expired .annl-card__title,
+.annl-card.is-expired .annl-card__body {
+  color: #64748b;
 }
 
-.ann-card__badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-}
-
-.ann-card__delete {
-  flex-shrink: 0;
+.annl-card__top {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  margin: -0.25rem -0.25rem 0 0;
+  justify-content: space-between;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.annl-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.22rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.annl-pill .pi {
+  font-size: 0.68rem;
+}
+
+.annl-pill--urgent { background: #fde4e4; color: #b42318; }
+.annl-pill--important { background: #fdf3dc; color: #92400e; }
+.annl-pill--normal { background: #e8eefc; color: #1e3a8a; }
+
+.annl-pill--time.is-ok { background: #e3f4e8; color: #15803d; }
+.annl-pill--time.is-soon { background: #fdeee2; color: #c2410c; }
+.annl-pill--time.is-expired { background: #f1f5f9; color: #64748b; }
+
+.annl-card__title {
+  margin: 0.1rem 0 0;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.02rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.annl-card__content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.annl-card__body {
+  margin: 0;
+  width: 100%;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: #334155;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.annl-card__body.is-clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+}
+
+.annl-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0;
   border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: #ff3b30;
+  background: none;
+  color: #1e3a8a;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
   cursor: pointer;
 }
 
-.ann-card__delete:hover {
-  color: #e0352b;
-  background: rgba(255, 59, 48, 0.1);
-}
-
-.ann-card__title {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  line-height: 1.3;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.ann-card__body {
-  margin: 0;
-  flex: 1;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.ann-card__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem 0.85rem;
-  margin-top: 0.2rem;
-  font-size: 0.75rem;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.ann-card__meta i {
-  margin-right: 0.25rem;
-  font-size: 0.7rem;
-}
-
-.ann-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.12rem 0.5rem;
-  border-radius: 980px;
+.annl-more .pi {
   font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
 }
 
-.ann-badge--normal {
-  background: #f2f2f7;
+.annl-more:hover {
+  text-decoration: underline;
+}
+
+.annl-card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.annl-author {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.annl-avatar {
+  flex-shrink: 0;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: #e8eefc;
+  color: #1e3a8a;
+}
+
+.annl-author__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.annl-author__text strong {
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annl-author__text time {
+  font-size: 0.72rem;
   color: #6e6e73;
 }
 
-.ann-badge--important {
-  background: #fff3e0;
-  color: #e65100;
+.annl-actions {
+  display: inline-flex;
+  gap: 0.2rem;
+  flex-shrink: 0;
 }
 
-.ann-badge--urgent {
-  background: #fdecee;
+.annl-action {
+  position: relative;
+  width: 2.1rem;
+  height: 2.1rem;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #1e3a8a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.annl-action:hover {
+  background: #e8eefc;
+}
+
+.annl-action--danger {
   color: #b42318;
 }
 
-.ann-badge--expired {
-  background: #f2f2f7;
-  color: #b42318;
+.annl-action--danger:hover {
+  background: #fde4e4;
+}
+
+.annl-action[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 0.35rem);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.25rem 0.55rem;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 2;
+}
+
+.annl-action[data-tip]:hover::after,
+.annl-action[data-tip]:focus-visible::after {
+  opacity: 1;
+}
+
+.annl-action:focus-visible,
+.annl-more:focus-visible {
+  outline: 2px solid #1e3a8a;
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .annl {
+    gap: 0.7rem;
+  }
+  .annl-card {
+    padding: 0.9rem 0.95rem 0.8rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .annl-action[data-tip]::after {
+    transition: none;
+  }
 }
 </style>

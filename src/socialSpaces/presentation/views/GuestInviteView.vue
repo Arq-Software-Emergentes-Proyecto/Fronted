@@ -8,6 +8,9 @@ import { reservationInviteExpiresAtMs } from '@/shared/infrastructure/api/utils.
 import LocaleSwitch from '@/shared/presentation/components/LocaleSwitch.vue'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 
+/** The server opens the pass on the booking date, 1 h before the start (NOT_YET_VALID before that). */
+const PASS_OPENS_MINUTES_BEFORE_START = 60
+
 const route = useRoute()
 const { t, locale } = useI18n()
 
@@ -21,13 +24,14 @@ const qrSrc = ref('')
 
 let tick
 
-function formatDateShort(dateStr) {
+const intlLocale = computed(() => (locale.value === 'es' ? 'es-PE' : 'en-US'))
+
+function formatDateLong(dateStr) {
   if (!dateStr) return ''
   const [y, m, d] = dateStr.split('-').map(Number)
   if (!y || !m || !d) return dateStr
-  return new Date(y, m - 1, d).toLocaleDateString(locale.value === 'es' ? 'es-PE' : 'en-US', {
+  return new Date(y, m - 1, d).toLocaleDateString(intlLocale.value, {
     weekday: 'long',
-    year: 'numeric',
     month: 'long',
     day: 'numeric',
   })
@@ -35,7 +39,7 @@ function formatDateShort(dateStr) {
 
 function formatClockFromMs(ms) {
   const d = new Date(ms)
-  return d.toLocaleTimeString(locale.value === 'es' ? 'es-PE' : 'en-US', {
+  return d.toLocaleTimeString(intlLocale.value, {
     hour: '2-digit',
     minute: '2-digit',
   })
@@ -45,10 +49,18 @@ function formatClockTime(timeStr) {
   const [h, mi] = String(timeStr ?? '').split(':').map(Number)
   if (!Number.isFinite(h)) return String(timeStr ?? '')
   const d = new Date(2000, 0, 1, h, mi || 0, 0, 0)
-  return d.toLocaleTimeString(locale.value === 'es' ? 'es-PE' : 'en-US', {
+  return d.toLocaleTimeString(intlLocale.value, {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function initials(name) {
+  const parts = String(name ?? '').trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return '?'
+  const first = parts[0][0] ?? ''
+  const last = parts.length > 1 ? parts[parts.length - 1][0] : ''
+  return `${first}${last}`.toUpperCase()
 }
 
 const expiryMs = computed(() => {
@@ -69,6 +81,21 @@ const isExpired = computed(() => {
   if (exp == null) return false
   return nowMs.value >= exp
 })
+
+/** 'valid' | 'notYet' | 'expired' | 'cancelled' — drives the big status block. */
+const passState = computed(() => {
+  if (isCancelled.value) return 'cancelled'
+  if (isExpired.value) return 'expired'
+  if (isNotYetValid.value) return 'notYet'
+  return 'valid'
+})
+
+const STATE_META = {
+  valid: { icon: 'pi-check-circle', title: 'guestInvite.statusValidTitle' },
+  notYet: { icon: 'pi-clock', title: 'socialSpaces.passNotYetValid' },
+  expired: { icon: 'pi-times-circle', title: 'guestInvite.statusExpiredTitle' },
+  cancelled: { icon: 'pi-ban', title: 'socialSpaces.guestCancelledTitle' },
+}
 
 async function loadInvite() {
   const token = String(route.params.token ?? '').trim()
@@ -111,7 +138,7 @@ async function refreshQr() {
     return
   }
   try {
-    qrSrc.value = await QRCode.toDataURL(url, { width: 260, margin: 2, errorCorrectionLevel: 'M' })
+    qrSrc.value = await QRCode.toDataURL(url, { width: 520, margin: 1, errorCorrectionLevel: 'M' })
   } catch {
     qrSrc.value = ''
   }
@@ -145,7 +172,7 @@ const expiryClockLabel = computed(() => {
   const sameDay = new Date(exp).toDateString() === new Date(`${bundle.value?.date}T00:00:00`).toDateString()
   return sameDay
     ? formatClockFromMs(exp)
-    : new Date(exp).toLocaleString(locale.value === 'es' ? 'es-PE' : 'en-US', {
+    : new Date(exp).toLocaleString(intlLocale.value, {
         day: 'numeric',
         month: 'short',
         hour: '2-digit',
@@ -153,94 +180,150 @@ const expiryClockLabel = computed(() => {
       })
 })
 
-const slotSummary = computed(() => {
+/** When the pass opens: booking date, 1 h before the start (never before that day). */
+const opensLabel = computed(() => {
   const b = bundle.value
   if (!b) return ''
-  return t('guestInvite.slotSummary', {
-    date: formatDateShort(b.date),
-    start: formatClockTime(b.startTime),
-    end: formatClockTime(b.endTime),
+  const [y, m, d] = String(b.date ?? '').split('-').map(Number)
+  const [h, mi] = String(b.startTime ?? '').split(':').map(Number)
+  if (![y, m, d, h].every(Number.isFinite)) return ''
+  const start = new Date(y, m - 1, d, h, mi || 0, 0, 0).getTime()
+  const dayStart = new Date(y, m - 1, d, 0, 0, 0, 0).getTime()
+  const opens = Math.max(dayStart, start - PASS_OPENS_MINUTES_BEFORE_START * 60 * 1000)
+  return new Date(opens).toLocaleString(intlLocale.value, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
   })
 })
+
+const dateLabel = computed(() => formatDateLong(bundle.value?.date))
+const startLabel = computed(() => formatClockTime(bundle.value?.startTime))
+const endLabel = computed(() => formatClockTime(bundle.value?.endTime))
+
+const guests = computed(() => (Array.isArray(bundle.value?.guests) ? bundle.value.guests : []))
 </script>
 
 <template>
   <div class="invite-page">
-    <div class="invite-card">
+    <main class="invite-shell">
       <div class="invite-top">
-        <p class="invite-brand">{{ t('brand') }}</p>
+        <p class="invite-brand">
+          <span class="invite-brand__mark" aria-hidden="true"><i class="pi pi-building" /></span>
+          {{ t('brand') }}
+        </p>
         <LocaleSwitch />
       </div>
 
-      <template v-if="loading">
-        <p class="invite-muted">{{ t('guestInvite.loading') }}</p>
-      </template>
-
-      <template v-else-if="loadUnavailable">
-        <LoadErrorRetry :message="t('common.serviceUnavailable')" :loading="loading" @retry="loadInvite" />
-      </template>
-
-      <template v-else-if="loadError || !bundle">
-        <h1 class="invite-title">{{ t('guestInvite.invalidTitle') }}</h1>
-        <p class="invite-muted">{{ t('guestInvite.invalidBody') }}</p>
-      </template>
-
-      <template v-else-if="isCancelled">
-        <h1 class="invite-title invite-title--warn">{{ t('socialSpaces.guestCancelledTitle') }}</h1>
-        <p class="invite-body">{{ t('socialSpaces.guestCancelledBody') }}</p>
-        <p class="invite-muted">{{ slotSummary }}</p>
-      </template>
-
-      <template v-else-if="isExpired">
-        <h1 class="invite-title invite-title--warn">{{ t('socialSpaces.passExpired') }}</h1>
-        <p class="invite-body">{{ t('socialSpaces.guestExpiredBody') }}</p>
-        <p class="invite-muted">{{ slotSummary }}</p>
-        <ul v-if="bundle.guests?.length" class="invite-names">
-          <li v-for="g in bundle.guests" :key="g.id" class="invite-names__row">
-            <span>{{ g.name }}</span>
-            <span
-              class="invite-pill"
-              :class="g.checkedIn ? 'invite-pill--in' : 'invite-pill--out'"
-            >
-              {{ g.checkedIn ? t('guestInvite.guestEnteredBadge') : t('guestInvite.guestNotEnteredBadge') }}
-            </span>
-          </li>
-        </ul>
-      </template>
-
-      <template v-else>
-        <h1 class="invite-title">{{ t('guestInvite.validTitle') }}</h1>
-        <p class="invite-space">{{ bundle.spaceName }}</p>
-        <p class="invite-body">{{ slotSummary }}</p>
-        <p v-if="isNotYetValid" class="invite-body invite-title--warn" role="status">
-          {{ t('socialSpaces.passNotYetValid') }}. {{ t('socialSpaces.guestNotYetValidBody') }}
-        </p>
-        <p class="invite-expiry">
-          {{ t('guestInvite.qrValidUntil', { time: expiryClockLabel }) }}
-        </p>
-        <p v-if="bundle.residentName" class="invite-host">
-          {{ t('guestInvite.hostLabel') }}: {{ bundle.residentName }}
-        </p>
-
-        <p class="invite-section-label">{{ t('guestInvite.guestListTitle') }}</p>
-        <ul class="invite-names">
-          <li v-for="g in bundle.guests" :key="g.id" class="invite-names__row">
-            <span>{{ g.name }}</span>
-            <span
-              class="invite-pill"
-              :class="g.checkedIn ? 'invite-pill--in' : 'invite-pill--out'"
-            >
-              {{ g.checkedIn ? t('guestInvite.guestEnteredBadge') : t('guestInvite.guestNotEnteredBadge') }}
-            </span>
-          </li>
-        </ul>
-
-        <div v-if="qrSrc" class="invite-qr-wrap">
-          <p class="invite-qr-hint">{{ t('guestInvite.qrHint') }}</p>
-          <img class="invite-qr" :src="qrSrc" width="260" height="260" alt="" />
+      <div class="invite-card">
+        <div v-if="loading" class="invite-loading" role="status">
+          <i class="pi pi-spin pi-spinner" aria-hidden="true" />
+          <span>{{ t('guestInvite.loading') }}</span>
         </div>
-      </template>
-    </div>
+
+        <template v-else-if="loadUnavailable">
+          <LoadErrorRetry :message="t('common.serviceUnavailable')" :loading="loading" @retry="loadInvite" />
+        </template>
+
+        <div v-else-if="loadError || !bundle" class="invite-invalid">
+          <span class="invite-invalid__icon" aria-hidden="true"><i class="pi pi-link" /></span>
+          <h1 class="invite-invalid__title">{{ t('guestInvite.invalidTitle') }}</h1>
+          <p class="invite-invalid__body">{{ t('guestInvite.invalidBody') }}</p>
+        </div>
+
+        <template v-else>
+          <header class="invite-head">
+            <p class="invite-eyebrow">{{ t('guestInvite.eyebrow') }}</p>
+            <h1 class="invite-space">{{ bundle.spaceName }}</h1>
+            <p v-if="bundle.residentName" class="invite-host">
+              <span class="invite-avatar invite-avatar--host" aria-hidden="true">
+                {{ initials(bundle.residentName) }}
+              </span>
+              <span>{{ t('guestInvite.invitedBy', { name: bundle.residentName }) }}</span>
+            </p>
+          </header>
+
+          <dl class="invite-facts">
+            <div class="invite-fact">
+              <dt><i class="pi pi-calendar" aria-hidden="true" />{{ t('guestInvite.dateLabel') }}</dt>
+              <dd class="invite-fact__date">{{ dateLabel }}</dd>
+            </div>
+            <div class="invite-fact">
+              <dt><i class="pi pi-clock" aria-hidden="true" />{{ t('guestInvite.timeLabel') }}</dt>
+              <dd>
+                <span class="invite-nowrap">{{ startLabel }}</span> –
+                <span class="invite-nowrap">{{ endLabel }}</span>
+              </dd>
+            </div>
+          </dl>
+
+          <section
+            class="invite-status"
+            :class="`invite-status--${passState}`"
+            :role="passState === 'valid' ? 'status' : 'alert'"
+          >
+            <div class="invite-status__head">
+              <span class="invite-status__icon" aria-hidden="true">
+                <i class="pi" :class="STATE_META[passState].icon" />
+              </span>
+              <div class="invite-status__text">
+                <h2 class="invite-status__title">{{ t(STATE_META[passState].title) }}</h2>
+                <p v-if="passState === 'valid'" class="invite-status__body">
+                  {{ t('guestInvite.statusValidBody') }}
+                </p>
+                <p v-else-if="passState === 'notYet'" class="invite-status__body">
+                  <template v-if="opensLabel">
+                    <strong class="invite-status__opens">{{ t('guestInvite.opensAt', { when: opensLabel }) }}</strong>
+                    {{ t('guestInvite.notYetKeep') }}
+                  </template>
+                  <template v-else>{{ t('socialSpaces.guestNotYetValidBody') }}</template>
+                </p>
+                <p v-else-if="passState === 'expired'" class="invite-status__body">
+                  {{ t('socialSpaces.guestExpiredBody') }}
+                </p>
+                <p v-else class="invite-status__body">{{ t('socialSpaces.guestCancelledBody') }}</p>
+              </div>
+            </div>
+
+            <div v-if="qrSrc && (passState === 'valid' || passState === 'notYet')" class="invite-qr">
+              <img class="invite-qr__img" :src="qrSrc" width="260" height="260" :alt="t('guestInvite.qrAlt')" />
+              <p class="invite-qr__hint">{{ t('guestInvite.qrHint') }}</p>
+            </div>
+
+            <p v-if="passState === 'valid' || passState === 'notYet'" class="invite-status__until">
+              <i class="pi pi-stopwatch" aria-hidden="true" />
+              {{ t('guestInvite.qrValidUntil', { time: expiryClockLabel }) }}
+            </p>
+          </section>
+
+          <section v-if="guests.length" class="invite-guests" aria-labelledby="invite-guests-heading">
+            <div class="invite-guests__head">
+              <h2 id="invite-guests-heading" class="invite-guests__title">
+                {{ t('guestInvite.guestListTitle') }}
+              </h2>
+              <span class="invite-pill invite-pill--neutral">
+                {{ t('guestInvite.guestCount', { n: guests.length }, guests.length) }}
+              </span>
+            </div>
+            <ul class="invite-names" role="list">
+              <li v-for="g in guests" :key="g.id" class="invite-names__row">
+                <span class="invite-avatar" :class="{ 'invite-avatar--in': g.checkedIn }" aria-hidden="true">
+                  {{ initials(g.name) }}
+                </span>
+                <span class="invite-names__name">{{ g.name }}</span>
+                <span class="invite-pill" :class="g.checkedIn ? 'invite-pill--in' : 'invite-pill--out'">
+                  {{ g.checkedIn ? t('guestInvite.guestEnteredBadge') : t('guestInvite.guestNotEnteredBadge') }}
+                </span>
+              </li>
+            </ul>
+          </section>
+        </template>
+      </div>
+
+      <p class="invite-foot">{{ t('guestInvite.footer') }}</p>
+    </main>
   </div>
 </template>
 
@@ -248,20 +331,18 @@ const slotSummary = computed(() => {
 .invite-page {
   min-height: 100vh;
   display: flex;
-  align-items: flex-start;
   justify-content: center;
-  padding: 2rem 1.25rem 3rem;
-  background: linear-gradient(180deg, #f5f5f7 0%, #e8e8ed 100%);
+  padding: 1.5rem 1rem 2.5rem;
+  background: #f4f6fb;
+  box-sizing: border-box;
 }
 
-.invite-card {
+.invite-shell {
   width: 100%;
-  max-width: 26rem;
-  padding: 1.5rem 1.35rem 1.75rem;
-  border-radius: 18px;
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  max-width: 28rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
 }
 
 .invite-top {
@@ -269,126 +350,372 @@ const slotSummary = computed(() => {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  margin: 0 0 1rem;
 }
 
 .invite-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   margin: 0;
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #86868b;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #1e3a8a;
 }
 
-.invite-title {
-  margin: 0 0 0.5rem;
-  font-size: 1.35rem;
-  font-weight: 600;
-  letter-spacing: -0.03em;
-  color: #1d1d1f;
+.invite-brand__mark {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #1e3a8a;
+  color: #fff;
+  font-size: 0.85rem;
 }
 
-.invite-title--warn {
-  color: #9a3412;
+.invite-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.35rem 1.25rem 1.4rem;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-sizing: border-box;
+}
+
+.invite-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  padding: 2.5rem 0;
+  font-size: 0.88rem;
+  color: #6e6e73;
+}
+
+/* Invalid / unknown */
+.invite-invalid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 1.5rem 0.5rem;
+}
+
+.invite-invalid__icon {
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.8rem;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 1.25rem;
+}
+
+.invite-invalid__title {
+  margin: 0;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+}
+
+.invite-invalid__body {
+  margin: 0.4rem 0 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: #6e6e73;
+}
+
+/* Header */
+.invite-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.invite-eyebrow {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #64748b;
 }
 
 .invite-space {
-  margin: 0 0 0.35rem;
-  font-size: 1.05rem;
-  font-weight: 600;
-  color: #1d1d1f;
-}
-
-.invite-body {
-  margin: 0 0 0.65rem;
-  font-size: 0.9rem;
-  line-height: 1.45;
-  color: #3c3c43;
-}
-
-.invite-expiry {
-  margin: 0 0 0.5rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: #2563eb;
+  margin: 0;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: #0f172a;
+  overflow-wrap: anywhere;
 }
 
 .invite-host {
-  margin: 0 0 1rem;
-  font-size: 0.8125rem;
-  color: #6e6e73;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.25rem 0 0;
+  font-size: 0.86rem;
+  color: #334155;
 }
 
-.invite-muted {
+/* Facts */
+.invite-facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 0.6rem;
   margin: 0;
-  font-size: 0.875rem;
-  line-height: 1.45;
-  color: #6e6e73;
 }
 
-.invite-section-label {
-  margin: 1rem 0 0.35rem;
+.invite-fact {
+  min-width: 0;
+  padding: 0.7rem 0.85rem;
+  border-radius: 14px;
+  background: #f1f5f9;
+}
+
+.invite-fact dt {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   font-size: 0.72rem;
   font-weight: 600;
+  color: #64748b;
+}
+
+.invite-fact dt .pi {
+  font-size: 0.72rem;
+}
+
+.invite-fact dd {
+  margin: 0.25rem 0 0;
+  font-size: 0.9rem;
+  font-weight: 650;
+  color: #0f172a;
+  line-height: 1.35;
+}
+
+.invite-nowrap {
+  white-space: nowrap;
+}
+
+.invite-fact__date::first-letter {
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #86868b;
+}
+
+/* Status */
+.invite-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 1rem;
+  border-radius: 16px;
+}
+
+.invite-status--valid { background: #e3f4e8; color: #14532d; }
+.invite-status--notYet { background: #fdf3dc; color: #78350f; }
+.invite-status--expired { background: #fde4e4; color: #7f1d1d; }
+.invite-status--cancelled { background: #f1f5f9; color: #334155; }
+
+.invite-status__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.invite-status__icon {
+  flex-shrink: 0;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  font-size: 1.15rem;
+}
+
+.invite-status--valid .invite-status__icon { color: #15803d; }
+.invite-status--notYet .invite-status__icon { color: #b45309; }
+.invite-status--expired .invite-status__icon { color: #b42318; }
+.invite-status--cancelled .invite-status__icon { color: #64748b; }
+
+.invite-status__text {
+  min-width: 0;
+}
+
+.invite-status__title {
+  margin: 0.1rem 0 0;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.12rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+
+.invite-status__body {
+  margin: 0.3rem 0 0;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.invite-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 1rem 0.75rem 0.85rem;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.invite-qr__img {
+  display: block;
+  width: min(260px, 100%);
+  height: auto;
+}
+
+.invite-qr__hint {
+  margin: 0;
+  font-size: 0.76rem;
+  color: #64748b;
+  text-align: center;
+}
+
+.invite-status__opens {
+  display: block;
+  margin-bottom: 0.2rem;
+  font-size: 0.9rem;
+}
+
+.invite-status__opens::first-letter {
+  text-transform: uppercase;
+}
+
+.invite-status__until {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+/* Guests */
+.invite-guests__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.invite-guests__title {
+  margin: 0;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: #0f172a;
 }
 
 .invite-names {
   margin: 0;
   padding: 0;
   list-style: none;
-  font-size: 0.9375rem;
-  line-height: 1.5;
-  color: #1d1d1f;
 }
 
 .invite-names__row {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.35rem 0.75rem;
-  margin: 0.35rem 0;
+  gap: 0.7rem;
+  padding: 0.55rem 0;
+}
+
+.invite-names__row + .invite-names__row {
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.invite-names__name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.invite-avatar {
+  flex-shrink: 0;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #e8eefc;
+  color: #1e3a8a;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.invite-avatar--host {
+  width: 1.8rem;
+  height: 1.8rem;
+  font-size: 0.66rem;
+}
+
+.invite-avatar--in {
+  background: #e3f4e8;
+  color: #15803d;
 }
 
 .invite-pill {
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  padding: 0.2rem 0.45rem;
-  border-radius: 6px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 650;
+  white-space: nowrap;
 }
 
-.invite-pill--in {
-  background: rgba(4, 120, 87, 0.12);
-  color: #047857;
-}
+.invite-pill--in { background: #e3f4e8; color: #15803d; }
+.invite-pill--out { background: #fdf3dc; color: #92400e; }
+.invite-pill--neutral { background: #f1f5f9; color: #475569; }
 
-.invite-pill--out {
-  background: rgba(0, 0, 0, 0.05);
-  color: #6e6e73;
-}
-
-.invite-qr-wrap {
-  margin-top: 1.25rem;
-  padding-top: 1.1rem;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
+.invite-foot {
+  margin: 0;
   text-align: center;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: #94a3b8;
 }
 
-.invite-qr-hint {
-  margin: 0 0 0.65rem;
-  font-size: 0.8125rem;
-  color: #6e6e73;
+@media (min-width: 720px) {
+  .invite-page {
+    padding-top: 3rem;
+  }
+
+  .invite-card {
+    padding: 1.6rem 1.6rem 1.7rem;
+  }
 }
 
-.invite-qr {
-  display: inline-block;
-  border-radius: 12px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+@media (max-width: 360px) {
+  .invite-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

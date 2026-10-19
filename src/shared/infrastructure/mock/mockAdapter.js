@@ -1195,6 +1195,29 @@ function handleIncidentsAndAnnouncements(config, method, parts) {
     }
   }
 
+  // Como Announcement.Update(): conserva autor/fechas y recalcula expiresAt = publishedAt + duration (0 = mantener).
+  if (collection === 'announcements' && id && !action && method === 'PUT') {
+    const current = findById('announcements', id)
+    if (!current) fail(config, 404, 'ANNOUNCEMENT_NOT_FOUND', 'Comunicado no encontrado.')
+    if (!String(body.title ?? '').trim()) fail(config, 400, 'TITLE_REQUIRED', 'El título es obligatorio.')
+    const requested = Number(body.duration)
+    const duration = requested > 0 ? Math.min(requested, 365) : Number(current.duration) || 7
+    const expires = new Date(current.publishedAt || current.createdAt || Date.now())
+    expires.setDate(expires.getDate() + duration)
+    return ok(
+      config,
+      replaceRow('announcements', id, {
+        ...current,
+        title: String(body.title).trim(),
+        body: String(body.body ?? '').trim(),
+        priority: ANNOUNCEMENT_RANK[body.priority] ? body.priority : current.priority || 'normal',
+        duration,
+        expiresAt: expires.toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+    )
+  }
+
   if (collection !== 'incidents') return null
 
   if (!id && method === 'POST') {

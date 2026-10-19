@@ -1,7 +1,7 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import Button from 'primevue/button'
+import Dialog from 'primevue/dialog'
 import { getResidentLimitForActiveOwner, refreshSubscriptionFromApi } from '@/billing/infrastructure/subscriptionPlanStorage.js'
 import {
   deriveFloorFromDepartment,
@@ -11,7 +11,6 @@ import { residentsApi } from '@/residents/infrastructure/residentsApi.js'
 import { spacesApi } from '@/socialSpaces/infrastructure/spacesApi.js'
 import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.js'
 import { useFinancesStore } from '@/finances/application/financesStore.js'
-import { formatDayMonth } from '@/finances/domain/billingCycle.js'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import { RouterLink } from 'vue-router'
@@ -232,11 +231,14 @@ async function confirmDeleteResidentCascade() {
 const accountStatusCandidate = ref(null)
 const isChangingAccountStatus = ref(false)
 const accountStatusError = ref('')
+/** Last resident shown in the status dialog (kept while the dialog fades out). */
+const accountStatusShown = ref(null)
 
 function openAccountStatusModal(resident) {
   if (isChangingAccountStatus.value) return
   accountStatusError.value = ''
   accountStatusCandidate.value = resident
+  accountStatusShown.value = resident
 }
 
 function closeAccountStatusModal() {
@@ -729,616 +731,1035 @@ const groupedReservations = computed(() => {
         .sort((a, b) => a.startTime.localeCompare(b.startTime)),
     }))
 })
+
+/* ---------- Presentation helpers (summary, tabs, filters, dates) ---------- */
+
+const intlLocale = computed(() => (String(locale.value).startsWith('es') ? 'es-PE' : 'en-US'))
+
+function parseYmd(value) {
+  const s = String(value ?? '').trim()
+  if (!s) return null
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T12:00:00`) : new Date(s)
+  return Number.isFinite(d.getTime()) ? d : null
+}
+
+/** "7 oct. 2026" / "Oct 7, 2026". */
+function nfDate(value) {
+  const d = parseYmd(value)
+  if (!d) return '—'
+  return new Intl.DateTimeFormat(intlLocale.value, { day: 'numeric', month: 'short', year: 'numeric' }).format(d)
+}
+
+/** "sáb., 24 oct. 2026" / "Sat, Oct 24, 2026" (reservation day headings). */
+function nfDayLong(value) {
+  const d = parseYmd(value)
+  if (!d) return String(value ?? '')
+  return new Intl.DateTimeFormat(intlLocale.value, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(d)
+}
+
+const todayYmd = (() => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+})()
+
+/** active = can sign in · pending = invitation not used yet · deactivated = blocked by the admin. */
+function residentStatus(resident) {
+  if (resident?.accountStatus === 'DEACTIVATED') return 'deactivated'
+  return resident?.hasCredentials ? 'active' : 'pending'
+}
+
+const STATUS_LABEL_KEYS = {
+  active: 'app.advancedMgmt.statusActive',
+  pending: 'app.advancedMgmt.statusPending',
+  deactivated: 'app.advancedMgmt.statusDeactivated',
+}
+
+const statusCounts = computed(() => {
+  const counts = { active: 0, pending: 0, deactivated: 0 }
+  for (const resident of residents.value) counts[residentStatus(resident)] += 1
+  return counts
+})
+
+const planUsagePct = computed(() => {
+  const cap = Number(residentPlanLimitCap.value) || 0
+  if (cap <= 0) return 100
+  return Math.min(100, Math.round((totalResidents.value / cap) * 100))
+})
+
+const remainingSlots = computed(() =>
+  Math.max(0, (Number(residentPlanLimitCap.value) || 0) - totalResidents.value),
+)
+
+const spaceCounts = computed(() => {
+  let maintenance = 0
+  for (const space of spaces.value) if (space.status === 'MAINTENANCE') maintenance += 1
+  return { available: spaces.value.length - maintenance, maintenance }
+})
+
+/* Tabs: Residentes | Espacios comunes */
+const activeTab = ref('residents')
+const TAB_KEYS = ['residents', 'spaces']
+const tabs = computed(() => [
+  { key: 'residents', label: t('app.advancedMgmt.tabResidents'), icon: 'pi pi-users', count: totalResidents.value },
+  { key: 'spaces', label: t('app.advancedMgmt.tabSpaces'), icon: 'pi pi-building', count: spaces.value.length },
+])
+
+function selectTab(key) {
+  activeTab.value = key
+}
+
+function onTabKeydown(event) {
+  const index = TAB_KEYS.indexOf(activeTab.value)
+  let next = null
+  if (event.key === 'ArrowRight') next = (index + 1) % TAB_KEYS.length
+  else if (event.key === 'ArrowLeft') next = (index - 1 + TAB_KEYS.length) % TAB_KEYS.length
+  else if (event.key === 'Home') next = 0
+  else if (event.key === 'End') next = TAB_KEYS.length - 1
+  if (next === null) return
+  event.preventDefault()
+  activeTab.value = TAB_KEYS[next]
+  document.getElementById(`adv-tab-${TAB_KEYS[next]}`)?.focus()
+}
+
+/* Residents filters */
+const residentSearch = ref('')
+const statusFilter = ref('all')
+
+const statusFilters = computed(() => [
+  { key: 'all', label: t('app.advancedMgmt.filterAll'), count: totalResidents.value },
+  { key: 'active', label: t('app.advancedMgmt.filterActive'), count: statusCounts.value.active },
+  { key: 'pending', label: t('app.advancedMgmt.filterPending'), count: statusCounts.value.pending },
+  { key: 'deactivated', label: t('app.advancedMgmt.filterDeactivated'), count: statusCounts.value.deactivated },
+])
+
+function normalizeText(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+const filteredResidents = computed(() => {
+  const query = normalizeText(residentSearch.value)
+  return residents.value.filter((resident) => {
+    if (statusFilter.value !== 'all' && residentStatus(resident) !== statusFilter.value) return false
+    if (!query) return true
+    return [resident.name, resident.code, resident.floor, resident.email].some((field) =>
+      normalizeText(field).includes(query),
+    )
+  })
+})
+
+const hasResidentFilters = computed(() => Boolean(residentSearch.value.trim()) || statusFilter.value !== 'all')
+
+function clearResidentFilters() {
+  residentSearch.value = ''
+  statusFilter.value = 'all'
+}
+
+/* Invitation link: open the row panel and copy it to the clipboard in one click. */
+const copiedInviteId = ref('')
+let copiedInviteTimer = null
+
+async function copyInviteLink(resident) {
+  const link = accessLinks[resident.id]
+  if (!link) return
+  try {
+    await navigator.clipboard.writeText(link)
+    copiedInviteId.value = resident.id
+    window.clearTimeout(copiedInviteTimer)
+    copiedInviteTimer = window.setTimeout(() => {
+      if (copiedInviteId.value === resident.id) copiedInviteId.value = ''
+    }, 2500)
+  } catch {
+    // Clipboard blocked (permissions / insecure context): the link stays visible to copy by hand.
+  }
+}
+
+async function onInviteAction(resident) {
+  const wasOpen = Boolean(accessLinks[resident.id])
+  generateResidentAccessLink(resident)
+  if (wasOpen) {
+    if (copiedInviteId.value === resident.id) copiedInviteId.value = ''
+    return
+  }
+  await copyInviteLink(resident)
+}
+
+onBeforeUnmount(() => window.clearTimeout(copiedInviteTimer))
+
+/** Dialog v-model bridge that respects each close guard (busy states). */
+function onDialogVisible(visible, close) {
+  if (!visible) close()
+}
+
+const accountStatusView = computed(() => accountStatusCandidate.value || accountStatusShown.value)
+const accountStatusReactivate = computed(() => accountStatusView.value?.accountStatus === 'DEACTIVATED')
 </script>
 
 <template>
-  <div class="app-view">
-    <div class="finance-page">
-      <div class="finance-main-row">
-        <article class="finance-panel finance-panel--table import-panel mgmt-col" aria-labelledby="residents-col-heading">
-          <div class="mgmt-panel-toolbar">
-            <h2 id="residents-col-heading" class="finance-panel__section-title">
-              <i class="pi pi-users" aria-hidden="true" />
-              {{ t('app.residentsColumnTitle') }}
-            </h2>
-            <Button
-              type="button"
-              icon="pi pi-plus"
-              class="import-dropzone__btn"
-              :label="t('app.addResidentAction')"
-              @click="openAddResidentModal"
-            />
+  <div class="app-view adv">
+    <header class="adv-head">
+      <div class="adv-head__text">
+        <h1 class="adv-head__title">{{ t('app.advancedMgmt.pageTitle') }}</h1>
+        <p class="adv-head__sub">{{ t('app.advancedMgmt.pageSubtitle') }}</p>
+      </div>
+      <div class="adv-head__actions" role="group" :aria-label="t('app.advancedMgmt.headerActions')">
+        <button type="button" class="adv-btn" @click="openBulkResidentsModal">
+          <i class="pi pi-file-import" aria-hidden="true" />
+          {{ t('app.advancedMgmt.import') }}
+        </button>
+        <button type="button" class="adv-btn" @click="openAddSpaceModal">
+          <i class="pi pi-building" aria-hidden="true" />
+          {{ t('app.addSpaceAction') }}
+        </button>
+        <button type="button" class="adv-btn adv-btn--primary" @click="openAddResidentModal">
+          <i class="pi pi-user-plus" aria-hidden="true" />
+          {{ t('app.advancedMgmt.addResident') }}
+        </button>
+      </div>
+    </header>
+
+    <!-- Summary -->
+    <section class="adv-stats" :aria-label="t('app.advancedMgmt.summaryLabel')">
+      <article class="adv-stat" :class="isAtPlanLimit ? 'adv-stat--red' : 'adv-stat--blue'">
+        <div class="adv-stat__head">
+          <h2 class="adv-stat__label">{{ t('app.advancedMgmt.statResidents') }}</h2>
+          <span class="adv-stat__icon" :class="isAtPlanLimit ? 'is-red' : 'is-blue'">
+            <i class="pi pi-users" aria-hidden="true" />
+          </span>
+        </div>
+        <p class="adv-stat__value">
+          {{ isLoading ? '…' : totalResidents }}<span class="adv-stat__of"> / {{ residentPlanLimitCap }}</span>
+        </p>
+        <div
+          class="adv-meter"
+          role="progressbar"
+          :aria-valuenow="planUsagePct"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          :aria-label="t('app.advancedMgmt.planMeterLabel')"
+        >
+          <span class="adv-meter__fill" :class="{ 'is-full': isAtPlanLimit }" :style="{ width: `${planUsagePct}%` }" />
+        </div>
+        <p class="adv-stat__hint">
+          <template v-if="isAtPlanLimit">
+            {{ t('app.advancedMgmt.statResidentsFull') }}
+            <RouterLink class="adv-stat__link" :to="upgradePlanRoute">
+              {{ t('billing.upgradeCta') }}
+              <i class="pi pi-arrow-right" aria-hidden="true" />
+            </RouterLink>
+          </template>
+          <template v-else>{{ t('app.advancedMgmt.statResidentsLeft', { n: remainingSlots }, remainingSlots) }}</template>
+        </p>
+      </article>
+
+      <article class="adv-stat adv-stat--green">
+        <div class="adv-stat__head">
+          <h2 class="adv-stat__label">{{ t('app.advancedMgmt.statActive') }}</h2>
+          <span class="adv-stat__icon is-green"><i class="pi pi-check-circle" aria-hidden="true" /></span>
+        </div>
+        <p class="adv-stat__value">{{ isLoading ? '…' : statusCounts.active }}</p>
+        <p class="adv-stat__hint">{{ t('app.advancedMgmt.statActiveHint') }}</p>
+      </article>
+
+      <article class="adv-stat adv-stat--amber">
+        <div class="adv-stat__head">
+          <h2 class="adv-stat__label">{{ t('app.advancedMgmt.statPending') }}</h2>
+          <span class="adv-stat__icon is-amber"><i class="pi pi-envelope" aria-hidden="true" /></span>
+        </div>
+        <p class="adv-stat__value">{{ isLoading ? '…' : statusCounts.pending }}</p>
+        <p class="adv-stat__hint">
+          {{ statusCounts.pending ? t('app.advancedMgmt.statPendingHint') : t('app.advancedMgmt.statPendingNone') }}
+        </p>
+      </article>
+
+      <article class="adv-stat adv-stat--orange">
+        <div class="adv-stat__head">
+          <h2 class="adv-stat__label">{{ t('app.advancedMgmt.statSpaces') }}</h2>
+          <span class="adv-stat__icon is-orange"><i class="pi pi-building" aria-hidden="true" /></span>
+        </div>
+        <p class="adv-stat__value">{{ isLoadingSpaces ? '…' : spaces.length }}</p>
+        <p class="adv-stat__hint">
+          {{ t('app.advancedMgmt.statSpacesAvailable', { n: spaceCounts.available }, spaceCounts.available) }}
+          <template v-if="spaceCounts.maintenance">
+            · {{ t('app.advancedMgmt.statSpacesMaintenance', { n: spaceCounts.maintenance }) }}
+          </template>
+        </p>
+      </article>
+    </section>
+
+    <!-- Residents | Common spaces -->
+    <section class="adv-card">
+      <div class="adv-tabs" role="tablist" :aria-label="t('app.advancedMgmt.tabsLabel')">
+        <button
+          v-for="tab in tabs"
+          :id="`adv-tab-${tab.key}`"
+          :key="tab.key"
+          type="button"
+          role="tab"
+          class="adv-tab"
+          :class="{ 'is-active': activeTab === tab.key }"
+          :aria-selected="activeTab === tab.key ? 'true' : 'false'"
+          :aria-controls="`adv-panel-${tab.key}`"
+          :tabindex="activeTab === tab.key ? 0 : -1"
+          @click="selectTab(tab.key)"
+          @keydown="onTabKeydown"
+        >
+          <i :class="tab.icon" aria-hidden="true" />
+          {{ tab.label }}
+          <span class="adv-tab__count">{{ tab.count }}</span>
+        </button>
+      </div>
+
+      <!-- Residents -->
+      <div
+        v-show="activeTab === 'residents'"
+        id="adv-panel-residents"
+        class="adv-panel"
+        role="tabpanel"
+        aria-labelledby="adv-tab-residents"
+      >
+        <p class="adv-panel__intro">{{ t('app.advancedMgmt.residentsIntro') }}</p>
+
+        <p v-if="residentDeleteError && !isDeleteResidentModalOpen" class="adv-alert" role="alert">
+          {{ residentDeleteError }}
+        </p>
+
+        <p v-if="isLoading" class="adv-status" role="status">
+          <i class="pi pi-spin pi-spinner" aria-hidden="true" />
+          {{ t('app.residentsLoading') }}
+        </p>
+        <LoadErrorRetry
+          v-else-if="loadError"
+          :message="loadError"
+          :loading="isLoading"
+          @retry="loadResidents"
+        />
+        <div v-else-if="!residents.length" class="adv-empty">
+          <span class="adv-empty__icon"><i class="pi pi-users" aria-hidden="true" /></span>
+          <p class="adv-empty__text">{{ t('app.emptyResidents') }}</p>
+          <div class="adv-empty__actions">
+            <button type="button" class="adv-btn" @click="openBulkResidentsModal">
+              <i class="pi pi-file-import" aria-hidden="true" />
+              {{ t('app.advancedMgmt.import') }}
+            </button>
+            <button type="button" class="adv-btn adv-btn--primary" @click="openAddResidentModal">
+              <i class="pi pi-user-plus" aria-hidden="true" />
+              {{ t('app.advancedMgmt.addResident') }}
+            </button>
+          </div>
+        </div>
+
+        <template v-else>
+          <div class="adv-toolbar">
+            <label class="adv-search">
+              <i class="pi pi-search" aria-hidden="true" />
+              <span class="visually-hidden">{{ t('app.advancedMgmt.searchLabel') }}</span>
+              <input
+                v-model="residentSearch"
+                type="search"
+                autocomplete="off"
+                :placeholder="t('app.advancedMgmt.searchPlaceholder')"
+              />
+            </label>
+            <div class="adv-filters" role="group" :aria-label="t('app.advancedMgmt.filterLabel')">
+              <button
+                v-for="filter in statusFilters"
+                :key="filter.key"
+                type="button"
+                class="adv-filter"
+                :class="{ 'is-active': statusFilter === filter.key }"
+                :aria-pressed="statusFilter === filter.key ? 'true' : 'false'"
+                @click="statusFilter = filter.key"
+              >
+                {{ filter.label }}
+                <span class="adv-filter__count">{{ filter.count }}</span>
+              </button>
+            </div>
           </div>
 
-          <p v-if="residentDeleteError" class="import-alert import-alert--error" role="alert">
-            {{ residentDeleteError }}
-          </p>
+          <div v-if="filteredResidents.length" class="adv-table-wrap">
+            <table class="adv-table">
+              <thead>
+                <tr>
+                  <th scope="col">{{ t('app.advancedMgmt.colResident') }}</th>
+                  <th scope="col">{{ t('app.advancedMgmt.colUnit') }}</th>
+                  <th scope="col">{{ t('app.advancedMgmt.colAdmission') }}</th>
+                  <th scope="col">{{ t('app.advancedMgmt.colStatus') }}</th>
+                  <th scope="col" class="is-actions">
+                    <span class="visually-hidden">{{ t('app.advancedMgmt.colActions') }}</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <template v-for="resident in filteredResidents" :key="resident.id">
+                  <tr :class="{ 'has-invite': accessLinks[resident.id] }">
+                    <td class="c-main">
+                      <div class="adv-person">
+                        <span class="adv-avatar" :class="`is-${residentStatus(resident)}`" aria-hidden="true">
+                          {{ residentInitials(resident.name) }}
+                        </span>
+                        <div class="adv-person__text">
+                          <strong>{{ resident.name }}</strong>
+                          <small :class="{ 'is-muted': !resident.email }">
+                            {{ resident.email || t('app.advancedMgmt.noEmail') }}
+                          </small>
+                        </div>
+                      </div>
+                    </td>
+                    <td class="c-unit" :data-label="t('app.advancedMgmt.colUnit')">
+                      {{ t('app.residentFloorApt', { floor: resident.floor, code: resident.code }) }}
+                    </td>
+                    <td class="c-date" :data-label="t('app.advancedMgmt.colAdmission')">
+                      {{ nfDate(resident.admissionDate) }}
+                    </td>
+                    <td class="c-status" :data-label="t('app.advancedMgmt.colStatus')">
+                      <span class="adv-pill" :class="`adv-pill--${residentStatus(resident)}`">
+                        <span class="adv-pill__dot" aria-hidden="true" />
+                        {{ t(STATUS_LABEL_KEYS[residentStatus(resident)]) }}
+                      </span>
+                    </td>
+                    <td class="c-actions">
+                      <div class="adv-actions">
+                        <button
+                          type="button"
+                          class="adv-action adv-action--blue"
+                          :class="{ 'is-open': accessLinks[resident.id] }"
+                          :aria-label="
+                            accessLinks[resident.id]
+                              ? `${t('app.hideResidentLinkAction')} — ${resident.name}`
+                              : `${t('app.advancedMgmt.copyInvite')} — ${resident.name}`
+                          "
+                          :aria-expanded="accessLinks[resident.id] ? 'true' : 'false'"
+                          :aria-controls="`adv-invite-${resident.id}`"
+                          :data-tip="accessLinks[resident.id] ? t('app.hideResidentLinkAction') : t('app.advancedMgmt.copyInvite')"
+                          @click="onInviteAction(resident)"
+                        >
+                          <i :class="accessLinks[resident.id] ? 'pi pi-chevron-up' : 'pi pi-link'" aria-hidden="true" />
+                        </button>
+                        <button
+                          type="button"
+                          class="adv-action"
+                          :class="resident.accountStatus === 'DEACTIVATED' ? 'adv-action--green' : 'adv-action--amber'"
+                          :aria-label="`${
+                            resident.accountStatus === 'DEACTIVATED'
+                              ? t('app.reactivateResidentAction')
+                              : t('app.deactivateResidentAction')
+                          } — ${resident.name}`"
+                          :data-tip="
+                            resident.accountStatus === 'DEACTIVATED'
+                              ? t('app.reactivateResidentAction')
+                              : t('app.deactivateResidentAction')
+                          "
+                          :disabled="isChangingAccountStatus && accountStatusCandidate?.id === resident.id"
+                          @click="openAccountStatusModal(resident)"
+                        >
+                          <i :class="resident.accountStatus === 'DEACTIVATED' ? 'pi pi-replay' : 'pi pi-ban'" aria-hidden="true" />
+                        </button>
+                        <button
+                          type="button"
+                          class="adv-action adv-action--danger"
+                          :aria-label="`${t('app.deleteResidentAction')} — ${resident.name}`"
+                          :data-tip="t('app.deleteResidentAction')"
+                          :disabled="isDeletingResidentCascade && deleteResidentCandidate?.id === resident.id"
+                          @click="openDeleteResidentModal(resident)"
+                        >
+                          <i class="pi pi-trash" aria-hidden="true" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="accessLinks[resident.id]" :id="`adv-invite-${resident.id}`" class="adv-invite-row">
+                    <td colspan="5">
+                      <div class="adv-invite">
+                        <p class="adv-invite__text" :class="{ 'is-copied': copiedInviteId === resident.id }" aria-live="polite">
+                          <i
+                            :class="copiedInviteId === resident.id ? 'pi pi-check-circle' : 'pi pi-info-circle'"
+                            aria-hidden="true"
+                          />
+                          {{
+                            copiedInviteId === resident.id
+                              ? t('app.advancedMgmt.inviteCopied', { name: resident.name })
+                              : t('app.advancedMgmt.inviteHint', { name: resident.name })
+                          }}
+                        </p>
+                        <div class="adv-invite__field">
+                          <input
+                            type="text"
+                            readonly
+                            :value="accessLinks[resident.id]"
+                            :aria-label="t('app.advancedMgmt.inviteLinkLabel', { name: resident.name })"
+                            @focus="$event.target.select()"
+                          />
+                          <button type="button" class="adv-btn adv-btn--sm" @click="copyInviteLink(resident)">
+                            <i :class="copiedInviteId === resident.id ? 'pi pi-check' : 'pi pi-copy'" aria-hidden="true" />
+                            {{ copiedInviteId === resident.id ? t('app.advancedMgmt.copied') : t('app.advancedMgmt.copy') }}
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="adv-empty">
+            <span class="adv-empty__icon"><i class="pi pi-search" aria-hidden="true" /></span>
+            <p class="adv-empty__text">{{ t('app.emptyResidentsSearch') }}</p>
+            <div v-if="hasResidentFilters" class="adv-empty__actions">
+              <button type="button" class="adv-btn" @click="clearResidentFilters">
+                {{ t('app.advancedMgmt.clearFilters') }}
+              </button>
+            </div>
+          </div>
+        </template>
+      </div>
 
-          <div v-if="isLoading" class="import-status import-panel-state">
-            <i class="pi pi-spin pi-spinner" aria-hidden="true" />
-            <span>{{ t('app.residentsLoading') }}</span>
+      <!-- Common spaces -->
+      <div
+        v-show="activeTab === 'spaces'"
+        id="adv-panel-spaces"
+        class="adv-panel"
+        role="tabpanel"
+        aria-labelledby="adv-tab-spaces"
+      >
+        <p class="adv-panel__intro">{{ t('app.advancedMgmt.spacesIntro') }}</p>
+
+        <p v-if="spaceDeleteError && !isDeleteSpaceModalOpen" class="adv-alert" role="alert">
+          {{ spaceDeleteError }}
+        </p>
+
+        <p v-if="isLoadingSpaces" class="adv-status" role="status">
+          <i class="pi pi-spin pi-spinner" aria-hidden="true" />
+          {{ t('app.spacesLoading') }}
+        </p>
+        <LoadErrorRetry
+          v-else-if="spacesLoadError"
+          :message="spacesLoadError"
+          :loading="isLoadingSpaces"
+          @retry="loadSpaces"
+        />
+        <div v-else-if="!spaces.length" class="adv-empty">
+          <span class="adv-empty__icon"><i class="pi pi-building" aria-hidden="true" /></span>
+          <p class="adv-empty__text">{{ t('app.emptySpaces') }}</p>
+          <div class="adv-empty__actions">
+            <button type="button" class="adv-btn adv-btn--primary" @click="openAddSpaceModal">
+              <i class="pi pi-plus" aria-hidden="true" />
+              {{ t('app.addSpaceAction') }}
+            </button>
           </div>
-          <LoadErrorRetry
-            v-else-if="loadError"
-            class="import-panel-state"
-            :message="loadError"
-            :loading="isLoading"
-            @retry="loadResidents"
-          />
-          <div v-else-if="!residents.length" class="import-empty import-panel-state">
-            <i class="pi pi-inbox" aria-hidden="true" />
-            <span>{{ t('app.emptyResidents') }}</span>
-          </div>
-        <ul v-else class="r-list" role="list">
-          <li v-for="resident in residents" :key="resident.id" class="r-card">
-            <div class="r-card__row">
-              <span class="r-card__avatar" :class="{ 'r-card__avatar--active': resident.hasCredentials }">
-                {{ residentInitials(resident.name) }}
+        </div>
+        <ul v-else class="adv-spaces" role="list">
+          <li v-for="space in spaces" :key="space.id" class="adv-space">
+            <div class="adv-space__media">
+              <img
+                v-if="space.imageUrl"
+                :src="space.imageUrl"
+                :alt="t('app.spaceImageAlt', { name: space.name })"
+                class="adv-space__img"
+              />
+              <span v-else class="adv-space__placeholder" aria-hidden="true">
+                <span class="adv-space__placeholder-icon"><i class="pi pi-image" /></span>
               </span>
-              <div class="r-card__body">
-                <p class="r-card__name">
-                  {{ resident.name }}
-                  <span v-if="resident.hasCredentials" class="r-card__badge">
-                    <i class="pi pi-check-circle" aria-hidden="true" />
-                  </span>
-                </p>
-                <p class="r-card__meta">
-                  {{ t('app.residentFloorApt', { floor: resident.floor, code: resident.code }) }}
-                  <template v-if="resident.admissionDate">
-                    · {{ t('app.residentAdmissionDate', { date: formatDayMonth(resident.admissionDate, locale) }) }}
+            </div>
+            <div class="adv-space__body">
+              <div class="adv-space__title-row">
+                <h3 class="adv-space__name">{{ space.name }}</h3>
+                <span
+                  class="adv-pill"
+                  :class="space.status === 'MAINTENANCE' ? 'adv-pill--maintenance' : 'adv-pill--active'"
+                >
+                  <span class="adv-pill__dot" aria-hidden="true" />
+                  {{
+                    space.status === 'MAINTENANCE'
+                      ? t('socialSpaces.statusMaintenance')
+                      : t('socialSpaces.statusAvailable')
+                  }}
+                </span>
+              </div>
+              <p class="adv-space__desc" :class="{ 'is-muted': !space.description }">
+                {{ space.description || t('app.advancedMgmt.noDescription') }}
+              </p>
+              <ul class="adv-space__facts" role="list">
+                <li v-if="space.capacity">
+                  <i class="pi pi-users" aria-hidden="true" />
+                  {{ t('app.advancedMgmt.capacityValue', { n: space.capacity }, Number(space.capacity)) }}
+                </li>
+                <li>
+                  <i class="pi pi-calendar" aria-hidden="true" />
+                  {{
+                    space.maxReservationsPerDay
+                      ? t(
+                          'app.advancedMgmt.maxPerDayValue',
+                          { n: space.maxReservationsPerDay },
+                          Number(space.maxReservationsPerDay),
+                        )
+                      : t('app.advancedMgmt.noDailyLimit')
+                  }}
+                </li>
+              </ul>
+              <div class="adv-space__rules" :class="{ 'is-muted': !space.rules }">
+                <i class="pi pi-book" aria-hidden="true" />
+                <p>
+                  <template v-if="space.rules">
+                    <strong>{{ t('socialSpaces.rulesLabel') }}:</strong> {{ space.rules }}
                   </template>
-                  <template v-if="resident.email"> · {{ resident.email }}</template>
-                </p>
-                <p v-if="resident.accountStatus === 'DEACTIVATED'" class="r-card__deactivated">
-                  <i class="pi pi-ban" aria-hidden="true" />
-                  {{ t('app.residentAccountDeactivated') }}
+                  <template v-else>{{ t('app.advancedMgmt.noRules') }}</template>
                 </p>
               </div>
-              <div class="r-card__actions">
+            </div>
+            <div class="adv-space__foot" role="group" :aria-label="t('app.advancedMgmt.spaceActionsFor', { name: space.name })">
+              <button type="button" class="adv-btn adv-btn--sm" @click="openSpaceCalendar(space)">
+                <i class="pi pi-calendar" aria-hidden="true" />
+                {{ t('app.advancedMgmt.viewReservations') }}
+              </button>
+              <div class="adv-actions">
                 <button
                   type="button"
-                  class="r-card__icon-btn r-card__icon-btn--link"
-                  :class="{ 'is-open': accessLinks[resident.id] }"
-                  :title="
-                    accessLinks[resident.id]
-                      ? t('app.hideResidentLinkAction')
-                      : t('app.shareResidentAction')
-                  "
-                  @click="generateResidentAccessLink(resident)"
+                  class="adv-action adv-action--blue"
+                  :aria-label="`${t('app.editSpaceAction')} — ${space.name}`"
+                  :data-tip="t('app.editSpaceAction')"
+                  @click="openEditSpaceModal(space)"
                 >
-                  <span class="r-card__link-icon" :class="{ 'r-card__link-icon--open': accessLinks[resident.id] }">
-                    <i class="pi pi-link r-card__link-icon-item r-card__link-icon-item--link" aria-hidden="true" />
-                    <i class="pi pi-chevron-up r-card__link-icon-item r-card__link-icon-item--up" aria-hidden="true" />
-                  </span>
+                  <i class="pi pi-pencil" aria-hidden="true" />
                 </button>
                 <button
                   type="button"
-                  class="r-card__icon-btn"
-                  :title="
-                    resident.accountStatus === 'DEACTIVATED'
-                      ? t('app.reactivateResidentAction')
-                      : t('app.deactivateResidentAction')
-                  "
-                  :aria-label="
-                    resident.accountStatus === 'DEACTIVATED'
-                      ? t('app.reactivateResidentAction')
-                      : t('app.deactivateResidentAction')
-                  "
-                  :disabled="isChangingAccountStatus && accountStatusCandidate?.id === resident.id"
-                  @click="openAccountStatusModal(resident)"
-                >
-                  <i
-                    :class="resident.accountStatus === 'DEACTIVATED' ? 'pi pi-unlock' : 'pi pi-ban'"
-                    aria-hidden="true"
-                  />
-                </button>
-                <button
-                  type="button"
-                  class="r-card__icon-btn r-card__icon-btn--danger"
-                  :title="t('app.deleteResidentAction')"
-                  :disabled="isDeletingResidentCascade && deleteResidentCandidate?.id === resident.id"
-                  @click="openDeleteResidentModal(resident)"
+                  class="adv-action adv-action--danger"
+                  :aria-label="`${t('app.deleteSpaceAction')} — ${space.name}`"
+                  :data-tip="t('app.deleteSpaceAction')"
+                  :disabled="isDeletingSpace && deleteSpaceCandidate?.id === space.id"
+                  @click="openDeleteSpaceModal(space)"
                 >
                   <i class="pi pi-trash" aria-hidden="true" />
                 </button>
               </div>
             </div>
-            <Transition name="r-card-link">
-              <a
-                v-if="accessLinks[resident.id]"
-                class="r-card__link"
-                :href="accessLinks[resident.id]"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {{ accessLinks[resident.id] }}
-              </a>
-            </Transition>
+          </li>
+          <li class="adv-space adv-space--add">
+            <button type="button" class="adv-space__add" @click="openAddSpaceModal">
+              <span class="adv-space__add-icon"><i class="pi pi-plus" aria-hidden="true" /></span>
+              <strong>{{ t('app.addSpaceAction') }}</strong>
+              <small>{{ t('app.advancedMgmt.newSpaceHint') }}</small>
+            </button>
           </li>
         </ul>
-      </article>
-
-        <article class="finance-panel finance-panel--table import-panel mgmt-col" aria-labelledby="spaces-col-heading">
-          <div class="mgmt-panel-toolbar">
-            <h2 id="spaces-col-heading" class="finance-panel__section-title">
-              <i class="pi pi-building" aria-hidden="true" />
-              {{ t('app.spacesColumnTitle') }}
-            </h2>
-            <Button
-              type="button"
-              icon="pi pi-plus"
-              class="import-dropzone__btn"
-              :label="t('app.addSpaceAction')"
-              @click="openAddSpaceModal"
-            />
-          </div>
-
-          <p v-if="spaceDeleteError" class="import-alert import-alert--error" role="alert">
-            {{ spaceDeleteError }}
-          </p>
-
-          <div v-if="isLoadingSpaces" class="import-status import-panel-state">
-            <i class="pi pi-spin pi-spinner" aria-hidden="true" />
-            <span>{{ t('app.spacesLoading') }}</span>
-          </div>
-          <LoadErrorRetry
-            v-else-if="spacesLoadError"
-            class="import-panel-state"
-            :message="spacesLoadError"
-            :loading="isLoadingSpaces"
-            @retry="loadSpaces"
-          />
-          <div v-else-if="!spaces.length" class="import-empty import-panel-state">
-            <i class="pi pi-image" aria-hidden="true" />
-            <span>{{ t('app.emptySpaces') }}</span>
-          </div>
-        <ul v-else class="s-list" role="list">
-          <li
-            v-for="space in spaces"
-            :key="space.id"
-            class="s-card"
-            tabindex="0"
-            role="button"
-            @click="openSpaceCalendar(space)"
-            @keyup.enter="openSpaceCalendar(space)"
-            @keyup.space.prevent="openSpaceCalendar(space)"
-          >
-            <div class="s-card__thumb">
-              <img
-                v-if="space.imageUrl"
-                :src="space.imageUrl"
-                :alt="t('app.spaceImageAlt', { name: space.name })"
-                class="s-card__img"
-              />
-              <div v-else class="s-card__placeholder" aria-hidden="true">
-                <i class="pi pi-image" />
-              </div>
-            </div>
-            <div class="s-card__info">
-              <p class="s-card__name">
-                {{ space.name }}
-                <span v-if="space.status === 'MAINTENANCE'" class="s-card__badge">
-                  {{ t('socialSpaces.maintenanceBadge') }}
-                </span>
-              </p>
-              <p class="s-card__meta">
-                <template v-if="space.capacity">
-                  <i class="pi pi-users" aria-hidden="true" />
-                  {{ space.capacity }}
-                </template>
-                <template v-if="space.capacity && space.description"> · </template>
-                <template v-if="space.description">{{ space.description }}</template>
-              </p>
-            </div>
-            <div class="s-card__actions" @click.stop @keyup.stop @keydown.stop>
-              <button
-                type="button"
-                class="r-card__icon-btn r-card__icon-btn--edit"
-                :title="t('app.editSpaceAction')"
-                @click.stop="openEditSpaceModal(space)"
-              >
-                <i class="pi pi-pencil" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                class="r-card__icon-btn r-card__icon-btn--danger"
-                :title="t('app.deleteSpaceAction')"
-                :disabled="isDeletingSpace && deleteSpaceCandidate?.id === space.id"
-                @click.stop="openDeleteSpaceModal(space)"
-              >
-                <i class="pi pi-trash" aria-hidden="true" />
-              </button>
-            </div>
-          </li>
-        </ul>
-      </article>
       </div>
+    </section>
 
-      <p class="mgmt-view-footer" role="note">
-        {{ t('app.residentPlanUsageHint', { current: totalResidents, max: residentPlanLimitCap }) }}
-        <RouterLink v-if="isAtPlanLimit" class="mgmt-view-footer__upgrade" :to="upgradePlanRoute">
+    <!-- Nuevo residente -->
+    <Dialog
+      :visible="isAddResidentModalOpen"
+      modal
+      dismissable-mask
+      :header="t('app.addResidentModalTitle')"
+      class="adv-dialog"
+      :style="{ width: 'min(28rem, 94vw)' }"
+      :draggable="false"
+      :closable="!isSubmitting"
+      :close-on-escape="!isSubmitting"
+      @update:visible="onDialogVisible($event, closeAddResidentModal)"
+    >
+      <form class="adv-form" novalidate @submit.prevent="onAddResidentSubmit">
+        <p v-if="isAtPlanLimit" class="adv-form__note adv-form__note--warn">
+          <i class="pi pi-exclamation-triangle" aria-hidden="true" />
+          <span>{{ t('app.advancedMgmt.planLimitNote', { current: totalResidents, max: residentPlanLimitCap }) }}</span>
+        </p>
+
+        <div class="adv-field" :class="{ 'bf-field--invalid': residentFieldErrors.name }">
+          <label for="adv-resident-name">{{ t('app.residentNameLabel') }}</label>
+          <input
+            id="adv-resident-name"
+            v-model="residentForm.name"
+            type="text"
+            autocomplete="name"
+            required
+            :aria-invalid="residentFieldErrors.name ? 'true' : 'false'"
+            :aria-describedby="residentFieldErrors.name ? 'resident-name-error' : undefined"
+            @input="residentFieldErrors.name = ''"
+          />
+          <small v-if="residentFieldErrors.name" id="resident-name-error" class="bf-field-error">
+            {{ t(residentFieldErrors.name) }}
+          </small>
+        </div>
+
+        <div class="adv-field" :class="{ 'bf-field--invalid': residentFieldErrors.department }">
+          <label for="adv-resident-dept">{{ t('app.residentDepartmentLabel') }}</label>
+          <input
+            id="adv-resident-dept"
+            v-model="residentForm.department"
+            type="text"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            maxlength="4"
+            required
+            :placeholder="t('app.residentDepartmentPlaceholder')"
+            autocomplete="off"
+            :aria-invalid="residentFieldErrors.department ? 'true' : 'false'"
+            :aria-describedby="residentFieldErrors.department ? 'resident-department-error' : 'resident-department-hint'"
+            @input="residentFieldErrors.department = ''"
+          />
+          <small v-if="residentFieldErrors.department" id="resident-department-error" class="bf-field-error">
+            {{ t(residentFieldErrors.department) }}
+          </small>
+          <small v-else-if="detectedFloor" id="resident-department-hint" class="adv-field__preview" aria-live="polite">
+            <i class="pi pi-check" aria-hidden="true" />
+            {{ t('app.residentFloorDetected', { floor: detectedFloor }) }}
+          </small>
+          <small v-else id="resident-department-hint" class="adv-field__hint">
+            {{ t('app.residentDepartmentHint') }}
+          </small>
+        </div>
+
+        <p v-if="modalError" class="adv-form__error" role="alert">{{ modalError }}</p>
+        <RouterLink
+          v-if="modalNeedsUpgrade || isAtPlanLimit"
+          class="adv-btn adv-btn--primary adv-form__upgrade"
+          :to="upgradePlanRoute"
+          @click="isAddResidentModalOpen = false"
+        >
+          <i class="pi pi-arrow-up-right" aria-hidden="true" />
           {{ t('billing.upgradeCta') }}
         </RouterLink>
-      </p>
-    </div>
 
-    <div
-      v-if="isAddResidentModalOpen"
-      class="resident-modal-backdrop bf-modal-backdrop"
-      role="presentation"
-      @click.self="closeAddResidentModal"
+        <button type="button" class="adv-text-btn" :disabled="isSubmitting" @click="openBulkResidentsModal">
+          <i class="pi pi-file-import" aria-hidden="true" />
+          {{ t('app.advancedMgmt.importInstead') }}
+        </button>
+
+        <ConfirmActions
+          :cancel-label="t('app.cancelAction')"
+          :confirm-label="isSubmitting ? t('app.savingResidentAction') : t('app.saveResidentAction')"
+          confirm-type="submit"
+          :stagger="false"
+          :loading="isSubmitting"
+          :cancel-disabled="isSubmitting"
+          @cancel="closeAddResidentModal"
+        />
+      </form>
+    </Dialog>
+
+    <!-- Importar residentes -->
+    <Dialog
+      :visible="isBulkResidentsModalOpen"
+      modal
+      dismissable-mask
+      :header="t('app.advancedMgmt.importTitle')"
+      class="adv-dialog"
+      :style="{ width: 'min(38rem, 94vw)' }"
+      :draggable="false"
+      :closable="!isSubmittingBulk"
+      :close-on-escape="!isSubmittingBulk"
+      @update:visible="onDialogVisible($event, closeBulkResidentsModal)"
     >
-      <section class="resident-modal bf-modal-panel" role="dialog" aria-modal="true" :aria-label="t('app.addResidentModalTitle')">
-        <div class="resident-modal__header">
-          <h3 class="resident-modal__title">{{ t('app.addResidentModalTitle') }}</h3>
-          <button
-            type="button"
-            class="resident-modal__bulk-btn"
-            :disabled="isSubmitting"
-            @click="openBulkResidentsModal"
-          >
-            <i class="pi pi-list" aria-hidden="true" />
-            {{ t('app.addBulkResidentsAction') }}
-          </button>
+      <div class="adv-segment" role="tablist" :aria-label="t('rosterImport.modeLabel')">
+        <button
+          type="button"
+          role="tab"
+          class="adv-segment__tab"
+          :class="{ 'is-active': bulkMode === 'file' }"
+          :aria-selected="bulkMode === 'file' ? 'true' : 'false'"
+          :disabled="isSubmittingBulk"
+          @click="bulkMode = 'file'"
+        >
+          <i class="pi pi-file-excel" aria-hidden="true" />
+          {{ t('rosterImport.modeFile') }}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="adv-segment__tab"
+          :class="{ 'is-active': bulkMode === 'text' }"
+          :aria-selected="bulkMode === 'text' ? 'true' : 'false'"
+          @click="bulkMode = 'text'"
+        >
+          <i class="pi pi-list" aria-hidden="true" />
+          {{ t('rosterImport.modeText') }}
+        </button>
+      </div>
+
+      <div v-if="bulkMode === 'file'" class="adv-form">
+        <ResidentImportPanel @imported="onRosterImported" />
+        <ConfirmActions
+          :cancel-label="t('app.closeAction')"
+          :show-confirm="false"
+          :stagger="false"
+          @cancel="closeBulkResidentsModal"
+        />
+      </div>
+
+      <form v-else class="adv-form" @submit.prevent="onBulkResidentsSubmit">
+        <div class="adv-form__note">
+          <i class="pi pi-info-circle" aria-hidden="true" />
+          <span>
+            {{ t('app.bulkResidentsHint') }}
+            <code class="adv-code">{{ t('app.bulkResidentsExample') }}</code>
+          </span>
+        </div>
+        <div class="adv-field">
+          <label for="adv-bulk-text">{{ t('app.bulkResidentsTextareaLabel') }}</label>
+          <textarea
+            id="adv-bulk-text"
+            v-model="bulkResidentsText"
+            class="adv-field__mono"
+            rows="7"
+            :placeholder="t('app.bulkResidentsPlaceholder')"
+          />
         </div>
 
-        <form class="resident-modal__form" novalidate @submit.prevent="onAddResidentSubmit">
-          <label class="resident-modal__field" :class="{ 'bf-field--invalid': residentFieldErrors.name }">
-            <span>{{ t('app.residentNameLabel') }}</span>
-            <input
-              v-model="residentForm.name"
-              type="text"
-              autocomplete="name"
-              required
-              :aria-invalid="residentFieldErrors.name ? 'true' : 'false'"
-              :aria-describedby="residentFieldErrors.name ? 'resident-name-error' : undefined"
-              @input="residentFieldErrors.name = ''"
-            />
-            <small v-if="residentFieldErrors.name" id="resident-name-error" class="bf-field-error">
-              {{ t(residentFieldErrors.name) }}
-            </small>
-          </label>
-
-          <label class="resident-modal__field" :class="{ 'bf-field--invalid': residentFieldErrors.department }">
-            <span>{{ t('app.residentDepartmentLabel') }}</span>
-            <input
-              v-model="residentForm.department"
-              type="text"
-              inputmode="numeric"
-              pattern="[0-9]*"
-              maxlength="4"
-              required
-              :placeholder="t('app.residentDepartmentPlaceholder')"
-              autocomplete="off"
-              :aria-invalid="residentFieldErrors.department ? 'true' : 'false'"
-              :aria-describedby="residentFieldErrors.department ? 'resident-department-error' : undefined"
-              @input="residentFieldErrors.department = ''"
-            />
-            <small v-if="residentFieldErrors.department" id="resident-department-error" class="bf-field-error">
-              {{ t(residentFieldErrors.department) }}
-            </small>
-            <span
-              v-if="detectedFloor"
-              class="resident-modal__field-preview"
-              aria-live="polite"
-            >
-              {{ t('app.residentFloorDetected', { floor: detectedFloor }) }}
-            </span>
-          </label>
-
-          <p v-if="modalError" class="resident-modal__error" role="alert">{{ modalError }}</p>
-          <RouterLink
-            v-if="modalNeedsUpgrade"
-            class="resident-modal__upgrade"
-            :to="upgradePlanRoute"
-            @click="isAddResidentModalOpen = false"
+        <ul v-if="bulkResults.length" class="adv-bulk-results" role="list">
+          <li
+            v-for="result in bulkResults"
+            :key="result.line"
+            class="adv-bulk-results__item"
+            :class="result.status === 'ok' ? 'is-ok' : 'is-error'"
           >
-            <i class="pi pi-arrow-up-right" aria-hidden="true" />
-            {{ t('billing.upgradeCta') }}
-          </RouterLink>
+            <i :class="result.status === 'ok' ? 'pi pi-check-circle' : 'pi pi-times-circle'" aria-hidden="true" />
+            <span v-if="result.line" class="adv-bulk-results__line">#{{ result.line }}</span>
+            <span class="adv-bulk-results__msg">{{ result.message }}</span>
+          </li>
+        </ul>
 
-          <ConfirmActions
-            :cancel-label="t('app.cancelAction')"
-            :confirm-label="isSubmitting ? t('app.savingResidentAction') : t('app.saveResidentAction')"
-            confirm-type="submit"
-            :stagger="false"
-            :loading="isSubmitting"
-            :cancel-disabled="isSubmitting"
-            @cancel="closeAddResidentModal"
-          />
-        </form>
-      </section>
-    </div>
+        <ConfirmActions
+          :cancel-label="t('app.closeAction')"
+          :confirm-label="isSubmittingBulk ? t('app.bulkResidentsSubmitting') : t('app.bulkResidentsSubmit')"
+          confirm-type="submit"
+          :stagger="false"
+          :loading="isSubmittingBulk"
+          :cancel-disabled="isSubmittingBulk"
+          @cancel="closeBulkResidentsModal"
+        />
+      </form>
+    </Dialog>
 
-    <div
-      v-if="isBulkResidentsModalOpen"
-      class="resident-modal-backdrop bf-modal-backdrop"
-      role="presentation"
-      @click.self="closeBulkResidentsModal"
+    <!-- Nuevo espacio -->
+    <Dialog
+      :visible="isAddSpaceModalOpen"
+      modal
+      dismissable-mask
+      :header="t('app.addSpaceModalTitle')"
+      class="adv-dialog"
+      :style="{ width: 'min(34rem, 94vw)' }"
+      :draggable="false"
+      :closable="!isSubmittingSpace"
+      :close-on-escape="!isSubmittingSpace"
+      @update:visible="onDialogVisible($event, closeAddSpaceModal)"
     >
-      <section
-        class="resident-modal resident-modal--wide bf-modal-panel"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="t('app.bulkResidentsModalTitle')"
-      >
-        <h3 class="resident-modal__title">{{ t('app.bulkResidentsModalTitle') }}</h3>
-        <div class="bulk-mode" role="tablist" :aria-label="t('rosterImport.modeLabel')">
-          <button
-            type="button"
-            role="tab"
-            class="bulk-mode__tab"
-            :class="{ 'is-active': bulkMode === 'file' }"
-            :aria-selected="bulkMode === 'file'"
-            :disabled="isSubmittingBulk"
-            @click="bulkMode = 'file'"
-          >
-            <i class="pi pi-file-excel" aria-hidden="true" />
-            {{ t('rosterImport.modeFile') }}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            class="bulk-mode__tab"
-            :class="{ 'is-active': bulkMode === 'text' }"
-            :aria-selected="bulkMode === 'text'"
-            @click="bulkMode = 'text'"
-          >
-            <i class="pi pi-list" aria-hidden="true" />
-            {{ t('rosterImport.modeText') }}
-          </button>
+      <form class="adv-form" novalidate @submit.prevent="onAddSpaceSubmit">
+        <div class="adv-field" :class="{ 'bf-field--invalid': spaceNameInvalid }">
+          <label for="adv-space-name">{{ t('app.spaceNameLabel') }}</label>
+          <input
+            id="adv-space-name"
+            v-model="spaceForm.name"
+            type="text"
+            required
+            :aria-invalid="spaceNameInvalid ? 'true' : 'false'"
+            :aria-describedby="spaceNameInvalid ? 'space-name-error' : undefined"
+            @input="spaceNameInvalid = false"
+          />
+          <small v-if="spaceNameInvalid" id="space-name-error" class="bf-field-error">
+            {{ t('app.spaceNameRequired') }}
+          </small>
         </div>
 
-        <template v-if="bulkMode === 'file'">
-          <ResidentImportPanel @imported="onRosterImported" />
-          <ConfirmActions
-            :cancel-label="t('app.closeAction')"
-            :show-confirm="false"
-            :stagger="false"
-            @cancel="closeBulkResidentsModal"
-          />
-        </template>
+        <div class="adv-field">
+          <label for="adv-space-desc">{{ t('app.spaceDescriptionLabel') }}</label>
+          <input id="adv-space-desc" v-model="spaceForm.description" type="text" />
+        </div>
 
-        <template v-else>
-        <p class="resident-modal__hint">{{ t('app.bulkResidentsHint') }}</p>
-        <p class="resident-modal__example">{{ t('app.bulkResidentsExample') }}</p>
-
-        <form class="resident-modal__form" @submit.prevent="onBulkResidentsSubmit">
-          <label class="resident-modal__field">
-            <span>{{ t('app.bulkResidentsTextareaLabel') }}</span>
-            <textarea
-              v-model="bulkResidentsText"
-              class="resident-modal__textarea"
-              rows="8"
-              :placeholder="t('app.bulkResidentsPlaceholder')"
-            />
-          </label>
-
-          <ul v-if="bulkResults.length" class="bulk-results" role="list">
-            <li
-              v-for="result in bulkResults"
-              :key="result.line"
-              class="bulk-results__item"
-              :class="{
-                'bulk-results__item--ok': result.status === 'ok',
-                'bulk-results__item--error': result.status === 'error',
-              }"
-            >
-              <span class="bulk-results__line">#{{ result.line }}</span>
-              <span class="bulk-results__msg">{{ result.message }}</span>
-            </li>
-          </ul>
-
-          <ConfirmActions
-            :cancel-label="t('app.closeAction')"
-            :confirm-label="isSubmittingBulk ? t('app.bulkResidentsSubmitting') : t('app.bulkResidentsSubmit')"
-            confirm-type="submit"
-            :stagger="false"
-            :loading="isSubmittingBulk"
-            :cancel-disabled="isSubmittingBulk"
-            @cancel="closeBulkResidentsModal"
-          />
-        </form>
-        </template>
-      </section>
-    </div>
-
-    <div
-      v-if="isAddSpaceModalOpen"
-      class="resident-modal-backdrop bf-modal-backdrop"
-      role="presentation"
-      @click.self="closeAddSpaceModal"
-    >
-      <section class="resident-modal bf-modal-panel" role="dialog" aria-modal="true" :aria-label="t('app.addSpaceModalTitle')">
-        <h3 class="resident-modal__title">{{ t('app.addSpaceModalTitle') }}</h3>
-
-        <form class="resident-modal__form" novalidate @submit.prevent="onAddSpaceSubmit">
-          <label class="resident-modal__field" :class="{ 'bf-field--invalid': spaceNameInvalid }">
-            <span>{{ t('app.spaceNameLabel') }}</span>
+        <div class="adv-form__row">
+          <div class="adv-field">
+            <label for="adv-space-capacity">{{ t('app.spaceCapacityLabel') }}</label>
+            <input id="adv-space-capacity" v-model="spaceForm.capacity" type="number" min="1" />
+          </div>
+          <div class="adv-field">
+            <label for="adv-space-max">{{ t('socialSpaces.maxPerDayLabel') }}</label>
             <input
-              v-model="spaceForm.name"
-              type="text"
-              required
-              :aria-invalid="spaceNameInvalid ? 'true' : 'false'"
-              :aria-describedby="spaceNameInvalid ? 'space-name-error' : undefined"
-              @input="spaceNameInvalid = false"
-            />
-            <small v-if="spaceNameInvalid" id="space-name-error" class="bf-field-error">
-              {{ t('app.spaceNameRequired') }}
-            </small>
-          </label>
-
-          <label class="resident-modal__field">
-            <span>{{ t('app.spaceDescriptionLabel') }}</span>
-            <input v-model="spaceForm.description" type="text" />
-          </label>
-
-          <label class="resident-modal__field">
-            <span>{{ t('app.spaceCapacityLabel') }}</span>
-            <input v-model="spaceForm.capacity" type="number" min="1" />
-          </label>
-
-          <label class="resident-modal__field">
-            <span>{{ t('socialSpaces.maxPerDayLabel') }}</span>
-            <input
+              id="adv-space-max"
               v-model="spaceForm.maxReservationsPerDay"
               type="number"
               min="1"
-              :placeholder="t('socialSpaces.maxPerDayHint')"
+              aria-describedby="adv-space-max-hint"
             />
-          </label>
-
-          <label class="resident-modal__field">
-            <span>{{ t('socialSpaces.rulesLabel') }}</span>
-            <textarea
-              v-model="spaceForm.rules"
-              rows="3"
-              maxlength="2000"
-              :placeholder="t('socialSpaces.rulesPlaceholder')"
-            />
-          </label>
-
-          <div class="resident-modal__field space-image-field">
-            <div v-if="spaceForm.imageUrl" class="space-image-field__preview">
-              <img :src="spaceForm.imageUrl" alt="" />
-            </div>
-            <div class="space-image-field__controls">
-              <label class="space-image-field__btn">
-                <input
-                  type="file"
-                  accept="image/*"
-                  class="space-image-field__input"
-                  :disabled="isProcessingAddImage || isSubmittingSpace"
-                  @change="onAddSpaceImageSelected"
-                />
-                <i class="pi pi-upload" aria-hidden="true" />
-                <span>
-                  {{
-                    isProcessingAddImage
-                      ? t('app.spaceImageProcessing')
-                      : spaceForm.imageUrl
-                        ? t('app.spaceImageChange')
-                        : t('app.spaceImageLabel')
-                  }}
-                </span>
-              </label>
-              <button
-                v-if="spaceForm.imageUrl"
-                type="button"
-                class="r-card__icon-btn r-card__icon-btn--danger"
-                :title="t('app.spaceImageRemove')"
-                :aria-label="t('app.spaceImageRemove')"
-                :disabled="isProcessingAddImage || isSubmittingSpace"
-                @click="clearAddSpaceImage"
-              >
-                <i class="pi pi-trash" aria-hidden="true" />
-              </button>
-            </div>
+            <small id="adv-space-max-hint" class="adv-field__hint">{{ t('socialSpaces.maxPerDayHint') }}</small>
           </div>
+        </div>
 
-          <p v-if="spaceModalError" class="resident-modal__error" role="alert">{{ spaceModalError }}</p>
-
-          <ConfirmActions
-            :cancel-label="t('app.cancelAction')"
-            :confirm-label="isSubmittingSpace ? t('app.savingSpaceAction') : t('app.saveSpaceAction')"
-            confirm-type="submit"
-            :stagger="false"
-            :loading="isSubmittingSpace"
-            :disabled="isSubmittingSpace || isProcessingAddImage"
-            :cancel-disabled="isSubmittingSpace"
-            @cancel="closeAddSpaceModal"
+        <div class="adv-field">
+          <label for="adv-space-rules">{{ t('socialSpaces.rulesLabel') }}</label>
+          <textarea
+            id="adv-space-rules"
+            v-model="spaceForm.rules"
+            rows="3"
+            maxlength="2000"
+            :placeholder="t('socialSpaces.rulesPlaceholder')"
           />
-        </form>
-      </section>
-    </div>
+        </div>
 
-    <div
-      v-if="isEditSpaceModalOpen"
-      class="resident-modal-backdrop bf-modal-backdrop"
-      role="presentation"
-      @click.self="closeEditSpaceModal"
-    >
-      <section
-        class="resident-modal resident-modal--horizontal bf-modal-panel"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="t('app.editSpaceModalTitle')"
-      >
-        <h3 class="resident-modal__title">{{ t('app.editSpaceModalTitle') }}</h3>
-
-        <form class="resident-modal__form" novalidate @submit.prevent="onEditSpaceSubmit">
-          <div class="resident-modal__grid">
-            <div class="resident-modal__fields">
-              <label class="resident-modal__field" :class="{ 'bf-field--invalid': editSpaceNameInvalid }">
-                <span>{{ t('app.spaceNameLabel') }}</span>
-                <input
-                  v-model="editSpaceForm.name"
-                  type="text"
-                  required
-                  :aria-invalid="editSpaceNameInvalid ? 'true' : 'false'"
-                  :aria-describedby="editSpaceNameInvalid ? 'edit-space-name-error' : undefined"
-                  @input="editSpaceNameInvalid = false"
-                />
-                <small v-if="editSpaceNameInvalid" id="edit-space-name-error" class="bf-field-error">
-                  {{ t('app.spaceNameRequired') }}
-                </small>
-              </label>
-
-              <label class="resident-modal__field">
-                <span>{{ t('app.spaceDescriptionLabel') }}</span>
-                <input v-model="editSpaceForm.description" type="text" />
-              </label>
-
-              <label class="resident-modal__field">
-                <span>{{ t('app.spaceCapacityLabel') }}</span>
-                <input v-model="editSpaceForm.capacity" type="number" min="1" />
-              </label>
-
-              <label class="resident-modal__field">
-                <span>{{ t('socialSpaces.maxPerDayLabel') }}</span>
-                <input
-                  v-model="editSpaceForm.maxReservationsPerDay"
-                  type="number"
-                  min="1"
-                  :placeholder="t('socialSpaces.maxPerDayHint')"
-                />
-              </label>
-
-              <label class="resident-modal__field">
-                <span>{{ t('socialSpaces.statusFieldLabel') }}</span>
-                <select v-model="editSpaceForm.status">
-                  <option value="AVAILABLE">{{ t('socialSpaces.statusAvailable') }}</option>
-                  <option value="MAINTENANCE">{{ t('socialSpaces.statusMaintenance') }}</option>
-                </select>
-              </label>
-
-              <label class="resident-modal__field">
-                <span>{{ t('socialSpaces.rulesLabel') }}</span>
-                <textarea
-                  v-model="editSpaceForm.rules"
-                  rows="3"
-                  maxlength="2000"
-                  :placeholder="t('socialSpaces.rulesPlaceholder')"
-                />
-              </label>
-            </div>
-
-            <div class="resident-modal__field space-image-field">
-              <span>{{ t('app.spaceImageLabel') }}</span>
-              <div v-if="editSpaceForm.imageUrl" class="space-image-field__preview">
-                <img :src="editSpaceForm.imageUrl" alt="" />
-              </div>
-              <div class="space-image-field__controls">
-                <label class="space-image-field__btn">
+        <div class="adv-field">
+          <span class="adv-field__label">{{ t('app.spaceImageLabel') }}</span>
+          <div class="adv-upload">
+            <img v-if="spaceForm.imageUrl" :src="spaceForm.imageUrl" alt="" class="adv-upload__preview" />
+            <span v-else class="adv-upload__preview adv-upload__preview--empty" aria-hidden="true">
+              <i class="pi pi-image" />
+            </span>
+            <div class="adv-upload__body">
+              <div class="adv-upload__buttons">
+                <label class="adv-file">
                   <input
                     type="file"
                     accept="image/*"
-                    class="space-image-field__input"
+                    class="adv-file__input"
+                    :disabled="isProcessingAddImage || isSubmittingSpace"
+                    @change="onAddSpaceImageSelected"
+                  />
+                  <span class="adv-file__trigger">
+                    <i :class="isProcessingAddImage ? 'pi pi-spin pi-spinner' : 'pi pi-upload'" aria-hidden="true" />
+                    {{
+                      isProcessingAddImage
+                        ? t('app.spaceImageProcessing')
+                        : spaceForm.imageUrl
+                          ? t('app.spaceImageChange')
+                          : t('app.spaceImageLabel')
+                    }}
+                  </span>
+                </label>
+                <button
+                  v-if="spaceForm.imageUrl"
+                  type="button"
+                  class="adv-link-btn"
+                  :disabled="isProcessingAddImage || isSubmittingSpace"
+                  @click="clearAddSpaceImage"
+                >
+                  {{ t('app.spaceImageRemove') }}
+                </button>
+              </div>
+              <p class="adv-field__hint">{{ t('app.spaceImageHint') }}</p>
+            </div>
+          </div>
+        </div>
+
+        <p v-if="spaceModalError" class="adv-form__error" role="alert">{{ spaceModalError }}</p>
+
+        <ConfirmActions
+          :cancel-label="t('app.cancelAction')"
+          :confirm-label="isSubmittingSpace ? t('app.savingSpaceAction') : t('app.saveSpaceAction')"
+          confirm-type="submit"
+          :stagger="false"
+          :loading="isSubmittingSpace"
+          :disabled="isSubmittingSpace || isProcessingAddImage"
+          :cancel-disabled="isSubmittingSpace"
+          @cancel="closeAddSpaceModal"
+        />
+      </form>
+    </Dialog>
+
+    <!-- Editar espacio -->
+    <Dialog
+      :visible="isEditSpaceModalOpen"
+      modal
+      dismissable-mask
+      :header="t('app.editSpaceModalTitle')"
+      class="adv-dialog"
+      :style="{ width: 'min(34rem, 94vw)' }"
+      :draggable="false"
+      :closable="!isSubmittingEditSpace"
+      :close-on-escape="!isSubmittingEditSpace"
+      @update:visible="onDialogVisible($event, closeEditSpaceModal)"
+    >
+      <form class="adv-form" novalidate @submit.prevent="onEditSpaceSubmit">
+        <div class="adv-field" :class="{ 'bf-field--invalid': editSpaceNameInvalid }">
+          <label for="adv-edit-space-name">{{ t('app.spaceNameLabel') }}</label>
+          <input
+            id="adv-edit-space-name"
+            v-model="editSpaceForm.name"
+            type="text"
+            required
+            :aria-invalid="editSpaceNameInvalid ? 'true' : 'false'"
+            :aria-describedby="editSpaceNameInvalid ? 'edit-space-name-error' : undefined"
+            @input="editSpaceNameInvalid = false"
+          />
+          <small v-if="editSpaceNameInvalid" id="edit-space-name-error" class="bf-field-error">
+            {{ t('app.spaceNameRequired') }}
+          </small>
+        </div>
+
+        <div class="adv-field">
+          <label for="adv-edit-space-desc">{{ t('app.spaceDescriptionLabel') }}</label>
+          <input id="adv-edit-space-desc" v-model="editSpaceForm.description" type="text" />
+        </div>
+
+        <fieldset class="adv-field adv-fieldset">
+          <legend class="adv-field__label">{{ t('socialSpaces.statusFieldLabel') }}</legend>
+          <div class="adv-choice">
+            <label class="adv-choice__opt" :class="{ 'is-active': editSpaceForm.status === 'AVAILABLE' }">
+              <input v-model="editSpaceForm.status" type="radio" name="adv-space-status" value="AVAILABLE" />
+              <span class="adv-pill__dot is-green" aria-hidden="true" />
+              {{ t('socialSpaces.statusAvailable') }}
+            </label>
+            <label class="adv-choice__opt" :class="{ 'is-active': editSpaceForm.status === 'MAINTENANCE' }">
+              <input v-model="editSpaceForm.status" type="radio" name="adv-space-status" value="MAINTENANCE" />
+              <span class="adv-pill__dot is-amber" aria-hidden="true" />
+              {{ t('socialSpaces.statusMaintenance') }}
+            </label>
+          </div>
+        </fieldset>
+
+        <div class="adv-form__row">
+          <div class="adv-field">
+            <label for="adv-edit-space-capacity">{{ t('app.spaceCapacityLabel') }}</label>
+            <input id="adv-edit-space-capacity" v-model="editSpaceForm.capacity" type="number" min="1" />
+          </div>
+          <div class="adv-field">
+            <label for="adv-edit-space-max">{{ t('socialSpaces.maxPerDayLabel') }}</label>
+            <input
+              id="adv-edit-space-max"
+              v-model="editSpaceForm.maxReservationsPerDay"
+              type="number"
+              min="1"
+              aria-describedby="adv-edit-space-max-hint"
+            />
+            <small id="adv-edit-space-max-hint" class="adv-field__hint">{{ t('socialSpaces.maxPerDayHint') }}</small>
+          </div>
+        </div>
+
+        <div class="adv-field">
+          <label for="adv-edit-space-rules">{{ t('socialSpaces.rulesLabel') }}</label>
+          <textarea
+            id="adv-edit-space-rules"
+            v-model="editSpaceForm.rules"
+            rows="3"
+            maxlength="2000"
+            :placeholder="t('socialSpaces.rulesPlaceholder')"
+          />
+        </div>
+
+        <div class="adv-field">
+          <span class="adv-field__label">{{ t('app.spaceImageLabel') }}</span>
+          <div class="adv-upload">
+            <img v-if="editSpaceForm.imageUrl" :src="editSpaceForm.imageUrl" alt="" class="adv-upload__preview" />
+            <span v-else class="adv-upload__preview adv-upload__preview--empty" aria-hidden="true">
+              <i class="pi pi-image" />
+            </span>
+            <div class="adv-upload__body">
+              <div class="adv-upload__buttons">
+                <label class="adv-file">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    class="adv-file__input"
                     :disabled="isProcessingEditImage || isSubmittingEditSpace"
                     @change="onEditSpaceImageSelected"
                   />
-                  <i class="pi pi-upload" aria-hidden="true" />
-                  <span>
+                  <span class="adv-file__trigger">
+                    <i :class="isProcessingEditImage ? 'pi pi-spin pi-spinner' : 'pi pi-upload'" aria-hidden="true" />
                     {{
                       isProcessingEditImage
                         ? t('app.spaceImageProcessing')
@@ -1351,1316 +1772,1745 @@ const groupedReservations = computed(() => {
                 <button
                   v-if="editSpaceForm.imageUrl"
                   type="button"
-                  class="r-card__icon-btn r-card__icon-btn--danger"
-                  :title="t('app.spaceImageRemove')"
-                  :aria-label="t('app.spaceImageRemove')"
+                  class="adv-link-btn"
                   :disabled="isProcessingEditImage || isSubmittingEditSpace"
                   @click="clearEditSpaceImage"
                 >
-                  <i class="pi pi-trash" aria-hidden="true" />
+                  {{ t('app.spaceImageRemove') }}
                 </button>
               </div>
+              <p class="adv-field__hint">{{ t('app.spaceImageHint') }}</p>
             </div>
           </div>
-
-          <p v-if="editSpaceModalError" class="resident-modal__error" role="alert">{{ editSpaceModalError }}</p>
-
-          <ConfirmActions
-            :cancel-label="t('app.cancelAction')"
-            :confirm-label="
-              isSubmittingEditSpace ? t('app.savingSpaceUpdateAction') : t('app.saveSpaceUpdateAction')
-            "
-            confirm-type="submit"
-            :stagger="false"
-            :loading="isSubmittingEditSpace"
-            :disabled="isSubmittingEditSpace || isProcessingEditImage"
-            :cancel-disabled="isSubmittingEditSpace"
-            @cancel="closeEditSpaceModal"
-          />
-        </form>
-      </section>
-    </div>
-
-    <div
-      v-if="isDeleteResidentModalOpen"
-      class="resident-modal-backdrop bf-modal-backdrop"
-      role="presentation"
-      @click.self="closeDeleteResidentModal"
-    >
-      <section
-        class="resident-modal bf-modal-panel"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="t('app.deleteResidentModalTitle')"
-      >
-        <h3 class="resident-modal__title">{{ t('app.deleteResidentModalTitle') }}</h3>
-
-        <div class="resident-modal__form">
-          <p class="resident-modal__hint">
-            {{
-              t('app.deleteResidentWarning', {
-                name: deleteResidentCandidate?.name || '',
-              })
-            }}
-          </p>
-
-          <div v-if="!deleteResidentSummary" class="delete-impact">
-            <p class="delete-impact__title">{{ t('app.deleteResidentImpactTitle') }}</p>
-            <p v-if="isLoadingDeletePreview" class="delete-impact__loading">
-              {{ t('app.deleteResidentLoadingPreview') }}
-            </p>
-            <ul v-else class="delete-impact__list">
-              <li
-                v-if="(deleteResidentPreview?.reservations ?? 0) > 0"
-                class="delete-impact__item"
-              >
-                <i class="pi pi-calendar" aria-hidden="true" />
-                {{
-                  t('app.deleteResidentImpactReservations', {
-                    n: deleteResidentPreview?.reservations ?? 0,
-                  })
-                }}
-              </li>
-              <li class="delete-impact__item">
-                <i class="pi pi-id-card" aria-hidden="true" />
-                {{ t('app.deleteResidentImpactAccount') }}
-              </li>
-              <li
-                v-if="(deleteResidentPreview?.reservations ?? 0) === 0"
-                class="delete-impact__item delete-impact__item--muted"
-              >
-                <i class="pi pi-info-circle" aria-hidden="true" />
-                {{ t('app.deleteResidentImpactNone') }}
-              </li>
-            </ul>
-          </div>
-
-          <div v-else class="delete-summary">
-            <p class="delete-summary__title">
-              <i class="pi pi-check-circle" aria-hidden="true" />
-              {{ t('app.deleteResidentSuccessTitle') }}
-            </p>
-            <p class="delete-summary__subtitle">
-              {{ t('app.deleteResidentSuccessSummary') }}
-            </p>
-            <ul class="delete-summary__list">
-              <li class="delete-summary__item">
-                <i class="pi pi-calendar" aria-hidden="true" />
-                {{
-                  t('app.deleteResidentSummaryReservations', {
-                    n: deleteResidentSummary.reservations,
-                  })
-                }}
-              </li>
-              <li class="delete-summary__item">
-                <i class="pi pi-id-card" aria-hidden="true" />
-                {{ t('app.deleteResidentSummaryAccount') }}
-              </li>
-            </ul>
-            <p
-              v-if="deleteResidentHasErrors"
-              class="delete-summary__partial"
-            >
-              {{ t('app.deleteResidentPartialError') }}
-            </p>
-          </div>
-
-          <p v-if="residentDeleteError" class="resident-modal__error">
-            {{ residentDeleteError }}
-          </p>
-
-          <ConfirmActions
-            :show-cancel="!deleteResidentSummary"
-            :cancel-label="t('app.cancelAction')"
-            :cancel-disabled="isDeletingResidentCascade"
-            :stagger="false"
-            align="end"
-            @cancel="closeDeleteResidentModal"
-          >
-            <template #confirm>
-              <button
-                v-if="!deleteResidentSummary"
-                type="button"
-                class="bf-btn bf-btn--danger"
-                :disabled="isDeletingResidentCascade || isLoadingDeletePreview"
-                @click="confirmDeleteResidentCascade"
-              >
-                <span v-if="isDeletingResidentCascade" class="bf-btn__spinner" aria-hidden="true" />
-                <span>{{
-                  isDeletingResidentCascade
-                    ? t('app.deleteResidentInProgress')
-                    : t('app.deleteResidentConfirmAction')
-                }}</span>
-              </button>
-              <button
-                v-else
-                type="button"
-                class="bf-btn bf-btn--confirm"
-                @click="closeDeleteResidentModal"
-              >
-                {{ t('app.closeAction') }}
-              </button>
-            </template>
-          </ConfirmActions>
         </div>
-      </section>
-    </div>
 
-    <div
-      v-if="accountStatusCandidate"
-      class="resident-modal-backdrop bf-modal-backdrop"
-      role="presentation"
-      @click.self="closeAccountStatusModal"
-    >
-      <section
-        class="resident-modal bf-modal-panel"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="
-          accountStatusCandidate.accountStatus === 'DEACTIVATED'
-            ? t('app.reactivateResidentModalTitle')
-            : t('app.deactivateResidentModalTitle')
-        "
-      >
-        <h3 class="resident-modal__title">
-          {{
-            accountStatusCandidate.accountStatus === 'DEACTIVATED'
-              ? t('app.reactivateResidentModalTitle')
-              : t('app.deactivateResidentModalTitle')
-          }}
-        </h3>
-        <div class="resident-modal__form">
-          <p class="resident-modal__hint">
-            {{
-              accountStatusCandidate.accountStatus === 'DEACTIVATED'
-                ? t('app.reactivateResidentWarning', { name: accountStatusCandidate.name || '' })
-                : t('app.deactivateResidentWarning', { name: accountStatusCandidate.name || '' })
-            }}
-          </p>
-          <p v-if="accountStatusError" class="resident-modal__error">{{ accountStatusError }}</p>
-          <ConfirmActions
-            :cancel-label="t('app.cancelAction')"
-            :cancel-disabled="isChangingAccountStatus"
-            :stagger="false"
-            align="end"
-            @cancel="closeAccountStatusModal"
-          >
-            <template #confirm>
-              <button
-                type="button"
-                class="bf-btn"
-                :class="accountStatusCandidate.accountStatus === 'DEACTIVATED' ? 'bf-btn--confirm' : 'bf-btn--danger'"
-                :disabled="isChangingAccountStatus"
-                @click="confirmAccountStatusChange"
-              >
-                <span v-if="isChangingAccountStatus" class="bf-btn__spinner" aria-hidden="true" />
-                <span>{{
-                  accountStatusCandidate.accountStatus === 'DEACTIVATED'
-                    ? t('app.reactivateResidentAction')
-                    : t('app.deactivateResidentAction')
-                }}</span>
-              </button>
-            </template>
-          </ConfirmActions>
-        </div>
-      </section>
-    </div>
+        <p v-if="editSpaceModalError" class="adv-form__error" role="alert">{{ editSpaceModalError }}</p>
 
-    <div
-      v-if="isDeleteSpaceModalOpen"
-      class="resident-modal-backdrop bf-modal-backdrop"
-      role="presentation"
-      @click.self="closeDeleteSpaceModal"
-    >
-      <section
-        class="resident-modal bf-modal-panel"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="t('app.deleteSpaceModalTitle')"
-      >
-        <h3 class="resident-modal__title">{{ t('app.deleteSpaceModalTitle') }}</h3>
-
-        <div class="resident-modal__form">
-          <p class="resident-modal__hint">
-            {{
-              t('app.deleteSpaceWarning', {
-                name: deleteSpaceCandidate?.name || '',
-              })
-            }}
-          </p>
-
-          <div v-if="!deleteSpaceSummary" class="delete-impact">
-            <p class="delete-impact__title">{{ t('app.deleteSpaceImpactTitle') }}</p>
-            <p v-if="isLoadingSpaceDeletePreview" class="delete-impact__loading">
-              {{ t('app.deleteResidentLoadingPreview') }}
-            </p>
-            <ul v-else class="delete-impact__list">
-              <li
-                v-if="(deleteSpacePreview?.reservations ?? 0) > 0"
-                class="delete-impact__item"
-              >
-                <i class="pi pi-calendar" aria-hidden="true" />
-                {{
-                  t('app.deleteSpaceImpactReservations', {
-                    n: deleteSpacePreview?.reservations ?? 0,
-                  })
-                }}
-              </li>
-              <li class="delete-impact__item">
-                <i class="pi pi-image" aria-hidden="true" />
-                {{ t('app.deleteSpaceImpactSpace') }}
-              </li>
-              <li
-                v-if="(deleteSpacePreview?.reservations ?? 0) === 0"
-                class="delete-impact__item delete-impact__item--muted"
-              >
-                <i class="pi pi-info-circle" aria-hidden="true" />
-                {{ t('app.deleteResidentImpactNone') }}
-              </li>
-            </ul>
-          </div>
-
-          <div v-else class="delete-summary">
-            <p class="delete-summary__title">
-              <i class="pi pi-check-circle" aria-hidden="true" />
-              {{ t('app.deleteSpaceSuccessTitle') }}
-            </p>
-            <p class="delete-summary__subtitle">
-              {{ t('app.deleteResidentSuccessSummary') }}
-            </p>
-            <ul class="delete-summary__list">
-              <li class="delete-summary__item">
-                <i class="pi pi-calendar" aria-hidden="true" />
-                {{
-                  t('app.deleteResidentSummaryReservations', {
-                    n: deleteSpaceSummary.reservations,
-                  })
-                }}
-              </li>
-              <li class="delete-summary__item">
-                <i class="pi pi-image" aria-hidden="true" />
-                {{ t('app.deleteSpaceImpactSpace') }}
-              </li>
-            </ul>
-          </div>
-
-          <p v-if="spaceDeleteError" class="resident-modal__error">
-            {{ spaceDeleteError }}
-          </p>
-
-          <ConfirmActions
-            :show-cancel="!deleteSpaceSummary"
-            :cancel-label="t('app.cancelAction')"
-            :cancel-disabled="isDeletingSpace"
-            :stagger="false"
-            align="end"
-            @cancel="closeDeleteSpaceModal"
-          >
-            <template #confirm>
-              <button
-                v-if="!deleteSpaceSummary"
-                type="button"
-                class="bf-btn bf-btn--danger"
-                :disabled="isDeletingSpace || isLoadingSpaceDeletePreview"
-                @click="confirmDeleteSpace"
-              >
-                <span v-if="isDeletingSpace" class="bf-btn__spinner" aria-hidden="true" />
-                <span>{{
-                  isDeletingSpace
-                    ? t('app.deleteResidentInProgress')
-                    : t('app.deleteResidentConfirmAction')
-                }}</span>
-              </button>
-              <button
-                v-else
-                type="button"
-                class="bf-btn bf-btn--confirm"
-                @click="closeDeleteSpaceModal"
-              >
-                {{ t('app.closeAction') }}
-              </button>
-            </template>
-          </ConfirmActions>
-        </div>
-      </section>
-    </div>
-
-    <div
-      v-if="isSpaceCalendarModalOpen"
-      class="resident-modal-backdrop bf-modal-backdrop"
-      role="presentation"
-      @click.self="closeSpaceCalendar"
-    >
-      <section
-        class="resident-modal resident-modal--wide bf-modal-panel"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="t('app.spaceCalendarTitle')"
-      >
-        <h3 class="resident-modal__title">
-          {{ t('app.spaceCalendarTitle') }}
-          <span v-if="selectedSpace" class="resident-modal__title-suffix">— {{ selectedSpace.name }}</span>
-        </h3>
-
-        <p v-if="isLoadingReservations" class="mgmt-msg">
-          {{ t('app.reservationsLoading') }}
-        </p>
-        <LoadErrorRetry
-          v-else-if="reservationsLoadError"
-          compact
-          :message="reservationsLoadError"
-          @retry="openSpaceCalendar(selectedSpace)"
+        <ConfirmActions
+          :cancel-label="t('app.cancelAction')"
+          :confirm-label="isSubmittingEditSpace ? t('app.savingSpaceUpdateAction') : t('app.saveSpaceUpdateAction')"
+          confirm-type="submit"
+          :stagger="false"
+          :loading="isSubmittingEditSpace"
+          :disabled="isSubmittingEditSpace || isProcessingEditImage"
+          :cancel-disabled="isSubmittingEditSpace"
+          @cancel="closeEditSpaceModal"
         />
-        <p v-else-if="!groupedReservations.length" class="mgmt-msg">
-          {{ t('app.emptyReservations') }}
+      </form>
+    </Dialog>
+
+    <!-- Eliminar residente -->
+    <Dialog
+      :visible="isDeleteResidentModalOpen"
+      modal
+      dismissable-mask
+      :header="t('app.deleteResidentModalTitle')"
+      class="adv-dialog"
+      :style="{ width: 'min(28rem, 94vw)' }"
+      :draggable="false"
+      :closable="!isDeletingResidentCascade"
+      :close-on-escape="!isDeletingResidentCascade"
+      @update:visible="onDialogVisible($event, closeDeleteResidentModal)"
+    >
+      <div class="adv-form">
+        <div v-if="deleteResidentCandidate && !deleteResidentSummary" class="adv-confirm-who">
+          <span class="adv-avatar" :class="`is-${residentStatus(deleteResidentCandidate)}`" aria-hidden="true">
+            {{ residentInitials(deleteResidentCandidate.name) }}
+          </span>
+          <div class="adv-person__text">
+            <strong>{{ deleteResidentCandidate.name }}</strong>
+            <small>{{ t('app.residentFloorApt', { floor: deleteResidentCandidate.floor, code: deleteResidentCandidate.code }) }}</small>
+          </div>
+        </div>
+        <p v-if="!deleteResidentSummary" class="adv-confirm-text">
+          {{ t('app.deleteResidentWarning', { name: deleteResidentCandidate?.name || '' }) }}
         </p>
-        <ul v-else class="reservations-list" role="list">
-          <li v-for="group in groupedReservations" :key="group.date" class="reservations-list__day">
-            <h4 class="reservations-list__date">{{ group.date }}</h4>
-            <ul class="reservations-list__slots" role="list">
-              <li v-for="r in group.items" :key="r.id" class="reservations-list__slot">
-                <span class="reservations-list__time">{{ r.startTime }} – {{ r.endTime }}</span>
-                <span class="reservations-list__resident">
-                  {{ r.residentName }}<span v-if="r.residentCode"> · {{ r.residentCode }}</span>
+
+        <div v-if="!deleteResidentSummary" class="adv-impact">
+          <p class="adv-impact__title">{{ t('app.deleteResidentImpactTitle') }}</p>
+          <p v-if="isLoadingDeletePreview" class="adv-impact__loading">
+            <i class="pi pi-spin pi-spinner" aria-hidden="true" />
+            {{ t('app.deleteResidentLoadingPreview') }}
+          </p>
+          <ul v-else class="adv-impact__list" role="list">
+            <li v-if="(deleteResidentPreview?.reservations ?? 0) > 0">
+              <i class="pi pi-calendar" aria-hidden="true" />
+              {{
+                t(
+                  'app.advancedMgmt.impactReservations',
+                  { n: deleteResidentPreview?.reservations ?? 0 },
+                  deleteResidentPreview?.reservations ?? 0,
+                )
+              }}
+            </li>
+            <li>
+              <i class="pi pi-id-card" aria-hidden="true" />
+              {{ t('app.deleteResidentImpactAccount') }}
+            </li>
+            <li v-if="(deleteResidentPreview?.reservations ?? 0) === 0" class="is-muted">
+              <i class="pi pi-info-circle" aria-hidden="true" />
+              {{ t('app.deleteResidentImpactNone') }}
+            </li>
+          </ul>
+        </div>
+
+        <div v-else class="adv-done">
+          <span class="adv-done__icon"><i class="pi pi-check" aria-hidden="true" /></span>
+          <p class="adv-done__title">{{ t('app.deleteResidentSuccessTitle') }}</p>
+          <p class="adv-done__sub">{{ t('app.deleteResidentSuccessSummary') }}</p>
+          <ul class="adv-impact__list" role="list">
+            <li>
+              <i class="pi pi-calendar" aria-hidden="true" />
+              {{
+                t(
+                  'app.advancedMgmt.summaryReservations',
+                  { n: deleteResidentSummary.reservations },
+                  Number(deleteResidentSummary.reservations) || 0,
+                )
+              }}
+            </li>
+            <li>
+              <i class="pi pi-id-card" aria-hidden="true" />
+              {{ t('app.deleteResidentSummaryAccount') }}
+            </li>
+          </ul>
+          <p v-if="deleteResidentHasErrors" class="adv-done__partial">
+            {{ t('app.deleteResidentPartialError') }}
+          </p>
+        </div>
+
+        <p v-if="residentDeleteError" class="adv-form__error" role="alert">{{ residentDeleteError }}</p>
+
+        <ConfirmActions
+          :show-cancel="!deleteResidentSummary"
+          :cancel-label="t('app.cancelAction')"
+          :cancel-disabled="isDeletingResidentCascade"
+          :stagger="false"
+          align="end"
+          @cancel="closeDeleteResidentModal"
+        >
+          <template #confirm>
+            <button
+              v-if="!deleteResidentSummary"
+              type="button"
+              class="bf-btn bf-btn--danger"
+              :disabled="isDeletingResidentCascade || isLoadingDeletePreview"
+              @click="confirmDeleteResidentCascade"
+            >
+              <span v-if="isDeletingResidentCascade" class="bf-btn__spinner" aria-hidden="true" />
+              <span>{{
+                isDeletingResidentCascade ? t('app.deleteResidentInProgress') : t('app.deleteResidentConfirmAction')
+              }}</span>
+            </button>
+            <button v-else type="button" class="bf-btn bf-btn--confirm" @click="closeDeleteResidentModal">
+              {{ t('app.closeAction') }}
+            </button>
+          </template>
+        </ConfirmActions>
+      </div>
+    </Dialog>
+
+    <!-- Desactivar / reactivar cuenta -->
+    <Dialog
+      :visible="Boolean(accountStatusCandidate)"
+      modal
+      dismissable-mask
+      :header="accountStatusReactivate ? t('app.reactivateResidentModalTitle') : t('app.deactivateResidentModalTitle')"
+      class="adv-dialog"
+      :style="{ width: 'min(28rem, 94vw)' }"
+      :draggable="false"
+      :closable="!isChangingAccountStatus"
+      :close-on-escape="!isChangingAccountStatus"
+      @update:visible="onDialogVisible($event, closeAccountStatusModal)"
+    >
+      <div class="adv-form">
+        <div v-if="accountStatusView" class="adv-confirm-who">
+          <span class="adv-avatar" :class="`is-${residentStatus(accountStatusView)}`" aria-hidden="true">
+            {{ residentInitials(accountStatusView.name) }}
+          </span>
+          <div class="adv-person__text">
+            <strong>{{ accountStatusView.name }}</strong>
+            <small>{{ t('app.residentFloorApt', { floor: accountStatusView.floor, code: accountStatusView.code }) }}</small>
+          </div>
+        </div>
+        <p class="adv-confirm-text">
+          {{
+            accountStatusReactivate
+              ? t('app.reactivateResidentWarning', { name: accountStatusView?.name || '' })
+              : t('app.deactivateResidentWarning', { name: accountStatusView?.name || '' })
+          }}
+        </p>
+        <p v-if="accountStatusError" class="adv-form__error" role="alert">{{ accountStatusError }}</p>
+        <ConfirmActions
+          :cancel-label="t('app.cancelAction')"
+          :cancel-disabled="isChangingAccountStatus"
+          :stagger="false"
+          align="end"
+          @cancel="closeAccountStatusModal"
+        >
+          <template #confirm>
+            <button
+              type="button"
+              class="bf-btn"
+              :class="accountStatusReactivate ? 'bf-btn--confirm' : 'bf-btn--danger'"
+              :disabled="isChangingAccountStatus"
+              @click="confirmAccountStatusChange"
+            >
+              <span v-if="isChangingAccountStatus" class="bf-btn__spinner" aria-hidden="true" />
+              <span>{{
+                accountStatusReactivate ? t('app.reactivateResidentAction') : t('app.deactivateResidentAction')
+              }}</span>
+            </button>
+          </template>
+        </ConfirmActions>
+      </div>
+    </Dialog>
+
+    <!-- Eliminar espacio -->
+    <Dialog
+      :visible="isDeleteSpaceModalOpen"
+      modal
+      dismissable-mask
+      :header="t('app.deleteSpaceModalTitle')"
+      class="adv-dialog"
+      :style="{ width: 'min(28rem, 94vw)' }"
+      :draggable="false"
+      :closable="!isDeletingSpace"
+      :close-on-escape="!isDeletingSpace"
+      @update:visible="onDialogVisible($event, closeDeleteSpaceModal)"
+    >
+      <div class="adv-form">
+        <p v-if="!deleteSpaceSummary" class="adv-confirm-text">
+          {{ t('app.deleteSpaceWarning', { name: deleteSpaceCandidate?.name || '' }) }}
+        </p>
+
+        <div v-if="!deleteSpaceSummary" class="adv-impact">
+          <p class="adv-impact__title">{{ t('app.deleteSpaceImpactTitle') }}</p>
+          <p v-if="isLoadingSpaceDeletePreview" class="adv-impact__loading">
+            <i class="pi pi-spin pi-spinner" aria-hidden="true" />
+            {{ t('app.deleteResidentLoadingPreview') }}
+          </p>
+          <ul v-else class="adv-impact__list" role="list">
+            <li v-if="(deleteSpacePreview?.reservations ?? 0) > 0">
+              <i class="pi pi-calendar" aria-hidden="true" />
+              {{
+                t(
+                  'app.advancedMgmt.impactReservations',
+                  { n: deleteSpacePreview?.reservations ?? 0 },
+                  deleteSpacePreview?.reservations ?? 0,
+                )
+              }}
+            </li>
+            <li>
+              <i class="pi pi-image" aria-hidden="true" />
+              {{ t('app.deleteSpaceImpactSpace') }}
+            </li>
+            <li v-if="(deleteSpacePreview?.reservations ?? 0) === 0" class="is-muted">
+              <i class="pi pi-info-circle" aria-hidden="true" />
+              {{ t('app.deleteResidentImpactNone') }}
+            </li>
+          </ul>
+        </div>
+
+        <div v-else class="adv-done">
+          <span class="adv-done__icon"><i class="pi pi-check" aria-hidden="true" /></span>
+          <p class="adv-done__title">{{ t('app.deleteSpaceSuccessTitle') }}</p>
+          <p class="adv-done__sub">{{ t('app.deleteResidentSuccessSummary') }}</p>
+          <ul class="adv-impact__list" role="list">
+            <li>
+              <i class="pi pi-calendar" aria-hidden="true" />
+              {{
+                t(
+                  'app.advancedMgmt.summaryReservations',
+                  { n: deleteSpaceSummary.reservations },
+                  Number(deleteSpaceSummary.reservations) || 0,
+                )
+              }}
+            </li>
+            <li>
+              <i class="pi pi-image" aria-hidden="true" />
+              {{ t('app.deleteSpaceImpactSpace') }}
+            </li>
+          </ul>
+        </div>
+
+        <p v-if="spaceDeleteError" class="adv-form__error" role="alert">{{ spaceDeleteError }}</p>
+
+        <ConfirmActions
+          :show-cancel="!deleteSpaceSummary"
+          :cancel-label="t('app.cancelAction')"
+          :cancel-disabled="isDeletingSpace"
+          :stagger="false"
+          align="end"
+          @cancel="closeDeleteSpaceModal"
+        >
+          <template #confirm>
+            <button
+              v-if="!deleteSpaceSummary"
+              type="button"
+              class="bf-btn bf-btn--danger"
+              :disabled="isDeletingSpace || isLoadingSpaceDeletePreview"
+              @click="confirmDeleteSpace"
+            >
+              <span v-if="isDeletingSpace" class="bf-btn__spinner" aria-hidden="true" />
+              <span>{{ isDeletingSpace ? t('app.deleteResidentInProgress') : t('app.deleteResidentConfirmAction') }}</span>
+            </button>
+            <button v-else type="button" class="bf-btn bf-btn--confirm" @click="closeDeleteSpaceModal">
+              {{ t('app.closeAction') }}
+            </button>
+          </template>
+        </ConfirmActions>
+      </div>
+    </Dialog>
+
+    <!-- Calendario de reservas -->
+    <Dialog
+      :visible="isSpaceCalendarModalOpen"
+      modal
+      dismissable-mask
+      class="adv-dialog"
+      :style="{ width: 'min(34rem, 94vw)' }"
+      :draggable="false"
+      @update:visible="onDialogVisible($event, closeSpaceCalendar)"
+    >
+      <template #header>
+        <div class="adv-dialog__head">
+          <span class="p-dialog-title">{{ t('app.spaceCalendarTitle') }}</span>
+          <span v-if="selectedSpace" class="adv-dialog__sub">{{ selectedSpace.name }}</span>
+        </div>
+      </template>
+
+      <p v-if="isLoadingReservations" class="adv-status" role="status">
+        <i class="pi pi-spin pi-spinner" aria-hidden="true" />
+        {{ t('app.reservationsLoading') }}
+      </p>
+      <LoadErrorRetry
+        v-else-if="reservationsLoadError"
+        compact
+        :message="reservationsLoadError"
+        @retry="openSpaceCalendar(selectedSpace)"
+      />
+      <div v-else-if="!groupedReservations.length" class="adv-empty">
+        <span class="adv-empty__icon"><i class="pi pi-calendar" aria-hidden="true" /></span>
+        <p class="adv-empty__text">{{ t('app.emptyReservations') }}</p>
+      </div>
+      <template v-else>
+        <p class="adv-field__hint adv-reservations__hint">
+          {{ t('app.advancedMgmt.reservationsHint') }}
+          · {{ t('app.advancedMgmt.reservationsCount', { n: spaceReservations.length }, spaceReservations.length) }}
+        </p>
+        <ul class="adv-reservations" role="list">
+          <li
+            v-for="group in groupedReservations"
+            :key="group.date"
+            class="adv-reservations__day"
+            :class="{ 'is-past': group.date < todayYmd }"
+          >
+            <h4 class="adv-reservations__date">
+              {{ nfDayLong(group.date) }}
+              <span v-if="group.date === todayYmd" class="adv-pill adv-pill--active">{{ t('app.advancedMgmt.today') }}</span>
+            </h4>
+            <ul class="adv-reservations__slots" role="list">
+              <li v-for="r in group.items" :key="r.id" class="adv-reservations__slot">
+                <span class="adv-reservations__time">{{ r.startTime }} – {{ r.endTime }}</span>
+                <span class="adv-reservations__resident">
+                  {{ r.residentName }}<span v-if="r.residentCode" class="is-muted"> · {{ r.residentCode }}</span>
                 </span>
               </li>
             </ul>
           </li>
         </ul>
+      </template>
 
+      <template #footer>
         <ConfirmActions
           :show-cancel="false"
           :confirm-label="t('app.closeAction')"
           :stagger="false"
-          align="center"
           @confirm="closeSpaceCalendar"
         />
-      </section>
-    </div>
+      </template>
+    </Dialog>
   </div>
 </template>
 
 <style scoped>
 .app-view {
-  padding: 1.75rem 1.5rem 1.25rem;
+  padding: 1.25rem 1.5rem 2.5rem;
   width: 100%;
-  max-width: none;
-  min-height: 100dvh;
+  max-width: 88rem;
   box-sizing: border-box;
+}
+
+.adv {
   display: flex;
   flex-direction: column;
-}
-
-.finance-page {
-  margin-top: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-  min-height: 0;
-}
-
-.finance-main-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  align-items: stretch;
-  gap: 2.5rem;
-  width: 100%;
-  flex: 1;
-}
-
-.mgmt-col {
+  gap: 1rem;
   min-width: 0;
-  width: 100%;
 }
 
-@media (max-width: 1024px) {
-  .finance-main-row {
-    flex-direction: column;
-  }
+.adv *,
+.adv *::before,
+.adv *::after,
+.adv-form *,
+.adv-form *::before,
+.adv-form *::after {
+  box-sizing: border-box;
 }
 
-.finance-panel {
-  padding: 1.2rem 1.25rem 1.35rem;
-  border-radius: 16px;
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+/* ---------- Header ---------- */
+.adv-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  flex-wrap: wrap;
 }
 
-.finance-panel--table {
-  padding: 1.2rem 1.25rem 1.35rem;
-  overflow: hidden;
+.adv-head__text {
+  min-width: 0;
 }
 
-.finance-panel__section-title {
+.adv-head__title {
   margin: 0;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: #0f172a;
+}
+
+.adv-head__sub {
+  margin: 0.25rem 0 0;
+  font-size: 0.88rem;
+  color: #6e6e73;
+}
+
+.adv-head__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* ---------- Buttons ---------- */
+.adv-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.45rem;
-  font-size: 1.15rem;
+  min-height: 2.45rem;
+  padding: 0.5rem 0.95rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  color: #1e3a8a;
+  font: inherit;
+  font-size: 0.82rem;
   font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.25;
-  color: var(--apple-text, #1d1d1f);
-  text-transform: capitalize;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.finance-panel__section-title .pi {
-  font-size: 1.25rem;
-  color: #0071e3;
+.adv-btn .pi {
+  font-size: 0.78rem;
 }
 
-.mgmt-panel-toolbar {
+.adv-btn:hover:not(:disabled) {
+  background: #e8eefc;
+  border-color: transparent;
+}
+
+.adv-btn--primary {
+  background: #1e3a8a;
+  border-color: #1e3a8a;
+  color: #fff;
+}
+
+.adv-btn--primary:hover:not(:disabled) {
+  background: #172554;
+  border-color: #172554;
+}
+
+.adv-btn--sm {
+  min-height: 2.1rem;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.78rem;
+}
+
+.adv-btn:focus-visible,
+.adv-tab:focus-visible,
+.adv-filter:focus-visible,
+.adv-action:focus-visible,
+.adv-space__add:focus-visible,
+.adv-text-btn:focus-visible,
+.adv-segment__tab:focus-visible,
+.adv-link-btn:focus-visible {
+  outline: 2px solid #1e3a8a;
+  outline-offset: 2px;
+}
+
+.adv-text-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.1rem;
+  border: none;
+  background: none;
+  color: #1e3a8a;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.adv-text-btn:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.adv-text-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------- Summary cards ---------- */
+.adv-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.adv-stat {
+  background: var(--stat-bg, #f1f5f9);
+  border-radius: 16px;
+  padding: 1rem 1.1rem 1.05rem;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.adv-stat--blue { --stat-bg: #e8eefc; }
+.adv-stat--green { --stat-bg: #e3f4e8; }
+.adv-stat--amber { --stat-bg: #fdf3dc; }
+.adv-stat--orange { --stat-bg: #fdeee2; }
+.adv-stat--red { --stat-bg: #fde4e4; }
+
+.adv-stat__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.55rem;
 }
 
-.mgmt-view-footer {
-  margin-top: auto;
-  padding: 1.5rem 0 0.25rem;
-  width: 100%;
-  text-align: center;
-  font-size: 0.6875rem;
-  font-weight: 400;
-  line-height: 1.35;
-  letter-spacing: -0.01em;
-  color: #aeaeb2;
-}
-
-.import-dropzone__btn :deep(.p-button),
-.app-view :deep(.import-dropzone__btn.p-button) {
-  min-height: 1.7rem;
-  padding: 0.22rem 0.85rem;
-  border-radius: 8px;
-  font-weight: 500;
-  font-size: 0.8125rem;
-  box-shadow: none;
-  border: none;
-  background: #0071e3;
-  color: #ffffff;
-}
-
-.app-view :deep(.import-dropzone__btn.p-button:hover),
-.app-view :deep(.import-dropzone__btn .p-button:hover) {
-  background: #0066cc;
-  color: #ffffff;
-}
-
-.import-alert {
-  margin: 0.75rem 0 0;
-  padding: 0.65rem 0.85rem;
-  border-radius: 10px;
-  font-size: 0.8125rem;
-  font-weight: 500;
-}
-
-.import-alert--error {
-  color: #b42318;
-  background: rgba(180, 35, 24, 0.06);
-  border: 1px solid rgba(180, 35, 24, 0.12);
-}
-
-.import-alert.import-panel-state {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.import-panel-state {
-  margin-top: 0.75rem;
-}
-
-.import-status {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 2rem 1rem;
-  color: #86868b;
-  font-size: 0.875rem;
-  text-align: center;
-}
-
-.import-status .pi {
-  font-size: 1.5rem;
-  color: #c7c7cc;
-}
-
-.import-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 2rem 1rem;
-  color: #86868b;
-  font-size: 0.875rem;
-  text-align: center;
-}
-
-.import-empty .pi {
-  font-size: 1.5rem;
-  color: #c7c7cc;
-}
-
-.r-list {
-  margin: 0.85rem 0 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.r-card {
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 10px;
-  padding: 0.75rem 0.85rem;
-  background: #fafafa;
-  transition: box-shadow 0.15s ease;
-}
-
-.r-card:hover {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-}
-
-.r-card__row {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-}
-
-.r-card__avatar {
-  flex-shrink: 0;
-  width: 2.2rem;
-  height: 2.2rem;
-  border-radius: 50%;
-  background: #e8e8ed;
-  color: #6e6e73;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-  font-size: 0.75rem;
-  letter-spacing: 0.02em;
-}
-
-.r-card__avatar--active {
-  background: #d1fae5;
-  color: #166534;
-}
-
-.r-card__body {
-  flex: 1;
-  min-width: 0;
-}
-
-.r-card__name {
+.adv-stat__label {
   margin: 0;
+  color: #475569;
   font-weight: 600;
-  font-size: 0.875rem;
-  color: #1d1d1f;
+  font-size: 0.8rem;
+  font-family: inherit;
+  letter-spacing: 0;
+}
+
+.adv-stat__icon {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 10px;
   display: flex;
   align-items: center;
-  gap: 0.3rem;
-}
-
-.r-card__badge {
-  color: #34c759;
-  font-size: 0.7rem;
-  display: inline-flex;
-}
-
-.r-card__meta {
-  margin: 0.15rem 0 0;
-  font-size: 0.75rem;
-  color: #86868b;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.r-card__deactivated {
-  margin: 0.2rem 0 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: #b42318;
-}
-
-.r-card__actions {
+  justify-content: center;
   flex-shrink: 0;
-  display: flex;
+  font-size: 0.85rem;
+  background: #fff;
+}
+
+.is-blue { color: #1e3a8a; }
+.is-green { color: #15803d; }
+.is-amber { color: #b45309; }
+.is-orange { color: #c2410c; }
+.is-red { color: #b42318; }
+
+.adv-stat__value {
+  margin: 0 0 0.4rem;
+  color: #0f172a;
+  font-family: var(--bf-font-heading, inherit);
+  font-weight: 700;
+  font-size: 1.65rem;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.adv-stat__of {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0;
+}
+
+.adv-stat__hint {
+  margin: auto 0 0;
+  color: #6e6e73;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.adv-stat__link {
+  display: inline-flex;
+  align-items: center;
   gap: 0.25rem;
-}
-
-.r-card__icon-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.85rem;
-  height: 1.85rem;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: #86868b;
-  cursor: pointer;
-  font-size: 0.8rem;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-
-.r-card__icon-btn--link {
-  color: #34c759;
-}
-
-.r-card__link-icon {
-  position: relative;
-  display: block;
-  width: 0.85rem;
-  height: 0.85rem;
-}
-
-.r-card__link-icon-item {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.8rem;
-  transition:
-    opacity 0.22s ease,
-    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.r-card__link-icon-item--link {
-  opacity: 1;
-  transform: rotate(0deg) scale(1);
-}
-
-.r-card__link-icon-item--up {
-  opacity: 0;
-  transform: rotate(-90deg) scale(0.55);
-}
-
-.r-card__link-icon--open .r-card__link-icon-item--link {
-  opacity: 0;
-  transform: rotate(90deg) scale(0.55);
-}
-
-.r-card__link-icon--open .r-card__link-icon-item--up {
-  opacity: 1;
-  transform: rotate(0deg) scale(1);
-}
-
-.r-card__icon-btn--link:hover {
-  background: #f0fff4;
-  color: #248a3d;
-}
-
-.r-card__icon-btn--edit {
-  color: #0071e3;
-}
-
-.r-card__icon-btn--edit:hover {
-  background: #f0f7ff;
-  color: #0066cc;
-}
-
-.r-card__icon-btn--danger {
-  color: #ff3b30;
-}
-
-.r-card__icon-btn--danger:hover {
-  background: #fff2f2;
-  color: #e0352b;
-}
-
-.r-card__icon-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-.r-card__link {
-  display: block;
-  margin-top: 0.45rem;
-  padding: 0.3rem 0.55rem;
-  border-radius: 6px;
-  background: #f5f5f7;
-  font-size: 0.7rem;
-  color: #0a84ff;
+  margin-left: 0.15rem;
+  color: #1e3a8a;
+  font-weight: 700;
   text-decoration: none;
-  overflow-wrap: anywhere;
-  word-break: break-all;
+  white-space: nowrap;
 }
 
-.r-card__link:hover {
+.adv-stat__link .pi {
+  font-size: 0.65rem;
+}
+
+.adv-stat__link:hover {
   text-decoration: underline;
 }
 
-.r-card-link-enter-active,
-.r-card-link-leave-active {
+.adv-meter {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
   overflow: hidden;
-  transform-origin: top;
-  transition:
-    max-height 0.32s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.24s ease,
-    margin-top 0.32s ease,
-    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+  margin-bottom: 0.5rem;
 }
 
-.r-card-link-enter-from,
-.r-card-link-leave-to {
-  max-height: 0;
+.adv-meter__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #1e3a8a;
+  transition: width 0.4s ease;
+}
+
+.adv-meter__fill.is-full {
+  background: #b42318;
+}
+
+/* ---------- Main card + tabs ---------- */
+.adv-card {
+  padding: 1.1rem 1.25rem 1.2rem;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  min-width: 0;
+}
+
+.adv-tabs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+}
+
+.adv-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.5rem 0.45rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.adv-tab .pi {
+  font-size: 0.78rem;
+}
+
+.adv-tab:hover:not(.is-active) {
+  background: #f1f5f9;
+}
+
+.adv-tab__count,
+.adv-filter__count {
+  min-width: 1.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.adv-tab.is-active,
+.adv-filter.is-active {
+  background: #1e3a8a;
+  border-color: #1e3a8a;
+  color: #fff;
+}
+
+.adv-tab.is-active .adv-tab__count,
+.adv-filter.is-active .adv-filter__count {
+  background: #fff;
+  color: #1e3a8a;
+}
+
+.adv-panel {
+  min-width: 0;
+}
+
+.adv-panel__intro {
+  margin: 0 0 0.85rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #6e6e73;
+}
+
+.adv-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 1.25rem 0.25rem;
+  font-size: 0.85rem;
+  color: #6e6e73;
+}
+
+.adv-alert {
+  margin: 0 0 0.8rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 12px;
+  background: #fde4e4;
+  color: #7f1d1d;
+  font-size: 0.8rem;
+}
+
+/* Toolbar: search + status pills */
+.adv-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.85rem;
+}
+
+.adv-search {
+  position: relative;
+  flex: 1 1 18rem;
+  max-width: 26rem;
+  min-width: 0;
+}
+
+.adv-search .pi {
+  position: absolute;
+  left: 0.85rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.8rem;
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.adv-search input {
+  width: 100%;
+  min-height: 2.35rem;
+  padding: 0.45rem 0.9rem 0.45rem 2.2rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  font: inherit;
+  font-size: 0.82rem;
+  color: #0f172a;
+}
+
+.adv-search input:focus {
+  outline: none;
+  border-color: #1e3a8a;
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.12);
+}
+
+.adv-filters {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.adv-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.4rem 0.35rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.adv-filter:hover:not(.is-active) {
+  background: #f1f5f9;
+}
+
+/* ---------- Residents table ---------- */
+.adv-table-wrap {
+  overflow-x: auto;
+}
+
+.adv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.adv-table th {
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #6e6e73;
+  background: #f8fafc;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.07);
+  white-space: nowrap;
+}
+
+.adv-table th:first-child {
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+}
+
+.adv-table th:last-child {
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+}
+
+.adv-table td {
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  vertical-align: middle;
+  color: #0f172a;
+}
+
+.adv-table tbody tr:last-child td,
+.adv-table tbody tr.has-invite td {
+  border-bottom: none;
+}
+
+.adv-table tbody tr:not(.adv-invite-row):hover td {
+  background: #fafbfd;
+}
+
+.adv-table .c-unit,
+.adv-table .c-date {
+  white-space: nowrap;
+  color: #334155;
+}
+
+.adv-table .is-actions,
+.adv-table .c-actions {
+  width: 1%;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.adv-person {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.adv-person__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.adv-person__text strong {
+  font-weight: 650;
+  font-size: 0.875rem;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.adv-person__text small {
+  font-size: 0.74rem;
+  color: #6e6e73;
+  overflow-wrap: anywhere;
+}
+
+.adv-person__text small.is-muted,
+.is-muted {
+  color: #94a3b8;
+}
+
+.adv-avatar {
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: #e8eefc;
+  color: #1e3a8a;
+}
+
+.adv-avatar.is-active {
+  background: #e3f4e8;
+  color: #15803d;
+}
+
+.adv-avatar.is-pending {
+  background: #fdf3dc;
+  color: #b45309;
+}
+
+.adv-avatar.is-deactivated {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+/* Status pills */
+.adv-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  white-space: nowrap;
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.adv-pill__dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.adv-pill--active {
+  background: #e3f4e8;
+  color: #15803d;
+}
+
+.adv-pill--pending,
+.adv-pill--maintenance {
+  background: #fdf3dc;
+  color: #b45309;
+}
+
+.adv-pill--deactivated {
+  background: #fde4e4;
+  color: #b42318;
+}
+
+.adv-pill__dot.is-green { background: #15803d; }
+.adv-pill__dot.is-amber { background: #b45309; }
+
+/* Row icon actions with a visible tooltip on hover / keyboard focus */
+.adv-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.adv-action {
+  position: relative;
+  width: 2.1rem;
+  height: 2.1rem;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #64748b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.12s ease;
+}
+
+.adv-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.adv-action--blue { color: #1e3a8a; }
+.adv-action--blue:hover:not(:disabled),
+.adv-action--blue.is-open { background: #e8eefc; }
+.adv-action--amber { color: #b45309; }
+.adv-action--amber:hover:not(:disabled) { background: #fdf3dc; }
+.adv-action--green { color: #15803d; }
+.adv-action--green:hover:not(:disabled) { background: #e3f4e8; }
+.adv-action--danger { color: #b42318; }
+.adv-action--danger:hover:not(:disabled) { background: #fde4e4; }
+
+.adv-action[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 0.35rem);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.25rem 0.55rem;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
   opacity: 0;
-  margin-top: 0;
-  transform: translateY(-6px);
+  transition: opacity 0.12s ease;
+  z-index: 3;
 }
 
-.r-card-link-enter-to,
-.r-card-link-leave-from {
-  max-height: 6rem;
+.adv-actions .adv-action:last-child[data-tip]::after {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.adv-action[data-tip]:hover::after,
+.adv-action[data-tip]:focus-visible::after {
   opacity: 1;
-  margin-top: 0.45rem;
-  transform: translateY(0);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .r-card__link-icon-item,
-  .r-card-link-enter-active,
-  .r-card-link-leave-active {
-    transition: none;
-  }
+/* Invitation link row */
+.adv-invite-row td {
+  padding: 0 0.75rem 0.75rem;
 }
 
-.s-list {
-  margin: 0.85rem 0 0;
-  padding: 0;
-  list-style: none;
+.adv-invite {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 14px;
+  background: #e8eefc;
 }
 
-.s-card {
+.adv-invite__text {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: #1e3a8a;
+}
+
+.adv-invite__text .pi {
+  margin-top: 0.12rem;
+  font-size: 0.78rem;
+}
+
+.adv-invite__text.is-copied {
+  color: #15803d;
+}
+
+.adv-invite__field {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 10px;
-  padding: 0.75rem 0.85rem;
-  background: #fafafa;
-  cursor: pointer;
-  transition: box-shadow 0.15s ease;
+  gap: 0.5rem;
+  min-width: 0;
 }
 
-.s-card:hover {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+.adv-invite__field input {
+  flex: 1;
+  min-width: 0;
+  min-height: 2.1rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+  font: inherit;
+  font-size: 0.75rem;
+  color: #334155;
 }
 
-.s-card:focus-visible {
-  outline: 2px solid #0a84ff;
-  outline-offset: 2px;
+.adv-invite__field input:focus {
+  outline: 2px solid #1e3a8a;
+  outline-offset: 1px;
 }
 
-.s-card__thumb {
-  flex-shrink: 0;
-  width: 2.2rem;
-  height: 2.2rem;
-  border-radius: 8px;
+/* Empty states */
+.adv-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 1.75rem 1rem;
+  border-radius: 14px;
+  background: #f8fafc;
+  text-align: center;
+}
+
+.adv-empty__icon {
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 50%;
+  background: #fff;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.05rem;
+}
+
+.adv-empty__text {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.adv-empty__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* ---------- Spaces grid ---------- */
+.adv-spaces {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: 0.85rem;
+}
+
+.adv-space {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #fff;
   overflow: hidden;
-  background: #e8e8ed;
 }
 
-.s-card__img {
+.adv-space__media {
+  aspect-ratio: 16 / 9;
+  background: #e8eefc;
+  overflow: hidden;
+}
+
+.adv-space__img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
 
-.s-card__placeholder {
+.adv-space__placeholder {
   width: 100%;
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #6e6e73;
-  font-size: 0.75rem;
 }
 
-.s-card__info {
-  flex: 1;
-  min-width: 0;
-}
-
-.s-card__name {
-  margin: 0;
-  font-weight: 600;
-  font-size: 0.875rem;
-  color: #1d1d1f;
-}
-
-.s-card__meta {
-  margin: 0.15rem 0 0;
-  font-size: 0.75rem;
-  color: #86868b;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.s-card__meta .pi {
-  font-size: 0.62rem;
-}
-
-.s-card__actions {
-  flex-shrink: 0;
-  display: flex;
-  gap: 0.2rem;
-}
-
-/* Space calendar modal — legacy class names in template */
-.mgmt-msg {
-  margin: 0.5rem 0 0;
-  font-size: 0.8125rem;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.mgmt-msg--error {
-  color: #b42318;
-}
-
-.resident-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+.adv-space__placeholder-icon {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 12px;
+  background: #fff;
+  color: #1e3a8a;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
-  z-index: 1000;
+  font-size: 1.05rem;
 }
 
-.resident-modal {
-  width: min(100%, 26rem);
-  background: #ffffff;
-  border-radius: 14px;
-  border: 1px solid #e8e8ed;
-  padding: 1.15rem;
-  max-height: 90vh;
-  overflow-y: auto;
-}
-
-.resident-modal--wide {
-  width: min(100%, 36rem);
-}
-
-.resident-modal--horizontal {
-  width: min(100%, 46rem);
-}
-
-.resident-modal__grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(13rem, 16.5rem);
-  gap: 1rem;
-  align-items: stretch;
-}
-
-.resident-modal__fields {
+.adv-space__body {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.5rem;
+  padding: 0.85rem 0.95rem 0.6rem;
+  min-width: 0;
 }
 
-.resident-modal--horizontal .space-image-field {
-  height: 100%;
+.adv-space__title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 
-.resident-modal--horizontal .space-image-field__preview {
-  aspect-ratio: 4 / 3;
-}
-
-@media (max-width: 640px) {
-  .resident-modal__grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.resident-modal__title {
+.adv-space__name {
   margin: 0;
-  font-size: 1.05rem;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 0.98rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.adv-space__desc {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #475569;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.adv-space__desc.is-muted {
+  color: #94a3b8;
+}
+
+.adv-space__facts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.adv-space__facts li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #334155;
+  font-size: 0.72rem;
   font-weight: 600;
-  color: #1d1d1f;
 }
 
-.resident-modal__title-suffix {
-  font-weight: 500;
-  color: #86868b;
-  margin-left: 0.2rem;
+.adv-space__facts .pi {
+  font-size: 0.68rem;
+  color: #64748b;
 }
 
-.resident-modal__header {
+.adv-space__rules {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 12px;
+  background: #f8fafc;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: #475569;
+}
+
+.adv-space__rules .pi {
+  margin-top: 0.12rem;
+  font-size: 0.72rem;
+  color: #1e3a8a;
+}
+
+.adv-space__rules p {
+  margin: 0;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.adv-space__rules strong {
+  color: #0f172a;
+  font-weight: 650;
+}
+
+.adv-space__rules.is-muted,
+.adv-space__rules.is-muted .pi {
+  color: #94a3b8;
+}
+
+.adv-space__foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  padding: 0.6rem 0.75rem 0.75rem 0.95rem;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
 }
 
-.resident-modal__bulk-btn {
+.adv-space--add {
+  border-style: dashed;
+  border-color: rgba(15, 23, 42, 0.16);
+  background: #f8fafc;
+}
+
+.adv-space__add {
+  flex: 1;
+  min-height: 12rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 1.25rem;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: #1e3a8a;
+  cursor: pointer;
+  border-radius: 16px;
+}
+
+.adv-space__add:hover {
+  background: #eef2fb;
+}
+
+.adv-space__add strong {
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+
+.adv-space__add small {
+  font-size: 0.75rem;
+  color: #6e6e73;
+}
+
+.adv-space__add-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+}
+
+/* ---------- Dialog content (slot content keeps this component's scope) ---------- */
+.adv-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.adv-form__row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 0.9rem;
+}
+
+.adv-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.adv-field > label,
+.adv-field__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.adv-field input:not([type='radio']):not([type='file']),
+.adv-field textarea,
+.adv-field select {
+  width: 100%;
+  min-height: 2.6rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  font: inherit;
+  font-size: 0.875rem;
+  color: #0f172a;
+}
+
+.adv-field textarea {
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.adv-field input:focus,
+.adv-field textarea:focus,
+.adv-field select:focus {
+  outline: none;
+  border-color: #1e3a8a;
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.12);
+}
+
+.adv-field__mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;
+  font-size: 0.82rem !important;
+}
+
+.adv-field__hint {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: #6e6e73;
+}
+
+.adv-field__preview {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  border: none;
-  background: transparent;
-  color: #0a84ff;
-  border-radius: 8px;
-  padding: 0.32rem 0.65rem;
+  font-size: 0.75rem;
   font-weight: 600;
-  font-size: 0.78rem;
+  color: #15803d;
+}
+
+.adv-field__preview .pi {
+  font-size: 0.68rem;
+}
+
+.adv-fieldset {
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.adv-fieldset legend {
+  padding: 0;
+  margin-bottom: 0.35rem;
+}
+
+.adv-choice {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.adv-choice__opt {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 600;
   cursor: pointer;
 }
 
-.resident-modal__bulk-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.adv-choice__opt input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
 }
 
-.resident-modal__hint {
-  margin: 0.5rem 0 0;
-  color: #1d1d1f;
-  font-size: 0.85rem;
+.adv-choice__opt.is-active {
+  border-color: #1e3a8a;
+  background: #e8eefc;
+  color: #1e3a8a;
 }
 
-.resident-modal__example {
-  margin: 0.15rem 0 0;
-  color: #86868b;
+.adv-choice__opt:has(input:focus-visible) {
+  outline: 2px solid #1e3a8a;
+  outline-offset: 2px;
+}
+
+.adv-form__error {
+  margin: 0;
+  padding: 0.55rem 0.75rem;
+  border-radius: 12px;
+  background: #fde4e4;
+  color: #7f1d1d;
+  font-size: 0.8rem;
+}
+
+.adv-form__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: 12px;
+  background: #e8eefc;
+  color: #1e3a8a;
   font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.adv-form__note .pi {
+  margin-top: 0.15rem;
+  font-size: 0.75rem;
+}
+
+.adv-form__note--warn {
+  background: #fdf3dc;
+  color: #78350f;
+}
+
+.adv-form__upgrade {
+  align-self: flex-start;
+}
+
+.adv-code {
+  display: inline-block;
+  margin-top: 0.2rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 6px;
+  background: #fff;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: #0f172a;
 }
 
-.resident-modal__textarea {
-  width: 100%;
-  border: 1px solid #d2d2d7;
-  border-radius: 8px;
-  padding: 0.5rem 0.6rem;
-  font: inherit;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85rem;
-  resize: vertical;
-  box-sizing: border-box;
-}
-
-.resident-modal__textarea:focus {
-  outline: none;
-  border-color: #0a84ff;
-}
-
-.bulk-mode {
+/* Segmented control (import mode) */
+.adv-segment {
   display: inline-flex;
   gap: 0.25rem;
   padding: 0.25rem;
-  margin: 0.25rem 0 0.75rem;
-  border-radius: 980px;
-  background: rgba(0, 0, 0, 0.05);
+  margin: 0 0 0.9rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 
-.bulk-mode__tab {
+.adv-segment__tab {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.4rem 0.85rem;
+  gap: 0.4rem;
+  padding: 0.45rem 0.9rem;
   border: none;
-  border-radius: 980px;
+  border-radius: 999px;
   background: transparent;
-  font-size: 0.8125rem;
+  font: inherit;
+  font-size: 0.8rem;
   font-weight: 600;
-  color: var(--apple-text-secondary, #6e6e73);
+  color: #475569;
   cursor: pointer;
 }
 
-.bulk-mode__tab.is-active {
-  background: #fff;
-  color: var(--apple-text, #1d1d1f);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
-}
-
-.resident-modal__upgrade,
-.mgmt-view-footer__upgrade {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-weight: 600;
-  color: #0a84ff;
-  text-decoration: none;
-}
-
-.resident-modal__upgrade {
-  align-self: flex-start;
-  padding: 0.45rem 0.9rem;
-  border-radius: 980px;
-  background: #0a84ff;
+.adv-segment__tab.is-active {
+  background: #1e3a8a;
   color: #fff;
-  font-size: 0.8125rem;
 }
 
-.mgmt-view-footer__upgrade {
-  margin-left: 0.5rem;
+.adv-segment__tab:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
-.bulk-results {
+/* Bulk (paste) results */
+.adv-bulk-results {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.3rem;
   max-height: 14rem;
   overflow-y: auto;
 }
 
-.bulk-results__item {
+.adv-bulk-results__item {
   display: flex;
-  gap: 0.5rem;
   align-items: flex-start;
-  border-radius: 6px;
-  padding: 0.35rem 0.5rem;
-  font-size: 0.8rem;
+  gap: 0.45rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 10px;
+  font-size: 0.78rem;
 }
 
-.bulk-results__item--ok {
-  background: #f0fdf4;
-  color: #166534;
+.adv-bulk-results__item .pi {
+  margin-top: 0.12rem;
+  font-size: 0.75rem;
 }
 
-.bulk-results__item--error {
-  background: #fff2f2;
-  color: #ff3b30;
+.adv-bulk-results__item.is-ok {
+  background: #e3f4e8;
+  color: #14532d;
 }
 
-.bulk-results__line {
+.adv-bulk-results__item.is-error {
+  background: #fde4e4;
+  color: #7f1d1d;
+}
+
+.adv-bulk-results__line {
   font-weight: 700;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
 }
 
-.bulk-results__msg {
+.adv-bulk-results__msg {
   flex: 1;
+  min-width: 0;
 }
 
-.resident-modal__form {
-  margin-top: 0.85rem;
+/* Image upload */
+.adv-upload {
   display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 14px;
+  border: 1px dashed rgba(15, 23, 42, 0.18);
+  background: #f8fafc;
 }
 
-.resident-modal__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-  color: #6e6e73;
-  font-weight: 500;
-}
-
-.resident-modal__field input {
-  border: 1px solid #d2d2d7;
-  border-radius: 8px;
-  padding: 0.5rem 0.6rem;
-  font: inherit;
-  color: #1d1d1f;
-  font-weight: 400;
-}
-
-.resident-modal__field input:focus {
-  outline: none;
-  border-color: #0a84ff;
-}
-
-.resident-modal__field textarea,
-.resident-modal__field select {
-  border: 1px solid #d2d2d7;
-  border-radius: 8px;
-  padding: 0.5rem 0.6rem;
-  font: inherit;
-  color: #1d1d1f;
-  font-weight: 400;
-  background: #fff;
-  resize: vertical;
-}
-
-.resident-modal__field textarea:focus,
-.resident-modal__field select:focus {
-  outline: none;
-  border-color: #0a84ff;
-}
-
-.s-card__badge {
-  display: inline-block;
-  margin-left: 0.35rem;
-  padding: 0.1rem 0.45rem;
-  border-radius: 980px;
-  background: #fff3e0;
-  color: #b54708;
-  font-size: 0.68rem;
-  font-weight: 700;
-  vertical-align: middle;
-}
-
-.resident-modal__field-preview {
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--apple-blue, #1e3a8a);
-}
-
-.space-image-field {
-  border: 1px dashed #d2d2d7;
-  border-radius: 8px;
-  padding: 0.6rem 0.65rem;
-  background: #fafafc;
-}
-
-
-.space-image-field__preview {
-  margin-top: 0.5rem;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #f5f5f7;
-}
-
-.space-image-field__preview img {
-  width: 100%;
-  height: 100%;
+.adv-upload__preview {
+  flex-shrink: 0;
+  width: 5.5rem;
+  height: 3.6rem;
+  border-radius: 12px;
   object-fit: cover;
-  display: block;
+  border: 1px solid rgba(15, 23, 42, 0.07);
 }
 
-.space-image-field__controls {
-  position: relative;
-  margin-top: 0.5rem;
+.adv-upload__preview--empty {
   display: flex;
   align-items: center;
   justify-content: center;
+  background: #fff;
+  color: #94a3b8;
+  font-size: 0.95rem;
+}
+
+.adv-upload__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   gap: 0.35rem;
-  width: 100%;
 }
 
-.space-image-field__controls .r-card__icon-btn {
-  position: absolute;
-  right: 0;
-}
-
-.space-image-field__btn {
-  display: inline-flex;
+.adv-upload__buttons {
+  display: flex;
   align-items: center;
-  gap: 0.3rem;
-  border: none;
-  background: transparent;
-  color: #0a84ff;
-  border-radius: 8px;
-  padding: 0.35rem 0.65rem;
-  font-weight: 600;
-  font-size: 0.78rem;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.adv-file {
+  position: relative;
+  display: inline-flex;
   cursor: pointer;
 }
 
-.space-image-field__input {
-  display: none;
+.adv-file__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
 }
 
-.space-image-field__btn:has(input:disabled) {
+.adv-file__input:disabled {
+  cursor: not-allowed;
+}
+
+.adv-file__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.42rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  color: #1e3a8a;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.adv-file:hover .adv-file__trigger {
+  background: #e8eefc;
+}
+
+.adv-file:focus-within .adv-file__trigger {
+  outline: 2px solid #1e3a8a;
+  outline-offset: 2px;
+}
+
+.adv-link-btn {
+  padding: 0.2rem 0.3rem;
+  border: none;
+  background: none;
+  color: #b42318;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.adv-link-btn:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.adv-link-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.resident-modal__error {
-  margin: 0;
-  color: #ff3b30;
-  font-size: 0.78rem;
-}
-
-.resident-modal__form .bf-actions {
-  margin-top: 0.4rem;
-}
-
-.app-view :deep(.bf-btn) {
-  min-height: 1.7rem;
-  padding: 0.22rem 0.85rem;
-  border-radius: 8px;
-  box-shadow: none;
-  transform: none;
-}
-
-.app-view :deep(.bf-btn:not(:disabled):hover),
-.app-view :deep(.bf-btn:not(:disabled):active) {
-  transform: none;
-  box-shadow: none;
-}
-
-.app-view :deep(.bf-btn--cancel) {
-  background: #f5f5f7;
-  color: #1d1d1f;
-  border-color: transparent;
-}
-
-.app-view :deep(.bf-btn--cancel:not(:disabled):hover) {
-  background: #e8e8ed;
-  border-color: transparent;
-}
-
-.app-view :deep(.bf-btn--confirm) {
-  background: #0071e3;
-  color: #ffffff;
-}
-
-.app-view :deep(.bf-btn--confirm:not(:disabled):hover) {
-  background: #0066cc;
-}
-
-.app-view :deep(.bf-btn--confirm:not(:disabled):focus-visible) {
-  animation: none;
-}
-
-.app-view :deep(.bf-btn--danger) {
-  background: #ff3b30;
-  color: #ffffff;
-}
-
-.app-view :deep(.bf-btn--danger:not(:disabled):hover) {
-  background: #e0352b;
-}
-
-.delete-impact,
-.delete-summary {
-  background: #fafafa;
-  border: 1px solid #e8e8ed;
-  border-radius: 8px;
+/* Confirmation dialogs */
+.adv-confirm-who {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
   padding: 0.65rem 0.75rem;
+  border-radius: 14px;
+  background: #f8fafc;
 }
 
-.delete-impact__title {
-  margin: 0 0 0.4rem;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: #6e6e73;
-}
-
-.delete-impact__loading {
+.adv-confirm-text {
   margin: 0;
-  color: #86868b;
-  font-size: 0.8rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: #0f172a;
 }
 
-.delete-impact__list,
-.delete-summary__list {
+.adv-impact {
+  padding: 0.7rem 0.8rem;
+  border-radius: 14px;
+  background: #fde4e4;
+}
+
+.adv-impact__title {
+  margin: 0 0 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: #7f1d1d;
+}
+
+.adv-impact__loading {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.8rem;
+  color: #7f1d1d;
+}
+
+.adv-impact__list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -2669,100 +3519,379 @@ const groupedReservations = computed(() => {
   gap: 0.3rem;
 }
 
-.delete-impact__item,
-.delete-summary__item {
+.adv-impact__list li {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.45rem;
   font-size: 0.8rem;
-  color: #1d1d1f;
+  color: #0f172a;
 }
 
-.delete-impact__item .pi,
-.delete-summary__item .pi {
-  color: #0071e3;
-  font-size: 0.8rem;
-}
-
-.delete-impact__item--muted {
-  color: #86868b;
-}
-
-.delete-impact__item--muted .pi {
-  color: #c7c7cc;
-}
-
-.delete-summary__title {
-  margin: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: #1d1d1f;
-}
-
-.delete-summary__title .pi {
-  color: #34c759;
-}
-
-.delete-summary__subtitle {
-  margin: 0.35rem 0 0.5rem;
-  color: #6e6e73;
-  font-size: 0.78rem;
-}
-
-.delete-summary__partial {
-  margin: 0.5rem 0 0;
-  color: #ff9500;
+.adv-impact__list .pi {
   font-size: 0.75rem;
+  color: #b42318;
 }
 
-.reservations-list {
-  list-style: none;
-  margin: 0.85rem 0 0;
-  padding: 0;
+.adv-impact__list li.is-muted {
+  color: #6e6e73;
+}
+
+.adv-impact__list li.is-muted .pi {
+  color: #94a3b8;
+}
+
+.adv-done {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  align-items: flex-start;
+  gap: 0.4rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: 14px;
+  background: #e3f4e8;
 }
 
-.reservations-list__day {
-  border: 1px solid #e8e8ed;
+.adv-done__icon {
+  width: 2rem;
+  height: 2rem;
   border-radius: 10px;
-  padding: 0.6rem 0.75rem;
-  background: #fafafc;
+  background: #fff;
+  color: #15803d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
 }
 
-.reservations-list__date {
-  margin: 0 0 0.35rem;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #1d1d1f;
+.adv-done__title {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: #14532d;
 }
 
-.reservations-list__slots {
+.adv-done__sub {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #3f6212;
+}
+
+.adv-done .adv-impact__list .pi {
+  color: #15803d;
+}
+
+.adv-done__partial {
+  margin: 0.2rem 0 0;
+  font-size: 0.75rem;
+  color: #b45309;
+}
+
+/* Reservation calendar */
+.adv-reservations__hint {
+  margin-bottom: 0.7rem;
+}
+
+.adv-reservations {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.6rem;
 }
 
-.reservations-list__slot {
+.adv-reservations__day {
+  padding: 0.65rem 0.8rem;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  background: #fff;
+}
+
+.adv-reservations__day.is-past {
+  background: #f8fafc;
+}
+
+.adv-reservations__day.is-past .adv-reservations__date {
+  color: #64748b;
+}
+
+.adv-reservations__date {
   display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.45rem;
+  font-size: 0.85rem;
+  font-weight: 650;
+  color: #0f172a;
+}
+
+.adv-reservations__slots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.adv-reservations__slot {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   font-size: 0.8rem;
-  color: #1d1d1f;
+  color: #0f172a;
+  min-width: 0;
 }
 
-.reservations-list__time {
-  font-weight: 600;
+.adv-reservations__time {
+  flex-shrink: 0;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: #e8eefc;
+  color: #1e3a8a;
+  font-size: 0.74rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
 
-.reservations-list__resident {
-  color: #86868b;
+.adv-reservations__resident {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.adv-dialog__head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.adv-dialog__sub {
+  font-size: 0.8rem;
+  color: #6e6e73;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 1100px) {
+  .adv-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .app-view {
+    padding: 1rem 1rem 2rem;
+  }
+  .adv-head__title {
+    font-size: 1.35rem;
+  }
+  .adv-head,
+  .adv-head__actions {
+    width: 100%;
+  }
+  .adv-head__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .adv-head__actions .adv-btn {
+    padding-inline: 0.6rem;
+    white-space: normal;
+    text-align: center;
+  }
+  .adv-head__actions .adv-btn--primary {
+    grid-column: 1 / -1;
+    order: -1;
+  }
+  .adv-stats {
+    gap: 0.6rem;
+  }
+  .adv-stat {
+    padding: 0.85rem 0.9rem 0.9rem;
+  }
+  .adv-stat__value {
+    font-size: 1.4rem;
+  }
+  .adv-card {
+    padding: 1rem 0.85rem;
+  }
+  .adv-tabs {
+    flex-wrap: nowrap;
+  }
+  .adv-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: center;
+    padding-inline: 0.6rem 0.45rem;
+    font-size: 0.78rem;
+  }
+  .adv-tab .pi {
+    display: none;
+  }
+  .adv-search {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  /* Table → one card per resident */
+  .adv-table-wrap {
+    overflow: visible;
+  }
+  .adv-table,
+  .adv-table tbody,
+  .adv-table tr,
+  .adv-table td {
+    display: block;
+    width: 100%;
+  }
+  .adv-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+  .adv-table tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+  .adv-table tbody tr:not(.adv-invite-row) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.6rem 0.75rem;
+    padding: 0.8rem 0.85rem;
+    border-radius: 16px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: #fff;
+  }
+  .adv-table tbody tr.has-invite {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    border-bottom: none;
+  }
+  .adv-table tbody tr.adv-invite-row {
+    margin-top: -0.55rem;
+    padding: 0 0.85rem 0.85rem;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-top: none;
+    border-radius: 0 0 16px 16px;
+    background: #fff;
+  }
+  .adv-table tbody tr:hover td {
+    background: transparent !important;
+  }
+  .adv-table td {
+    padding: 0;
+    border: none;
+    text-align: left !important;
+    min-width: 0;
+    white-space: normal !important;
+  }
+  .adv-invite-row td {
+    padding: 0;
+  }
+  .adv-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.2rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: #6e6e73;
+  }
+  .adv-table .c-main {
+    grid-column: 1 / -1;
+  }
+  .adv-table .c-status {
+    grid-column: 1 / 2;
+  }
+  .adv-table .c-actions {
+    grid-column: 2 / 3;
+    width: auto;
+    align-self: end;
+    text-align: right !important;
+  }
+  .adv-actions {
+    justify-content: flex-end;
+    width: 100%;
+  }
+  .adv-invite__field {
+    flex-wrap: wrap;
+  }
+  .adv-invite__field input {
+    flex-basis: 100%;
+  }
+  .adv-spaces {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .adv-space__add {
+    min-height: 8rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .adv-form__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .adv-upload {
+    align-items: flex-start;
+  }
+  .adv-upload__preview {
+    width: 4rem;
+    height: 3rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .adv-btn,
+  .adv-meter__fill,
+  .adv-action,
+  .adv-action[data-tip]::after {
+    transition: none;
+  }
+}
+</style>
+
+<style>
+/* PrimeVue Dialog shell is teleported to <body>: style it by class (unscoped). */
+.adv-dialog.p-dialog {
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  max-height: 90vh;
+}
+
+.adv-dialog .p-dialog-header {
+  padding: 1.1rem 1.25rem 0.6rem;
+}
+
+.adv-dialog .p-dialog-title {
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+}
+
+.adv-dialog .p-dialog-content {
+  padding: 0.25rem 1.25rem 1.1rem;
+}
+
+.adv-dialog .p-dialog-footer {
+  padding: 0.75rem 1.25rem 1.1rem;
+  gap: 0.5rem;
+}
+
+.adv-dialog .bf-actions {
+  margin-top: 0.25rem;
 }
 </style>
