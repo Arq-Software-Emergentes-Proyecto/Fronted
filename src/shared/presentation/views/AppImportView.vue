@@ -2070,11 +2070,6 @@ onMounted(loadList)
   gap: 0.35rem;
 }
 
-.imp-filters--type {
-  padding-left: 0.75rem;
-  border-left: 1px solid rgba(15, 23, 42, 0.08);
-}
-
 .imp-filter {
   display: inline-flex;
   align-items: center;
@@ -2590,11 +2585,6 @@ onMounted(loadList)
     flex-basis: 100%;
   }
 
-  .imp-filters--type {
-    padding-left: 0;
-    border-left: none;
-  }
-
   .imp-row {
     padding: 0.8rem 0.8rem;
     margin-bottom: 0.5rem;
@@ -2615,6 +2605,21 @@ onMounted(loadList)
 
   .imp-row__actions {
     gap: 0;
+    align-self: start;
+  }
+
+  .imp-row__name {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .imp-row__meta {
+    flex-wrap: wrap;
+    white-space: normal;
+    row-gap: 0;
   }
 
   .imp-row__actions .imp-action {
@@ -2692,6 +2697,11 @@ onMounted(loadList)
 
 .imp-dialog .imp-field .p-inputtext {
   min-height: 2.6rem;
+}
+
+.imp-dialog .imp-field .p-select-label,
+.imp-dialog .imp-field .p-inputtext {
+  font-size: 0.9rem;
 }
 
 .imp-dialog .imp-field__error {

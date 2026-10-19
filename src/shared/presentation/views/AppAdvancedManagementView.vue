@@ -2913,7 +2913,7 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
 }
 
 .adv-space__media {
-  aspect-ratio: 16 / 9;
+  aspect-ratio: 2 / 1;
   background: #e8eefc;
   overflow: hidden;
 }
@@ -3836,6 +3836,9 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
   }
   .adv-space__add {
     min-height: 8rem;
+  }
+  .adv-space__media {
+    aspect-ratio: 5 / 2;
   }
 }
 

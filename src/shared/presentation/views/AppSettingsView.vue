@@ -345,7 +345,12 @@ function onLanguageKeydown(event) {
 
 const previewSample = computed(() => ({
   date: new Intl.DateTimeFormat(intlLocale.value, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date()),
-  amount: formatPen(1250.5),
+  amount: new Intl.NumberFormat(intlLocale.value, {
+    style: 'currency',
+    currency: 'PEN',
+    currencyDisplay: 'narrowSymbol',
+    minimumFractionDigits: 2,
+  }).format(1250.5),
 }))
 
 const serviceProviders = ref([])
@@ -1678,7 +1683,7 @@ watch(admissionRuleNotice, (msg) => {
 }
 
 .st-account__main {
-  flex: 1 1 16rem;
+  flex: 1 1 12rem;
   min-width: 0;
 }
 

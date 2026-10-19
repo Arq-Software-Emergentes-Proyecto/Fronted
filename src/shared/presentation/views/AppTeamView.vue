@@ -1,6 +1,6 @@
 <script setup>
 /* Admin "Equipo": workers directory, maintenance tasks board and shifts. */
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Dialog from 'primevue/dialog'
 import Select from 'primevue/select'
@@ -44,13 +44,6 @@ const form = reactive({
 const fieldErrors = reactive({ name: false, phone: false, dni: false, salary: false })
 /** RNF012: the worker list itself failed to load (retryable). */
 const listLoadFailed = ref(false)
-
-/* Drop the "required fields" banner once every flagged field has been corrected. */
-watch(fieldErrors, (errs) => {
-  if (submitError.value === t('teamMgmt.requiredFields') && !Object.values(errs).some(Boolean)) {
-    submitError.value = ''
-  }
-})
 
 function errorIdFor(field, invalid) {
   return invalid ? `team-worker-${field}-error` : undefined

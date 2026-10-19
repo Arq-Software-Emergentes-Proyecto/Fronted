@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Dialog from 'primevue/dialog'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
@@ -20,7 +20,6 @@ const emit = defineEmits(['confirm', 'cancel'])
 const { t } = useI18n()
 const comment = ref('')
 const touched = ref(false)
-const textareaRef = ref(null)
 
 watch(
   () => props.open,
@@ -30,11 +29,6 @@ watch(
     touched.value = false
   },
 )
-
-async function focusField() {
-  await nextTick()
-  textareaRef.value?.focus()
-}
 
 function onVisible(open) {
   if (!open && !props.busy) emit('cancel')
@@ -58,7 +52,6 @@ function confirm() {
     :draggable="false"
     :closable="!busy"
     @update:visible="onVisible"
-    @show="focusField"
   >
     <div class="incd-form">
       <p v-if="incidentTitle" class="incd-note">
@@ -70,7 +63,7 @@ function confirm() {
         <label for="ird-comment">{{ t('incidentFlow.resolutionCommentLabel') }} *</label>
         <textarea
           id="ird-comment"
-          ref="textareaRef"
+          autofocus
           v-model="comment"
           rows="4"
           maxlength="2000"

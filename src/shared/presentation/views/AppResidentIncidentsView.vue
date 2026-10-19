@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
@@ -48,7 +48,6 @@ const descriptionTouched = ref(false)
 const statusFilter = ref('all')
 const detailId = ref('')
 const detailRefreshKey = ref(0)
-const titleInputRef = ref(null)
 
 // US024: campos vacíos en rojo con mensaje; el botón de envío queda bloqueado.
 const titleInvalid = computed(
@@ -111,12 +110,6 @@ function cancelCompose() {
 
 function onComposeVisible(open) {
   if (!open && !sending.value) cancelCompose()
-}
-
-async function focusTitle() {
-  await nextTick()
-  const el = titleInputRef.value?.$el ?? titleInputRef.value
-  el?.focus?.()
 }
 
 function openDetail(row) {
@@ -382,7 +375,6 @@ onBeforeUnmount(() => stopRealtime())
       :draggable="false"
       :closable="!sending"
       @update:visible="onComposeVisible"
-      @show="focusTitle"
     >
       <form class="incd-form" novalidate @submit.prevent="reportIncident">
         <p class="incd-note">
@@ -393,7 +385,6 @@ onBeforeUnmount(() => stopRealtime())
           <label for="inc-resident-title">{{ t('incidentFlow.titleLabel') }} *</label>
           <InputText
             id="inc-resident-title"
-            ref="titleInputRef"
             v-model="draftTitle"
             :maxlength="INCIDENT_TITLE_MAX"
             :invalid="titleInvalid"
@@ -402,6 +393,7 @@ onBeforeUnmount(() => stopRealtime())
             :placeholder="t('incidentFlow.titlePlaceholder')"
             :disabled="sending"
             autocomplete="off"
+            autofocus
             fluid
             @blur="titleTouched = true"
           />

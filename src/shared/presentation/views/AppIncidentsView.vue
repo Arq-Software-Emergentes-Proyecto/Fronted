@@ -490,11 +490,15 @@ function closeDetail() {
   detailFocus.value = ''
 }
 
+/** PrimeVue Dialog focuses `[autofocus]` after its enter transition ('show' fires before it). */
 async function onDetailShow() {
   await nextTick()
+  for (const ref of [providerFieldRef.value, taskFieldRef.value]) {
+    ref?.querySelectorAll('[autofocus]').forEach((el) => el.removeAttribute('autofocus'))
+  }
   const target = detailFocus.value === 'provider' ? providerFieldRef.value : detailFocus.value === 'task' ? taskFieldRef.value : null
   const focusable = target?.querySelector('[role="combobox"], input, button')
-  focusable?.focus()
+  focusable?.setAttribute('autofocus', '')
 }
 
 /* ---------- Row actions menu ---------- */
@@ -821,6 +825,7 @@ onBeforeUnmount(() => stopRealtime())
             :placeholder="t('incidentFlow.titlePlaceholder')"
             :disabled="sending"
             autocomplete="off"
+            autofocus
             fluid
             @blur="titleTouched = true"
           />

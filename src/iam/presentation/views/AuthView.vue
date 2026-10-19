@@ -1714,16 +1714,10 @@ watch(loginEmail, () => {
   text-align: center;
 }
 
-.auth-helper--muted {
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 0.45rem;
-}
-
 .auth-helper--muted .pi {
-  margin-top: 0.2rem;
+  margin-right: 0.3rem;
   font-size: 0.8rem;
+  vertical-align: -0.05em;
 }
 
 .auth-link {
