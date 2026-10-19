@@ -50,6 +50,7 @@ const stats = computed(() => [
     tone: 'amber',
     icon: 'pi-clock',
     label: t('information.statExpiringWeek'),
+    short: t('kpiShort.thisWeek'),
     hint: t('information.statExpiringWeekHint'),
     value: activeRows.value.filter((a) => expiresWithinWeek(a)).length,
   },
@@ -238,6 +239,7 @@ onMounted(fetchAnnouncements)
   <div class="app-view inf">
     <header class="inf-head">
       <h1 class="bf-sr-only">{{ t('information.announcementsPanelTitle') }}</h1>
+      <KpiPills v-if="loaded" inline :items="stats" :aria-label="t('information.summaryAria')" />
       <div class="inf-head__actions">
         <button
           type="button"
@@ -273,8 +275,6 @@ onMounted(fetchAnnouncements)
     <p v-else-if="loading && !loaded" class="inf-status" role="status">{{ t('information.loading') }}</p>
 
     <template v-else-if="loaded">
-      <KpiPills :items="stats" :aria-label="t('information.summaryAria')" />
-
       <section class="inf-card">
         <div class="inf-toolbar">
           <div class="inf-filters" v-bf-seg role="group" :aria-label="t('information.statusFilterAria')">
@@ -423,7 +423,7 @@ onMounted(fetchAnnouncements)
 /* ---------- Header ---------- */
 .inf-head {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;

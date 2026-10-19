@@ -266,6 +266,7 @@ const kpiPills = computed(() => {
       tone: 'blue',
       icon: 'pi-verified',
       label: t('importView.statCurrent'),
+      short: t('kpiShort.current'),
       value: shown(s.current),
       hint: t('importView.statCurrentHint'),
     },
@@ -274,6 +275,7 @@ const kpiPills = computed(() => {
       tone: 'green',
       icon: 'pi-sparkles',
       label: t('importView.statAi'),
+      short: t('kpiShort.forAi'),
       value: shown(s.aiUsed),
       hint: t('importView.statAiHint', { n: s.aiReady }, s.aiReady),
     },
@@ -282,6 +284,7 @@ const kpiPills = computed(() => {
       tone: 'amber',
       icon: 'pi-history',
       label: t('importView.statInactive'),
+      short: t('kpiShort.archived'),
       value: shown(s.inactive),
       hint: `${t('importView.statSupersededCount', { n: s.superseded }, s.superseded)} · ${t('importView.statArchivedCount', { n: s.archived }, s.archived)}`,
     },
@@ -290,6 +293,7 @@ const kpiPills = computed(() => {
       tone: 'orange',
       icon: 'pi-database',
       label: t('importView.statStorage'),
+      short: t('kpiShort.storage'),
       value: shown(formatBytes(s.bytes)),
       hint: t('importView.statStorageHint', { n: s.total }, s.total),
     },
@@ -832,6 +836,7 @@ onMounted(loadList)
   <div class="app-view imp">
     <header class="imp-head">
       <h1 class="bf-sr-only">{{ t('importView.pageTitle') }}</h1>
+      <KpiPills inline :items="kpiPills" :aria-label="t('importView.summaryLabel')" :busy="loading" />
       <div class="imp-head__actions" role="group" :aria-label="t('importView.headerActions')">
         <button type="button" class="imp-btn" :disabled="isSavingFolder" @click="openFolderModal()">
           <i class="pi pi-folder-plus" aria-hidden="true" />
@@ -851,7 +856,6 @@ onMounted(loadList)
     </header>
 
     <!-- Summary -->
-    <KpiPills :items="kpiPills" :aria-label="t('importView.summaryLabel')" :busy="loading" />
 
     <LoadErrorRetry
       v-if="loadError && !loading"
@@ -1481,7 +1485,7 @@ onMounted(loadList)
 /* ---------- Header ---------- */
 .imp-head {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;

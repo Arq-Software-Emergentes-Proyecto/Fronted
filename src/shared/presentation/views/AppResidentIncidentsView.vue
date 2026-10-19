@@ -10,6 +10,7 @@ import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
 import { authApi } from '@/iam/infrastructure/authApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
 import IncidentDetailDialog from '@/incidents/presentation/components/IncidentDetailDialog.vue'
+import KpiPills from '@/shared/presentation/components/KpiPills.vue'
 import {
   onIncidentRealtime,
   startIncidentRealtime,
@@ -81,11 +82,20 @@ const filters = computed(() => [
   ...statusOptions.value.map((opt) => ({ id: opt.value, label: opt.label, count: counts.value[opt.value] ?? 0 })),
 ])
 
-const summaryCards = computed(() => [
-  { id: 'open', tone: 'orange', icon: 'pi-exclamation-circle', label: t('resident.incidentsOpen'), value: counts.value.open },
-  { id: 'in-progress', tone: 'blue', icon: 'pi-sync', label: t('resident.incidentsInProgress'), value: counts.value['in-progress'] },
-  { id: 'resolved', tone: 'green', icon: 'pi-check-circle', label: t('resident.incidentsResolved'), value: counts.value.resolved },
-])
+const kpiPills = computed(() => {
+  const shown = (n) => (loading.value && !incidents.value.length ? '…' : n)
+  return [
+    { key: 'open', tone: 'orange', icon: 'pi-exclamation-circle', label: t('resident.incidentsOpen'), value: shown(counts.value.open) },
+    {
+      key: 'in-progress',
+      tone: 'blue',
+      icon: 'pi-sync',
+      label: t('resident.incidentsInProgress'),
+      value: shown(counts.value['in-progress']),
+    },
+    { key: 'resolved', tone: 'green', icon: 'pi-check-circle', label: t('resident.incidentsResolved'), value: shown(counts.value.resolved) },
+  ]
+})
 
 const visibleIncidents = computed(() => {
   if (statusFilter.value === 'all') return incidents.value
@@ -227,6 +237,7 @@ onBeforeUnmount(() => stopRealtime())
   <div class="app-view rinc">
     <header class="rinc-head">
       <h1 class="bf-sr-only">{{ t('incidentFlow.myIncidentsTitle') }}</h1>
+      <KpiPills v-if="!loadFailed" inline :items="kpiPills" :aria-label="t('incidentFlow.summaryAria')" :busy="loading" />
       <button type="button" class="rinc-btn rinc-btn--primary" @click="startCompose">
         <i class="pi pi-plus" aria-hidden="true" />
         {{ t('incidentFlow.reportIncident') }}
@@ -238,17 +249,6 @@ onBeforeUnmount(() => stopRealtime())
     <template v-else>
       <p v-if="error" class="rinc-alert" role="alert">{{ error }}</p>
 
-      <section class="rinc-summary" :aria-label="t('incidentFlow.summaryAria')">
-        <article v-for="card in summaryCards" :key="card.id" class="rinc-stat" :class="`rinc-stat--${card.tone}`">
-          <span class="rinc-stat__icon" :class="`rinc-stat__icon--${card.tone}`" aria-hidden="true">
-            <i class="pi" :class="card.icon" />
-          </span>
-          <div class="rinc-stat__text">
-            <p class="rinc-stat__value">{{ loading && !incidents.length ? '…' : card.value }}</p>
-            <h2 class="rinc-stat__label">{{ card.label }}</h2>
-          </div>
-        </article>
-      </section>
 
       <section class="rinc-card" aria-labelledby="rinc-list-title">
         <div class="rinc-card__head">
@@ -476,7 +476,7 @@ onBeforeUnmount(() => stopRealtime())
 /* ---------- Header ---------- */
 .rinc-head {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
@@ -551,67 +551,6 @@ onBeforeUnmount(() => stopRealtime())
   padding: 1.25rem 0.25rem;
   font-size: 0.85rem;
   color: #6e6e73;
-}
-
-/* ---------- Summary ---------- */
-.rinc-summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-
-.rinc-stat {
-  display: flex;
-  align-items: center;
-  gap: 0.8rem;
-  padding: 0.85rem 1rem;
-  border-radius: 16px;
-  background: var(--stat-bg, #f1f5f9);
-  min-width: 0;
-}
-
-.rinc-stat--orange { --stat-bg: #fdeee2; }
-.rinc-stat--blue { --stat-bg: #e8eefc; }
-.rinc-stat--green { --stat-bg: #e3f4e8; }
-
-.rinc-stat__icon {
-  width: 2.3rem;
-  height: 2.3rem;
-  border-radius: 12px;
-  background: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  font-size: 0.9rem;
-}
-
-.rinc-stat__icon--orange { color: #c2410c; }
-.rinc-stat__icon--blue { color: #1e3a8a; }
-.rinc-stat__icon--green { color: #15803d; }
-
-.rinc-stat__text {
-  display: flex;
-  flex-direction: column-reverse;
-  min-width: 0;
-}
-
-.rinc-stat__value {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.45rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-  color: #0f172a;
-  font-variant-numeric: tabular-nums;
-}
-
-.rinc-stat__label {
-  margin: 0;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: #475569;
 }
 
 /* ---------- List card ---------- */
@@ -913,24 +852,6 @@ onBeforeUnmount(() => stopRealtime())
   }
   .rinc-head > .rinc-btn--primary {
     width: 100%;
-  }
-  .rinc-summary {
-    gap: 0.5rem;
-  }
-  .rinc-stat {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.5rem;
-    padding: 0.75rem 0.8rem;
-  }
-  .rinc-stat__icon {
-    width: 2rem;
-    height: 2rem;
-    border-radius: 10px;
-    font-size: 0.8rem;
-  }
-  .rinc-stat__value {
-    font-size: 1.25rem;
   }
   .rinc-card {
     padding: 1rem 0.85rem;
