@@ -1,6 +1,6 @@
 /** Demo tenant used by local preview login (`preview-admin-1` / `preview-resident-1`). */
 export const MOCK_OWNER_ID = 'preview-admin-1'
-export const MOCK_DB_VERSION = 5
+export const MOCK_DB_VERSION = 6
 
 function pad(n) {
   return String(n).padStart(2, '0')
@@ -118,7 +118,8 @@ export function createSeedDb() {
         email: '',
         password: '',
         role: 'resident',
-        admissionDate: '2026-01-15',
+        // Ingresó este mes: así la demo muestra la tendencia de residentes/unidades en el panel.
+        admissionDate: monthStart(0),
         ownerAdminId: owner,
       },
     ],

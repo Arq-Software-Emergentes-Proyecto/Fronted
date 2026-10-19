@@ -11,6 +11,10 @@ import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import { buildingsApi } from '@/profiles/infrastructure/buildingsApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
 import { AppRouteNames } from '@/shared/domain/appRoutes.js'
+import { residentsApi } from '@/residents/infrastructure/residentsApi.js'
+import { supportApi } from '@/residentCare/infrastructure/supportApi.js'
+import KpiSparkline from '@/shared/presentation/components/dashboard/KpiSparkline.vue'
+import DashboardHeroArt from '@/shared/presentation/components/dashboard/DashboardHeroArt.vue'
 
 const { t, locale } = useI18n()
 const session = useSession()
@@ -31,7 +35,9 @@ const delinquency = ref({
   threshold: 0.15,
   criticalAmount: 0,
   isCritical: false,
+  overdueResidents: 0,
 })
+const billingAlerts = ref([])
 
 function applyKpi(kpiData) {
   kpi.value = {
@@ -49,7 +55,9 @@ function applyKpi(kpiData) {
     threshold: Number(d.threshold) || 0.15,
     criticalAmount: Number(d.criticalAmount) || 0,
     isCritical: Boolean(d.isCritical),
+    overdueResidents: Number(d.overdueResidents) || 0,
   }
+  billingAlerts.value = Array.isArray(kpiData.billingAlerts) ? kpiData.billingAlerts : []
 }
 
 const thresholdPct = computed(() => Math.round(delinquency.value.threshold * 100))
@@ -128,6 +136,11 @@ onBeforeUnmount(() => {
 })
 
 const recentIncidents = ref([])
+const allIncidents = ref([])
+const residents = ref([])
+const pendingChats = ref(0)
+/** Deuda vencida por mes de emisión (semáforo RF029), para la tendencia de morosidad. */
+const overdueByMonth = ref([])
 const reservations = ref([])
 const spacesById = ref(new Map())
 const isLoading = ref(true)
@@ -300,6 +313,8 @@ async function loadDashboard() {
       spacesApi.list(),
       buildingsApi.mine(),
     ])
+    // Datos complementarios (tendencias y "Para hoy"): si fallan, el panel sigue funcionando.
+    loadInsights()
 
     const buildings = buildingsResult.status === 'fulfilled' ? buildingsResult.value : null
     const building = Array.isArray(buildings) ? buildings[0] : buildings
@@ -317,6 +332,7 @@ async function loadDashboard() {
 
     const incidentsData = incidentsResult.status === 'fulfilled' ? incidentsResult.value : []
     if (Array.isArray(incidentsData)) {
+      allIncidents.value = incidentsData
       recentIncidents.value = [...incidentsData]
         .sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))
         .slice(0, 5)
@@ -335,6 +351,186 @@ async function loadDashboard() {
 }
 
 onMounted(loadDashboard)
+
+async function loadInsights() {
+  const [residentsResult, summaryResult, calendarResult] = await Promise.allSettled([
+    residentsApi.list(),
+    supportApi.getSummary(),
+    financesApi.getPaymentCalendar({ months: SERIES_MONTHS }),
+  ])
+  residents.value = residentsResult.status === 'fulfilled' && Array.isArray(residentsResult.value) ? residentsResult.value : []
+  pendingChats.value = summaryResult.status === 'fulfilled' ? summaryResult.value.pending : 0
+  if (calendarResult.status === 'fulfilled') {
+    const { months, residents: rows } = calendarResult.value
+    overdueByMonth.value = months.map((month) =>
+      rows.reduce((sum, row) => {
+        const cell = (row.cells || []).find((c) => c.month === month)
+        return cell?.status === 'overdue' ? sum + (Number(cell.amount) || 0) : sum
+      }, 0),
+    )
+  } else {
+    overdueByMonth.value = []
+  }
+}
+
+// ---------- Tendencias de los KPI (últimos meses) ----------
+const SERIES_MONTHS = 6
+
+function lastMonthEnds(count) {
+  const now = new Date()
+  return Array.from({ length: count }, (_, i) => {
+    const end = new Date(now.getFullYear(), now.getMonth() - (count - 1 - i) + 1, 0)
+    return `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`
+  })
+}
+
+/** Residentes y departamentos ocupados al cierre de cada mes, según la fecha de ingreso. */
+const occupancySeries = computed(() => {
+  const ends = lastMonthEnds(SERIES_MONTHS)
+  return ends.map((endYmd) => {
+    const present = residents.value.filter((r) => !r.admissionDate || r.admissionDate <= endYmd)
+    const units = new Set(present.map((r) => String(r.code || r.id)))
+    return { residents: present.length, units: units.size }
+  })
+})
+
+const residentsSeries = computed(() =>
+  residents.value.length ? occupancySeries.value.map((m) => m.residents) : [],
+)
+const occupiedSeries = computed(() =>
+  residents.value.length ? occupancySeries.value.map((m) => m.units) : [],
+)
+const emptySeries = computed(() =>
+  totalUnits.value > 0 && residents.value.length
+    ? occupancySeries.value.map((m) => Math.max(0, totalUnits.value - m.units))
+    : [],
+)
+
+function seriesDelta(series) {
+  if (series.length < 2) return 0
+  return series[series.length - 1] - series[series.length - 2]
+}
+
+function countDeltaLabel(series) {
+  const delta = seriesDelta(series)
+  if (!delta) return t('dashboard.deltaFlat')
+  return t('dashboard.deltaThisMonth', { delta: `${delta > 0 ? '+' : '−'}${Math.abs(delta)}` })
+}
+
+/** Para unidades vacías y morosidad, subir es malo. */
+function deltaTone(series, upIsGood = true) {
+  const delta = seriesDelta(series)
+  if (!delta) return 'flat'
+  return (delta > 0) === upIsGood ? 'good' : 'bad'
+}
+
+// ---------- "Para hoy": pendientes accionables ----------
+const unresolvedIncidents = computed(() => {
+  const list = allIncidents.value.filter((row) => (row.status || 'open') !== 'resolved')
+  return {
+    total: list.length,
+    open: list.filter((row) => (row.status || 'open') === 'open').length,
+    inProgress: list.filter((row) => row.status === 'in-progress').length,
+  }
+})
+
+const todayWithGuests = computed(() => todayReservations.value.filter((row) => guestCount(row) > 0))
+
+const missingMonthlyCharge = computed(
+  () =>
+    !isLoading.value &&
+    !kpiLoadFailed.value &&
+    (billingAlerts.value.some((a) => String(a?.code ?? a?.type ?? a).includes('MISSING_MONTHLY_CHARGE')) ||
+      delinquency.value.monthlyBudget <= 0),
+)
+
+const agendaItems = computed(() => {
+  const items = []
+  const inc = unresolvedIncidents.value
+  if (inc.total > 0) {
+    items.push({
+      key: 'incidents',
+      tone: 'red',
+      icon: 'pi-flag',
+      badge: inc.total,
+      title: t('dashboard.agendaIncidentsTitle', { n: inc.total }, inc.total),
+      detail: t('dashboard.agendaIncidentsDetail', { open: inc.open, progress: inc.inProgress }),
+      action: t('dashboard.agendaIncidentsAction'),
+      to: { name: AppRouteNames.APP_INCIDENTS },
+    })
+  }
+  if (pendingChats.value > 0) {
+    items.push({
+      key: 'chats',
+      tone: 'blue',
+      icon: 'pi-comments',
+      badge: pendingChats.value,
+      title: t('dashboard.agendaChatsTitle', { n: pendingChats.value }, pendingChats.value),
+      detail: t('dashboard.agendaChatsDetail'),
+      action: t('dashboard.agendaChatsAction'),
+      to: { name: AppRouteNames.APP_RESIDENT_HELP },
+    })
+  }
+  if (missingMonthlyCharge.value) {
+    items.push({
+      key: 'budget',
+      tone: 'amber',
+      icon: 'pi-wallet',
+      badge: '!',
+      title: t('dashboard.agendaBudgetTitle'),
+      detail: t('dashboard.agendaBudgetDetail'),
+      action: t('dashboard.agendaBudgetAction'),
+      to: { name: AppRouteNames.APP_FINANCE },
+    })
+  }
+  if (delinquency.value.overdueResidents > 0) {
+    const n = delinquency.value.overdueResidents
+    items.push({
+      key: 'overdue',
+      tone: 'orange',
+      icon: 'pi-exclamation-circle',
+      badge: n,
+      title: t('dashboard.agendaOverdueTitle', { n }, n),
+      detail: t('dashboard.agendaOverdueDetail', { amount: nfPen.value(kpi.value.totalDebt) }),
+      action: t('dashboard.agendaOverdueAction'),
+      to: { name: AppRouteNames.APP_FINANCE },
+    })
+  }
+  if (todayWithGuests.value.length > 0) {
+    const first = todayWithGuests.value[0]
+    const n = todayWithGuests.value.length
+    items.push({
+      key: 'guests',
+      tone: 'green',
+      icon: 'pi-calendar',
+      badge: n,
+      title: t('dashboard.agendaGuestsTitle', { n }, n),
+      detail: t('dashboard.agendaGuestsDetail', { space: spaceName(first.spaceId), time: first.startTime || '—' }),
+      action: t('dashboard.agendaGuestsAction'),
+      to: { name: AppRouteNames.APP_GENERATION },
+    })
+  }
+  return items
+})
+
+const heroStatus = computed(() => {
+  const parts = []
+  const inc = unresolvedIncidents.value.total
+  if (inc > 0) parts.push(t('dashboard.heroStatusIncidents', { n: inc }, inc))
+  const res = todayReservations.value.length
+  if (res > 0) parts.push(t('dashboard.heroStatusReservations', { n: res }, res))
+  return { text: parts.length ? parts.join(' · ') : t('dashboard.heroStatusClear'), alert: inc > 0 }
+})
+
+function initials(name) {
+  const words = String(name ?? '').trim().split(/\s+/).filter(Boolean)
+  if (!words.length) return '?'
+  return words
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join('')
+    .toUpperCase()
+}
 
 function incidentStatusLabel(status) {
   switch (status) {
@@ -429,7 +625,12 @@ const chartOptions = ref({
           {{ firstName ? t('dashboard.greeting', { name: firstName }) : t('dashboard.title') }}
         </h1>
         <p class="dash-hero__sub">{{ t('dashboard.subtitle') }}</p>
+        <p v-if="!isLoading" class="dash-hero__status" role="status">
+          <span class="dash-hero__status-dot" :class="{ 'is-alert': heroStatus.alert }" aria-hidden="true"></span>
+          {{ heroStatus.text }}
+        </p>
       </div>
+      <DashboardHeroArt class="dash-hero__art" />
       <nav class="dash-actions" :aria-label="t('dashboard.quickActions')">
         <RouterLink :to="{ name: AppRouteNames.APP_FINANCE }" class="dash-action dash-action--primary">
           <i class="pi pi-receipt" aria-hidden="true"></i>
@@ -452,6 +653,35 @@ const chartOptions = ref({
       @retry="loadDashboard"
     />
 
+    <section v-if="!isLoading" class="dash-card agenda" aria-labelledby="dashboard-agenda-heading">
+      <div class="dash-card__head">
+        <div>
+          <h2 id="dashboard-agenda-heading" class="dash-card__title">{{ t('dashboard.agendaTitle') }}</h2>
+          <p class="dash-card__hint">{{ t('dashboard.agendaHint') }}</p>
+        </div>
+      </div>
+      <ul v-if="agendaItems.length" class="agenda__grid" role="list">
+        <li v-for="item in agendaItems" :key="item.key" class="agenda-item" :class="`agenda-item--${item.tone}`">
+          <span class="agenda-item__icon" aria-hidden="true">
+            <i class="pi" :class="item.icon"></i>
+            <b>{{ item.badge }}</b>
+          </span>
+          <div class="agenda-item__text">
+            <strong>{{ item.title }}</strong>
+            <span>{{ item.detail }}</span>
+          </div>
+          <RouterLink :to="item.to" class="agenda-item__action">{{ item.action }}</RouterLink>
+        </li>
+      </ul>
+      <div v-else class="agenda-clear">
+        <span class="agenda-clear__icon" aria-hidden="true"><i class="pi pi-check"></i></span>
+        <div>
+          <strong>{{ t('dashboard.agendaAllClear') }}</strong>
+          <span>{{ t('dashboard.agendaAllClearDetail') }}</span>
+        </div>
+      </div>
+    </section>
+
     <section class="kpi-grid" :aria-label="t('dashboard.financialOverview')">
       <article class="kpi-card kpi-card--blue">
         <div class="kpi-header">
@@ -460,6 +690,11 @@ const chartOptions = ref({
         </div>
         <div class="kpi-value">{{ isLoading ? '…' : kpi.totalResidents }}</div>
         <span class="kpi-subtext">{{ t('dashboard.kpiRegistered') }}</span>
+        <div v-if="residentsSeries.length" class="kpi-trendline">
+          <span class="kpi-delta" :class="`kpi-delta--${deltaTone(residentsSeries)}`">{{ countDeltaLabel(residentsSeries) }}</span>
+          <KpiSparkline :points="residentsSeries" color="#1e3a8a" />
+        </div>
+        <i class="pi pi-users kpi-watermark" aria-hidden="true"></i>
       </article>
 
       <article class="kpi-card kpi-card--green">
@@ -471,20 +706,14 @@ const chartOptions = ref({
           {{ isLoading ? '…' : kpi.occupiedUnits }}
           <span v-if="!isLoading && totalUnits" class="kpi-value__of">/ {{ totalUnits }}</span>
         </div>
-        <div
-          v-if="!isLoading && totalUnits"
-          class="kpi-meter"
-          role="meter"
-          :aria-valuenow="occupancyPct"
-          aria-valuemin="0"
-          aria-valuemax="100"
-          :aria-label="t('dashboard.occupancy', { pct: occupancyPct })"
-        >
-          <span class="kpi-meter__fill kpi-meter__fill--green" :style="{ width: `${occupancyPct}%` }"></span>
-        </div>
         <span class="kpi-subtext">
           {{ totalUnits ? t('dashboard.occupancy', { pct: occupancyPct }) : t('dashboard.kpiActiveDepts') }}
         </span>
+        <div v-if="occupiedSeries.length" class="kpi-trendline">
+          <span class="kpi-delta" :class="`kpi-delta--${deltaTone(occupiedSeries)}`">{{ countDeltaLabel(occupiedSeries) }}</span>
+          <KpiSparkline :points="occupiedSeries" color="#15803d" />
+        </div>
+        <i class="pi pi-building kpi-watermark" aria-hidden="true"></i>
       </article>
 
       <article class="kpi-card kpi-card--orange">
@@ -494,6 +723,11 @@ const chartOptions = ref({
         </div>
         <div class="kpi-value">{{ isLoading ? '…' : kpi.emptyUnits }}</div>
         <span class="kpi-subtext">{{ t('dashboard.kpiAvailable') }}</span>
+        <div v-if="emptySeries.length" class="kpi-trendline">
+          <span class="kpi-delta" :class="`kpi-delta--${deltaTone(emptySeries, false)}`">{{ countDeltaLabel(emptySeries) }}</span>
+          <KpiSparkline :points="emptySeries" color="#c2410c" />
+        </div>
+        <i class="pi pi-home kpi-watermark" aria-hidden="true"></i>
       </article>
 
       <article
@@ -540,25 +774,18 @@ const chartOptions = ref({
             }}
           </span>
         </div>
-        <div
-          v-if="!isLoading && delinquencyState !== 'none'"
-          class="kpi-meter"
-          role="meter"
-          :aria-valuenow="thresholdUsagePct"
-          aria-valuemin="0"
-          aria-valuemax="100"
-          :aria-label="t('dashboard.thresholdUsage', { pct: thresholdUsagePct })"
-        >
-          <span
-            class="kpi-meter__fill"
-            :class="delinquency.isCritical ? 'kpi-meter__fill--red' : 'kpi-meter__fill--amber'"
-            :style="{ width: `${thresholdUsagePct}%` }"
-          ></span>
-        </div>
         <span class="kpi-subtext" :class="{ 'subtext-red': delinquency.isCritical }">
           {{ isLoading ? t('dashboard.kpiAccumulatedDebt') : trendLabel }}
         </span>
-        <span v-if="!isLoading" class="kpi-subtext kpi-subtext--hint">{{ delinquencySubtext }}</span>
+        <span v-if="!isLoading" class="kpi-subtext kpi-subtext--hint">
+          {{ delinquencySubtext }}
+          <template v-if="delinquencyState !== 'none'"> · {{ t('dashboard.thresholdUsage', { pct: thresholdUsagePct }) }}</template>
+        </span>
+        <div v-if="overdueByMonth.length > 1" class="kpi-trendline">
+          <span class="kpi-delta kpi-delta--flat">{{ t('dashboard.last6Months') }}</span>
+          <KpiSparkline :points="overdueByMonth" :color="delinquency.isCritical ? '#b42318' : '#b45309'" />
+        </div>
+        <i class="pi pi-exclamation-triangle kpi-watermark" aria-hidden="true"></i>
       </article>
     </section>
 
@@ -671,7 +898,7 @@ const chartOptions = ref({
           class="inc-row"
           :class="`inc-row--${row.status || 'open'}`"
         >
-          <span class="inc-row__dot" aria-hidden="true"></span>
+          <span class="inc-row__avatar" aria-hidden="true">{{ initials(row.residentName) }}</span>
           <div class="dash-row__main">
             <span class="dash-row__title">{{ row.title || row.description }}</span>
             <span class="dash-row__meta">
@@ -707,11 +934,11 @@ const chartOptions = ref({
   position: relative;
   overflow: hidden;
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 1.25rem;
-  flex-wrap: wrap;
-  padding: 1.5rem 1.6rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1.1rem;
+  min-height: 11.5rem;
+  padding: 1.5rem 22rem 1.5rem 1.6rem;
   border-radius: 20px;
   color: #fff;
   background: #1e3a8a;
@@ -741,6 +968,39 @@ const chartOptions = ref({
   margin: 0.3rem 0 0;
   font-size: 0.9rem;
   color: rgba(255, 255, 255, 0.78);
+}
+
+.dash-hero__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.8rem 0 0;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  background: #fff;
+  color: #1e3a8a;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.dash-hero__status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: #16a34a;
+}
+
+.dash-hero__status-dot.is-alert {
+  background: #ea580c;
+}
+
+.dash-hero__art {
+  position: absolute;
+  right: 1.4rem;
+  bottom: 0;
+  width: 20rem;
+  height: 11rem;
+  pointer-events: none;
 }
 
 .dash-actions {
@@ -806,6 +1066,55 @@ const chartOptions = ref({
 .kpi-card:hover {
   transform: translateY(-1px);
 }
+
+.kpi-card > *:not(.kpi-watermark) {
+  position: relative;
+  z-index: 1;
+}
+
+/* Ícono grande y tenue como marca de agua. */
+.kpi-watermark {
+  position: absolute;
+  right: -0.6rem;
+  bottom: -1.3rem;
+  font-size: 6.5rem;
+  opacity: 0.07;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.kpi-card--blue .kpi-watermark { color: #1e3a8a; }
+.kpi-card--green .kpi-watermark { color: #15803d; }
+.kpi-card--orange .kpi-watermark { color: #c2410c; }
+.kpi-card--amber .kpi-watermark { color: #b45309; }
+.kpi-card--red .kpi-watermark { color: #b42318; }
+
+.kpi-trendline {
+  margin-top: auto;
+  padding-top: 0.75rem;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.kpi-trendline :deep(.kpi-sparkline) {
+  width: min(7.5rem, 48%);
+  height: auto;
+}
+
+.kpi-delta {
+  padding: 0.16rem 0.55rem;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.7rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.kpi-delta--good { color: #15803d; }
+.kpi-delta--bad { color: #b42318; }
+.kpi-delta--flat { color: #64748b; }
 
 /* Cada indicador es una tarjeta de color sólido (sin degradados ni franjas). */
 .kpi-card--blue { --kpi-bg: #e8eefc; }
@@ -1258,8 +1567,164 @@ const chartOptions = ref({
 .inc-badge--in-progress { background: #fff; color: #c2410c; }
 .inc-badge--resolved { background: #fff; color: #15803d; }
 
+/* ---------- Para hoy ---------- */
+.agenda__grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.7rem;
+}
+
+.agenda-item {
+  --agenda-ink: #1e3a8a;
+  --agenda-bg: #e8eefc;
+  --agenda-badge: #1e3a8a;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    'icon text'
+    'icon action';
+  align-items: start;
+  column-gap: 0.75rem;
+  row-gap: 0.55rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: 14px;
+  background: var(--agenda-bg);
+}
+
+.agenda-item--red { --agenda-ink: #b42318; --agenda-bg: #fde4e4; --agenda-badge: #dc2626; }
+.agenda-item--blue { --agenda-ink: #1e3a8a; --agenda-bg: #e8eefc; --agenda-badge: #1e3a8a; }
+.agenda-item--amber { --agenda-ink: #b45309; --agenda-bg: #fdf3dc; --agenda-badge: #d97706; }
+.agenda-item--orange { --agenda-ink: #c2410c; --agenda-bg: #fdeee2; --agenda-badge: #ea580c; }
+.agenda-item--green { --agenda-ink: #15803d; --agenda-bg: #e3f4e8; --agenda-badge: #16a34a; }
+
+.agenda-item__icon {
+  grid-area: icon;
+  position: relative;
+  flex-shrink: 0;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 12px;
+  background: #fff;
+  color: var(--agenda-ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agenda-item__icon b {
+  position: absolute;
+  top: -0.35rem;
+  right: -0.35rem;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: var(--agenda-badge);
+  color: #fff;
+  font-size: 0.66rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agenda-item__text {
+  grid-area: text;
+  min-width: 0;
+}
+
+.agenda-item__text strong {
+  display: block;
+  font-size: 0.86rem;
+  letter-spacing: -0.01em;
+  color: #0f172a;
+}
+
+.agenda-item__text span {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.74rem;
+  color: #6e6e73;
+}
+
+.agenda-item__action {
+  grid-area: action;
+  justify-self: start;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--agenda-ink);
+  font-size: 0.76rem;
+  font-weight: 650;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.agenda-item__action:hover {
+  text-decoration: underline;
+}
+
+.agenda-item__action:focus-visible {
+  outline: 2px solid var(--agenda-ink);
+  outline-offset: 2px;
+}
+
+.agenda-clear {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 14px;
+  background: #e3f4e8;
+}
+
+.agenda-clear__icon {
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 12px;
+  background: #fff;
+  color: #15803d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agenda-clear strong {
+  display: block;
+  font-size: 0.88rem;
+  color: #0f172a;
+}
+
+.agenda-clear span {
+  display: block;
+  font-size: 0.75rem;
+  color: #6e6e73;
+}
+
+.inc-row__avatar {
+  flex-shrink: 0;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--inc-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
 /* ---------- Responsive ---------- */
 @media (max-width: 1180px) {
+  .dash-hero {
+    padding-right: 1.6rem;
+  }
+  .dash-hero__art {
+    display: none;
+  }
   .kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1290,8 +1755,12 @@ const chartOptions = ref({
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.7rem;
   }
+  .kpi-card:nth-child(3),
   .kpi-card:last-child {
     grid-column: 1 / -1;
+  }
+  .kpi-trendline {
+    flex-wrap: wrap;
   }
   .kpi-value {
     font-size: 1.5rem;
