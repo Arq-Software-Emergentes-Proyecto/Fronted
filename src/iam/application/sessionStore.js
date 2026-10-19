@@ -34,26 +34,61 @@ export function isAccessTokenValid() {
   }
 }
 
-export function clearSession() {
-  state.role = null
-  state.profile = null
-  state.token = null
+/**
+ * Identity of the signed-in user ("role:id"), or null when signed out. Used to key
+ * per-user resources (e.g. the SignalR connection) so they never leak across logins.
+ */
+export function getSessionIdentityKey() {
+  return identityKeyOf(state.role, state.profile)
+}
+
+function identityKeyOf(role, profile) {
+  if (!role) return null
+  const id = profile?.id ?? profile?.email ?? ''
+  return `${role}:${String(id)}`
+}
+
+const identityListeners = new Set()
+
+/**
+ * Registers a callback fired when the signed-in identity ends or changes (logout,
+ * forced logout on 401 / ACCOUNT_DEACTIVATED, or a different user signing in).
+ * Returns an unsubscribe function.
+ */
+export function onSessionIdentityChange(listener) {
+  identityListeners.add(listener)
+  return () => identityListeners.delete(listener)
+}
+
+function applySession(role, profile, token) {
+  const before = getSessionIdentityKey()
+  state.role = role
+  state.profile = profile
+  state.token = token
   persist()
+  const after = getSessionIdentityKey()
+  if (before !== null && before !== after) {
+    identityListeners.forEach((fn) => {
+      try {
+        fn({ previous: before, next: after })
+      } catch (e) {
+        console.warn(e)
+      }
+    })
+  }
+}
+
+export function clearSession() {
+  applySession(null, null, null)
 }
 
 /** Module-level setters for router bootstrap (outside component setup). */
 export function setAdminSession(profile = {}, token = null) {
-  state.role = SessionRoles.ADMIN
-  state.profile = profile
-  state.token = token
-  persist()
+  applySession(SessionRoles.ADMIN, profile, token)
 }
 
 export function setResidentSession(profile = {}, token = null) {
-  state.role = SessionRoles.RESIDENT
-  state.profile = profile
-  state.token = token
-  persist()
+  applySession(SessionRoles.RESIDENT, profile, token)
 }
 
 /**

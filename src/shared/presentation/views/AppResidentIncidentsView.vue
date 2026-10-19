@@ -159,14 +159,15 @@ async function reportIncident() {
 // Tiempo real: cuando el admin asigna / cambia estado / resuelve, se refresca la vista.
 let stopRealtime = () => {}
 
-onMounted(async () => {
-  await loadIncidents()
+onMounted(() => {
+  // Register synchronously so an unmount before the first load finishes still cleans up.
   stopRealtime = onIncidentRealtime((type, payload) => {
     if (type !== IncidentRealtimeEvent.UPDATED) return
     if (payload?.residentId && payload.residentId !== profile.value.id) return
     loadIncidents()
     if (detailId.value && payload?.id === detailId.value) detailRefreshKey.value++
   })
+  void loadIncidents()
   startIncidentRealtime(profile.value.ownerAdminId)
 })
 

@@ -12,8 +12,10 @@ import {
   markIncidentsSeen,
   onIncidentRealtime,
   startIncidentRealtime,
+  stopIncidentRealtime,
   useIncidentRealtime,
 } from '@/incidents/application/incidentRealtimeStore.js'
+import { stopSupportHub } from '@/residentCare/infrastructure/supportRealtime.js'
 import { IncidentRealtimeEvent } from '@/incidents/domain/model/incidentConstants.js'
 
 const { t, locale } = useI18n()
@@ -180,6 +182,10 @@ watch(
 )
 
 function onLogout() {
+  // Tear realtime down explicitly (clearSession also notifies identity listeners) so the
+  // next user in this tab never inherits this user's hub connection / groups / listeners.
+  stopIncidentRealtime()
+  void stopSupportHub()
   clearSession()
   router.push({ name: AppRouteNames.LOGIN })
 }
@@ -823,16 +829,18 @@ function toggleAppLocale() {
     min-height: 0;
   }
 
+  /* Stacked nav + chat: let the page scroll instead of squeezing the conversation into the leftover height. */
   .app-shell--chat {
-    height: 100vh;
-    height: 100dvh;
-    overflow: hidden;
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow: visible;
   }
 
   .app-shell__main--chat {
     height: auto;
     max-height: none;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .app-shell__divider,

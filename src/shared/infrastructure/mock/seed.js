@@ -1,6 +1,6 @@
 /** Demo tenant used by local preview login (`preview-admin-1` / `preview-resident-1`). */
 export const MOCK_OWNER_ID = 'preview-admin-1'
-export const MOCK_DB_VERSION = 4
+export const MOCK_DB_VERSION = 5
 
 function pad(n) {
   return String(n).padStart(2, '0')
@@ -26,6 +26,38 @@ function monthStart(offsetMonths = 0) {
 
 function isoHoursAgo(hours) {
   return new Date(Date.now() - hours * 3600_000).toISOString()
+}
+
+function monthKey(offsetMonths = 0) {
+  return monthStart(offsetMonths).slice(0, 7)
+}
+
+/** Charge for month M: period = M, payment opens M+1 day 1 and is due M+1 day 7 (computeChargeDates). */
+function monthlyCharge(offsetMonths, amount) {
+  const month = monthKey(offsetMonths)
+  return {
+    id: `charge-${month}`,
+    month,
+    amount,
+    billingStart: monthStart(offsetMonths),
+    billingEnd: monthEnd(offsetMonths),
+    paymentOpen: monthStart(offsetMonths + 1),
+    paymentDue: `${monthKey(offsetMonths + 1)}-07`,
+  }
+}
+
+/** ISO date-time for today (local) at hh:00 + offset days. */
+function isoAt(offsetDays, hour) {
+  const d = new Date()
+  d.setDate(d.getDate() + offsetDays)
+  d.setHours(hour, 0, 0, 0)
+  return d.toISOString()
+}
+
+/** Today's demo reservation stays inside its guest-pass window whenever the demo is opened. */
+function todaySlot() {
+  const start = Math.min(new Date().getHours(), 21)
+  return { startTime: `${pad(start)}:00`, endTime: `${pad(start + 2)}:00` }
 }
 
 export function createSeedDb() {
@@ -124,8 +156,7 @@ export function createSeedDb() {
         residentName: 'Ana Torres',
         residentCode: '302',
         date: ymd(0),
-        startTime: '10:00',
-        endTime: '12:00',
+        ...todaySlot(),
         guests: [
           { id: 'guest-1', name: 'Mario Torres', checkedIn: true, checkedInAt: isoHoursAgo(1) },
           { id: 'guest-2', name: 'Lucía Pérez', checkedIn: false, checkedInAt: null },
@@ -169,7 +200,12 @@ export function createSeedDb() {
         description: 'Fuga de agua en el baño principal del dpto. 302.',
         status: 'open',
         provider: 'Plomería Andes',
+        providerId: 'provider-1',
         createdAt: isoHoursAgo(20),
+        events: [
+          { id: 9001, type: 'reported', status: 'open', comment: null, authorId: 'preview-resident-1', authorName: 'Ana Torres', authorRole: 'resident', createdAt: isoHoursAgo(20) },
+          { id: 9002, type: 'assigned', status: 'open', comment: 'Plomería Andes', authorId: owner, authorName: 'Admin demo', authorRole: 'admin', createdAt: isoHoursAgo(18) },
+        ],
         ownerAdminId: owner,
       },
       {
@@ -180,7 +216,13 @@ export function createSeedDb() {
         description: 'Ascensor del bloque A se detiene entre pisos 3 y 4.',
         status: 'in-progress',
         provider: 'Elevadores del Sur',
+        providerId: 'provider-2',
         createdAt: isoHoursAgo(48),
+        events: [
+          { id: 9011, type: 'reported', status: 'open', comment: null, authorId: 'preview-resident-2', authorName: 'Luis Vega', authorRole: 'resident', createdAt: isoHoursAgo(48) },
+          { id: 9012, type: 'assigned', status: 'in-progress', comment: 'Elevadores del Sur', authorId: owner, authorName: 'Admin demo', authorRole: 'admin', createdAt: isoHoursAgo(46) },
+          { id: 9013, type: 'comment', status: 'in-progress', comment: 'El técnico visitará el edificio mañana a las 9:00.', authorId: owner, authorName: 'Admin demo', authorRole: 'admin', createdAt: isoHoursAgo(30) },
+        ],
         ownerAdminId: owner,
       },
       {
@@ -191,7 +233,15 @@ export function createSeedDb() {
         description: 'Luminaria del pasillo 5to piso no enciende.',
         status: 'resolved',
         provider: 'Eléctricos Lima',
+        providerId: 'provider-3',
         createdAt: isoHoursAgo(120),
+        resolvedAt: isoHoursAgo(100),
+        resolutionComment: 'Se reemplazó el balastro y la luminaria del pasillo.',
+        events: [
+          { id: 9021, type: 'reported', status: 'open', comment: null, authorId: 'preview-resident-3', authorName: 'Carla Ríos', authorRole: 'resident', createdAt: isoHoursAgo(120) },
+          { id: 9022, type: 'assigned', status: 'in-progress', comment: 'Eléctricos Lima', authorId: owner, authorName: 'Admin demo', authorRole: 'admin', createdAt: isoHoursAgo(118) },
+          { id: 9023, type: 'resolved', status: 'resolved', comment: 'Se reemplazó el balastro y la luminaria del pasillo.', authorId: owner, authorName: 'Admin demo', authorRole: 'admin', createdAt: isoHoursAgo(100) },
+        ],
         ownerAdminId: owner,
       },
     ],
@@ -236,6 +286,7 @@ export function createSeedDb() {
     receipts: [
       {
         id: 'rcpt-ana-prev',
+        billingMonth: monthKey(-1),
         residentId: 'preview-resident-1',
         issueDate: monthStart(-1),
         dueDate: monthEnd(-1),
@@ -248,6 +299,7 @@ export function createSeedDb() {
       },
       {
         id: 'rcpt-ana-curr',
+        billingMonth: monthKey(0),
         residentId: 'preview-resident-1',
         issueDate: monthStart(0),
         dueDate: monthEnd(0),
@@ -259,7 +311,21 @@ export function createSeedDb() {
         ownerAdminId: owner,
       },
       {
+        id: 'rcpt-luis-overdue',
+        billingMonth: monthKey(-2),
+        residentId: 'preview-resident-2',
+        issueDate: monthStart(-2),
+        dueDate: `${monthKey(-1)}-07`,
+        amount: 180,
+        status: 'Pending',
+        lateFee: 25,
+        extraCharges: 0,
+        concept: 'Mantenimiento',
+        ownerAdminId: owner,
+      },
+      {
         id: 'rcpt-luis-curr',
+        billingMonth: monthKey(0),
         residentId: 'preview-resident-2',
         issueDate: monthStart(0),
         dueDate: monthEnd(0),
@@ -272,6 +338,7 @@ export function createSeedDb() {
       },
       {
         id: 'rcpt-carla-curr',
+        billingMonth: monthKey(0),
         residentId: 'preview-resident-3',
         issueDate: monthStart(0),
         dueDate: monthEnd(0),
@@ -284,6 +351,7 @@ export function createSeedDb() {
       },
       {
         id: 'rcpt-diego-curr',
+        billingMonth: monthKey(0),
         residentId: 'preview-resident-4',
         issueDate: monthStart(0),
         dueDate: monthEnd(0),
@@ -342,17 +410,7 @@ export function createSeedDb() {
         lateFeePerDay: 5,
         admissionPayFromDay: 1,
         admissionPayToDay: 7,
-        monthlyCharges: [
-          {
-            id: 'charge-2026-09',
-            month: '2026-09',
-            amount: 180,
-            billingStart: '2026-09-01',
-            billingEnd: '2026-09-30',
-            paymentOpen: '2026-10-01',
-            paymentDue: '2026-10-07',
-          },
-        ],
+        monthlyCharges: [monthlyCharge(-2, 180), monthlyCharge(-1, 180), monthlyCharge(0, 180)],
       },
     ],
     kpi: [
@@ -419,7 +477,68 @@ export function createSeedDb() {
         dni: '70881234',
         salary: 1800,
         photoUrl: '',
+        position: 'MAINTENANCE',
+        status: 'ACTIVE',
         ownerAdminId: owner,
+      },
+      {
+        id: 'tw-2',
+        name: 'Rosa Quispe',
+        phone: '934567812',
+        dni: '71234598',
+        salary: 1500,
+        photoUrl: '',
+        position: 'CONCIERGE',
+        status: 'ACTIVE',
+        ownerAdminId: owner,
+      },
+    ],
+    maintenanceTasks: [
+      {
+        id: 'task-1',
+        ownerAdminId: owner,
+        staffId: 'tw-1',
+        incidentId: 'inc-2',
+        description: 'Coordinar con Elevadores del Sur la revisión del ascensor del bloque A.',
+        scheduledFor: isoAt(1, 9),
+        status: 'IN_PROGRESS',
+        startedAt: isoHoursAgo(20),
+        completedAt: null,
+        createdAt: isoHoursAgo(30),
+        updatedAt: isoHoursAgo(20),
+      },
+      {
+        id: 'task-2',
+        ownerAdminId: owner,
+        staffId: 'tw-1',
+        incidentId: null,
+        description: 'Limpiar filtros de la bomba de agua.',
+        scheduledFor: isoAt(2, 10),
+        status: 'PENDING',
+        startedAt: null,
+        completedAt: null,
+        createdAt: isoHoursAgo(6),
+        updatedAt: null,
+      },
+    ],
+    shifts: [
+      {
+        id: 'shift-1',
+        ownerAdminId: owner,
+        staffId: 'tw-2',
+        start: isoAt(1, 7),
+        end: isoAt(1, 15),
+        notes: 'Portería principal',
+        createdAt: isoHoursAgo(10),
+      },
+      {
+        id: 'shift-2',
+        ownerAdminId: owner,
+        staffId: 'tw-1',
+        start: isoAt(1, 8),
+        end: isoAt(1, 17),
+        notes: null,
+        createdAt: isoHoursAgo(10),
       },
     ],
     supportChats: [
@@ -557,6 +676,10 @@ export function createSeedDb() {
         uploadStatus: 'confirmed',
         indexingStatus: 'ready',
         uploadedAt: isoHoursAgo(90),
+        documentType: 'REGULATION',
+        documentStatus: 'PUBLISHED',
+        version: 1,
+        publishedAt: isoHoursAgo(90),
       },
     ],
     residentExtraCharges: [],

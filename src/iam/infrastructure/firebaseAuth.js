@@ -2,6 +2,7 @@ import {
   EmailAuthProvider,
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
+  deleteUser,
   fetchSignInMethodsForEmail,
   linkWithCredential,
   reauthenticateWithPopup,
@@ -163,7 +164,13 @@ export async function createResidentPasswordAccount({ email, password, name }) {
     // A verified email keeps Firebase from dropping this password credential if the
     // resident later signs in with Google using the same address. Best effort.
     sendEmailVerification(credential.user).catch(() => {})
-    return { uid: credential.user.uid, email: normalized, token: await credential.user.getIdToken() }
+    return {
+      uid: credential.user.uid,
+      email: normalized,
+      token: await credential.user.getIdToken(),
+      // Lets the caller roll the account back if the API then rejects the invite.
+      created: true,
+    }
   } catch (error) {
     const code = String(error?.code ?? '')
     if (code === 'auth/weak-password') throw apiError('PASSWORD_TOO_SHORT')
@@ -172,9 +179,32 @@ export async function createResidentPasswordAccount({ email, password, name }) {
 
   try {
     const credential = await signInWithEmailAndPassword(auth, normalized, secret)
-    return { uid: credential.user.uid, email: normalized, token: await credential.user.getIdToken() }
+    return {
+      uid: credential.user.uid,
+      email: normalized,
+      token: await credential.user.getIdToken(),
+      created: false,
+    }
   } catch {
     throw apiError('EMAIL_ALREADY_EXISTS')
+  }
+}
+
+/**
+ * Best-effort rollback of a Firebase account created a moment ago by
+ * createResidentPasswordAccount when the API then rejected the invite; otherwise a
+ * retry (e.g. with another password) would fail with EMAIL_ALREADY_EXISTS.
+ * Only deletes the signed-in user with that uid.
+ */
+export async function deleteJustCreatedFirebaseUser(uid) {
+  try {
+    const user = getFirebaseAuth().currentUser
+    if (!user || (uid && user.uid !== uid)) return false
+    await deleteUser(user)
+    return true
+  } catch (e) {
+    console.warn('Could not roll back the Firebase account', e)
+    return false
   }
 }
 

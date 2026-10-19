@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Button from 'primevue/button'
-import Dropdown from 'primevue/dropdown'
+import Select from 'primevue/select'
 import InputText from 'primevue/inputtext'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -127,21 +127,23 @@ onMounted(loadTasks)
     <div class="team-panel__header">
       <h2 id="team-tasks-title" class="team-panel__title">{{ t('teamMgmt.tasks.title') }}</h2>
       <div class="team-panel__filters">
-        <Dropdown
+        <Select
           v-model="filters.staffId"
           :options="filterWorkerOptions"
           option-label="label"
           option-value="value"
           :aria-label="t('teamMgmt.tasks.workerLabel')"
+          :placeholder="t('teamMgmt.tasks.allWorkers')"
           class="team-panel__filter"
           @change="loadTasks"
         />
-        <Dropdown
+        <Select
           v-model="filters.status"
           :options="statusOptions"
           option-label="label"
           option-value="value"
           :aria-label="t('teamMgmt.tasks.statusLabel')"
+          :placeholder="t('teamMgmt.tasks.allStatuses')"
           class="team-panel__filter"
           @change="loadTasks"
         />
@@ -151,7 +153,7 @@ onMounted(loadTasks)
     <form class="team-panel__form" @submit.prevent="createTask">
       <div class="team-panel__field">
         <label for="team-task-worker">{{ t('teamMgmt.tasks.workerLabel') }}</label>
-        <Dropdown
+        <Select
           v-model="form.staffId"
           input-id="team-task-worker"
           :options="activeWorkerOptions"

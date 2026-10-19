@@ -11,7 +11,10 @@ import { residentsApi } from '@/residents/infrastructure/residentsApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
 import { OPEN_WIREFRAME_ACCESS } from '@/iam/application/localPreviewAuth.js'
 import { signInWithGoogle, refreshFirebaseIdToken } from '@/iam/infrastructure/googleIdentity.js'
-import { createResidentPasswordAccount } from '@/iam/infrastructure/firebaseAuth.js'
+import {
+  createResidentPasswordAccount,
+  deleteJustCreatedFirebaseUser,
+} from '@/iam/infrastructure/firebaseAuth.js'
 import BuildingForm from '@/profiles/presentation/components/BuildingForm.vue'
 
 const route = useRoute()
@@ -184,20 +187,36 @@ async function onResidentPasswordSignUp() {
     return
   }
   residentLoading.value = true
+  let account = null
   try {
-    const account = OPEN_WIREFRAME_ACCESS
-      ? { email, token: 'preview-password' }
+    // Validate the invite (not found / used / expired) BEFORE creating the Firebase
+    // account, so a rejected invite does not leave an orphan email/password account.
+    await residentsApi.findByInviteToken(inviteToken.value)
+    account = OPEN_WIREFRAME_ACCESS
+      ? { email, token: 'preview-password', created: false }
       : await createResidentPasswordAccount({
           email,
           password: invitePwPassword.value,
           name: inviteName.value,
         })
-    const authResult = await residentsApi.completeInviteWithPassword({
-      token: inviteToken.value,
-      email: account.email,
-      name: inviteName.value,
-      idToken: account.token,
-    })
+    let authResult
+    try {
+      authResult = await residentsApi.completeInviteWithPassword({
+        token: inviteToken.value,
+        email: account.email,
+        name: inviteName.value,
+        idToken: account.token,
+      })
+    } catch (apiFailure) {
+      // API rejected it (e.g. INVITE_EMAIL_MISMATCH): undo the account we just created.
+      // Not on network / 5xx errors: the server may have linked it before the failure.
+      const indeterminate =
+        apiFailure?.code === 'NETWORK_ERROR' ||
+        apiFailure?.code === 'TIMEOUT' ||
+        Number(apiFailure?.status) >= 500
+      if (account.created && !indeterminate) await deleteJustCreatedFirebaseUser(account.uid)
+      throw apiFailure
+    }
     const sessionToken = OPEN_WIREFRAME_ACCESS
       ? authResult.token
       : await resolveResidentToken({ token: null })
@@ -583,6 +602,16 @@ watch(
       regErrors.value = {}
     }
   },
+)
+
+// apiClient / router guard send the user here with ?session=deactivated|expired: say why.
+watch(
+  () => route.query.session,
+  (reason) => {
+    if (reason === 'deactivated') loginEmailError.value = t('auth.accountDeactivated')
+    else if (reason === 'expired') loginEmailError.value = t('auth.sessionExpired')
+  },
+  { immediate: true },
 )
 
 watch(loginEmail, () => {

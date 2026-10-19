@@ -520,7 +520,7 @@ const chartOptions = ref({
           <ul v-else class="dash-list" role="list">
             <li v-for="row in recentIncidents" :key="row.id" class="dash-row">
               <div class="dash-row__main">
-                <span class="dash-row__title">{{ row.description }}</span>
+                <span class="dash-row__title">{{ row.title || row.description }}</span>
                 <span class="dash-row__meta">
                   {{ row.residentName || '—' }}
                   <template v-if="row.createdAt"> · {{ nfDate(row.createdAt) }}</template>
@@ -542,7 +542,7 @@ const chartOptions = ref({
               {{ t('dashboard.chartEmpty') }}
             </p>
             <Chart
-              v-else
+              v-else-if="!isLoading"
               type="bar"
               :data="chartData"
               :options="chartOptions"
@@ -637,6 +637,8 @@ const chartOptions = ref({
 }
 
 .kpi-grid {
+  /* Containing block for absolutely positioned (visually-hidden) children so they stay in the scroller. */
+  position: relative;
   display: flex;
   flex-direction: row;
   gap: 0.85rem;
@@ -857,6 +859,10 @@ const chartOptions = ref({
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+.grid-layout > .flex-1 {
+  flex: 1 1 0;
+  min-width: 0;
 }
 @media (min-width: 1024px) {
   .grid-layout {

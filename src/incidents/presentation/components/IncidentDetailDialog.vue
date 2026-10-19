@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
 import { Incident } from '@/incidents/domain/model/incident.entity.js'
@@ -46,6 +46,18 @@ async function load() {
 
 watch(() => [props.open, props.incidentId, props.refreshKey], load, { immediate: true })
 
+/** Move focus into the dialog so Escape / Tab work right after opening (a11y). */
+const closeBtnRef = ref(null)
+watch(
+  () => props.open,
+  async (isOpen) => {
+    if (!isOpen) return
+    await nextTick()
+    closeBtnRef.value?.focus()
+  },
+  { immediate: true },
+)
+
 async function sendComment() {
   const text = comment.value.trim()
   if (!text || sending.value || !incident.value) return
@@ -75,7 +87,7 @@ async function sendComment() {
       >
         <header class="idd-head">
           <h2 id="idd-title" class="idd-title">{{ incident?.title || t('incidentFlow.detailTitle') }}</h2>
-          <button type="button" class="idd-close" :aria-label="t('information.close')" @click="emit('close')">
+          <button ref="closeBtnRef" type="button" class="idd-close" :aria-label="t('information.close')" @click="emit('close')">
             <i class="pi pi-times" aria-hidden="true" />
           </button>
         </header>

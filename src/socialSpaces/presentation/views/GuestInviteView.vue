@@ -59,6 +59,9 @@ const expiryMs = computed(() => {
 
 const isCancelled = computed(() => bundle.value?.status === 'CANCELLED')
 
+/** Server says the pass only opens on the booking date, 1 h before the start (the QR is still shown). */
+const isNotYetValid = computed(() => bundle.value?.status === 'NOT_YET_VALID')
+
 /** Server status (VALID/EXPIRED) plus the live clock so the page flips without reloading. */
 const isExpired = computed(() => {
   if (bundle.value?.status === 'EXPIRED') return true
@@ -209,6 +212,9 @@ const slotSummary = computed(() => {
         <h1 class="invite-title">{{ t('guestInvite.validTitle') }}</h1>
         <p class="invite-space">{{ bundle.spaceName }}</p>
         <p class="invite-body">{{ slotSummary }}</p>
+        <p v-if="isNotYetValid" class="invite-body invite-title--warn" role="status">
+          {{ t('socialSpaces.passNotYetValid') }}. {{ t('socialSpaces.guestNotYetValidBody') }}
+        </p>
         <p class="invite-expiry">
           {{ t('guestInvite.qrValidUntil', { time: expiryClockLabel }) }}
         </p>

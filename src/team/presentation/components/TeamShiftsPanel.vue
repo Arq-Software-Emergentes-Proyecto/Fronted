@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Button from 'primevue/button'
-import Dropdown from 'primevue/dropdown'
+import Select from 'primevue/select'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import { teamShiftsApi } from '@/team/infrastructure/teamShiftsApi.js'
@@ -104,7 +104,7 @@ onMounted(loadShifts)
     <form class="team-panel__form" @submit.prevent="createShift">
       <div class="team-panel__field">
         <label for="team-shift-worker">{{ t('teamMgmt.tasks.workerLabel') }}</label>
-        <Dropdown
+        <Select
           v-model="form.staffId"
           input-id="team-shift-worker"
           :options="workerOptions"

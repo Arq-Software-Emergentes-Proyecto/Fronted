@@ -1,5 +1,6 @@
 import { reactive, computed } from 'vue';
 import { financesApi } from '../infrastructure/financesApi.js';
+import { isExtraReceipt } from '../domain/receipt.js';
 import {
   applyLateFeeToReceipt,
   computeChargeDates,
@@ -145,13 +146,15 @@ export function useFinancesStore() {
   }
 
   function receiptForMonth(receipts, monthKey) {
-    const exact = (receipts || []).find(
+    // Only the monthly fee receipt counts; extra-charge receipts (kind "extra") also carry a billingMonth.
+    const monthly = (receipts || []).filter((receipt) => !isExtraReceipt(receipt))
+    const exact = monthly.find(
       (receipt) => String(receipt.billingMonth || '') === String(monthKey),
     )
     if (exact) return exact
 
     const paymentMonth = nextMonthKey(monthKey)
-    return (receipts || []).find((receipt) => {
+    return monthly.find((receipt) => {
       if (receipt.billingMonth) return false
       const due = String(receipt.dueDate || '')
       return due.startsWith(paymentMonth) || due.startsWith(String(monthKey))
@@ -276,6 +279,8 @@ export function useFinancesStore() {
     const receipts = await financesApi.getReceiptsByResident(residentId).catch(() => [])
     for (const receipt of receipts) {
       if (String(receipt.status ?? '') === 'Paid') continue
+      // Only the admission-month maintenance fee; extra-charge receipts stay.
+      if (isExtraReceipt(receipt)) continue
       const billingMonth = normalizeMonthKey(receipt.billingMonth || receipt.dueDate)
       if (billingMonth !== admissionMonth) continue
       await financesApi.deleteReceipt(receipt.id)
@@ -310,6 +315,7 @@ export function useFinancesStore() {
     const existing = await financesApi.getReceiptsByResident(billedResident.id).catch(() => [])
     const alreadyBilled = existing.some(
       (receipt) =>
+        !isExtraReceipt(receipt) &&
         normalizeMonthKey(receipt.billingMonth || receipt.dueDate) ===
         String(charge.month || monthKey),
     )
@@ -329,6 +335,7 @@ export function useFinancesStore() {
       lateFee: 0,
       billingMonth: charge?.month || monthKey,
       paymentOpen: dates.paymentOpen,
+      kind: 'monthly',
     };
 
     try {
@@ -378,7 +385,8 @@ export function useFinancesStore() {
       // Automatically evaluate if we should issue the *next* tracking bill right away
       const r = updatedReceipt;
       const baseDueDate = new Date(r.dueDate);
-      if (!isNaN(baseDueDate.getTime())) {
+      // Paying an extra-charge receipt does not roll the monthly fee forward.
+      if (!isExtraReceipt(r) && !isNaN(baseDueDate.getTime())) {
         baseDueDate.setDate(baseDueDate.getDate() + 30);
         const nextDueDate = formatLocalIsoStringDate(baseDueDate);
         const issueDate = formatLocalIsoStringDate(new Date());
@@ -401,6 +409,7 @@ export function useFinancesStore() {
           lateFee: 0,
           billingMonth: followingMonth,
           paymentOpen: nextDates.paymentOpen,
+          kind: 'monthly',
         };
         const autoCreated = await financesApi.createReceipt(nextReceiptData);
         state.receipts.push(autoCreated);

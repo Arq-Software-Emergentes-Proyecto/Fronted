@@ -3,7 +3,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
-import Dropdown from 'primevue/dropdown'
+import Select from 'primevue/select'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import DataTable from 'primevue/datatable'
@@ -382,7 +382,7 @@ onMounted(loadWorkers)
         </div>
         <div class="team-form__field">
           <label for="team-worker-position">{{ t('teamMgmt.positionLabel') }}</label>
-          <Dropdown
+          <Select
             v-model="form.position"
             input-id="team-worker-position"
             :options="positionOptions"
@@ -552,7 +552,7 @@ onMounted(loadWorkers)
         <label for="team-reassign-to">
           {{ t('teamMgmt.reassignLabel', { count: pendingDeactivate?.openTasks ?? 0 }) }}
         </label>
-        <Dropdown
+        <Select
           v-model="reassignToId"
           input-id="team-reassign-to"
           :options="reassignOptions"

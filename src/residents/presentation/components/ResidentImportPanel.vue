@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import { residentInviteLink, residentsApi } from '@/residents/infrastructure/residentsApi.js'
+import { OPEN_WIREFRAME_ACCESS } from '@/iam/application/localPreviewAuth.js'
 
 /**
  * US016 — Excel/CSV roster import. The server validates every row; if any is invalid the whole file
@@ -133,9 +134,24 @@ async function downloadTemplate(format) {
   try {
     const blob = await residentsApi.downloadImportTemplate(format)
     saveBlob(blob, `plantilla-residentes.${format}`)
-  } catch {
-    // Offline / preview: the CSV template can still be generated locally.
-    saveBlob(new Blob(['﻿' + LOCAL_CSV_TEMPLATE], { type: 'text/csv;charset=utf-8' }), 'plantilla-residentes.csv')
+  } catch (error) {
+    const code = error?.code
+    if (OPEN_WIREFRAME_ACCESS || code === 'NETWORK_ERROR' || code === 'TIMEOUT') {
+      // Offline / preview: the CSV template can still be generated locally.
+      saveBlob(new Blob(['﻿' + LOCAL_CSV_TEMPLATE], { type: 'text/csv;charset=utf-8' }), 'plantilla-residentes.csv')
+    } else {
+      // Real API error (e.g. plan / session): surface it instead of silently serving a local file.
+      const errCode = code || 'GENERIC'
+      failure.value = {
+        code: errCode,
+        message: '',
+        errors: [{
+          row: 0,
+          code: errCode,
+          message: te(`rosterImport.errors.${errCode}`) ? t(`rosterImport.errors.${errCode}`) : t('rosterImport.errors.GENERIC'),
+        }],
+      }
+    }
   } finally {
     isDownloading.value = ''
   }

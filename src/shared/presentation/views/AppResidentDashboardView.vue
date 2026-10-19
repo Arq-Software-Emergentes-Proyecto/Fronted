@@ -11,6 +11,7 @@ import {
   isAnnouncementActive,
 } from '@/communications/domain/model/announcementConstants.js'
 import noAnnouncementsIllustration from '@/communications/presentation/assets/no-announcements.svg'
+import { todayYmd } from '@/finances/domain/billingCycle.js'
 import { useResidentPaymentStore } from '@/finances/application/residentPaymentStore.js'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 
@@ -42,7 +43,8 @@ const showAllAnnouncements = ref(false)
 const showAllIncidents = ref(false)
 const showAllReservations = ref(false)
 
-const todayIso = new Date().toISOString().slice(0, 10)
+// Local calendar day (Lima), not UTC: after 19:00 UTC-5 the ISO date is already tomorrow.
+const todayIso = todayYmd()
 
 const allUpcomingReservations = computed(() => {
   return reservations.value
@@ -497,10 +499,10 @@ onMounted(() => {
             </h2>
             <div class="ann-section__actions">
               <template v-if="activeAnnouncements.length > 1">
-                <button type="button" class="nav-btn" @click="prevAnn">
+                <button type="button" class="nav-btn" :aria-label="t('resident.announcementsPrev')" @click="prevAnn">
                   <i class="pi pi-chevron-left" aria-hidden="true"></i>
                 </button>
-                <button type="button" class="nav-btn" @click="nextAnn">
+                <button type="button" class="nav-btn" :aria-label="t('resident.announcementsNext')" @click="nextAnn">
                   <i class="pi pi-chevron-right" aria-hidden="true"></i>
                 </button>
               </template>

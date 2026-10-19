@@ -163,7 +163,8 @@ async function onGenerateReceipts() {
   generateMessage.value = ''
   const month = store.currentBillingMonthKey.value
   try {
-    const result = await store.generateMonthlyReceipts()
+    // Bill exactly the month shown in the button label (not whatever the server deems current).
+    const result = await store.generateMonthlyReceipts(month)
     const label = chargeMonthLabel(result?.month || month)
     generateTone.value = 'ok'
     generateMessage.value = Number(result?.created) > 0
@@ -1250,7 +1251,7 @@ const residentsStatusMonthLabel = computed(() =>
 .finance-panel__title-month {
   display: inline-block;
   margin-left: 0.35rem;
-  text-transform: capitalize;
+  text-transform: none;
   color: #86868b;
   font-weight: 500;
 }

@@ -18,6 +18,8 @@ import {
   upsertSubscription,
 } from './mockDb.js'
 import { MOCK_OWNER_ID } from './seed.js'
+import { isExtraReceipt, ReceiptKinds, resolveReceiptKind } from '@/finances/domain/receipt.js'
+import { demoFileDataUrl, handleOperations, uploadResource } from './mockOperations.js'
 
 function headerValue(headers, name) {
   if (!headers || typeof headers !== 'object') return ''
@@ -51,7 +53,7 @@ function authClaimsFromConfig(config) {
   }
 }
 
-function resolveActor(config) {
+export function resolveActor(config) {
   const claims = authClaimsFromConfig(config)
   const sub = claims?.sub != null ? String(claims.sub) : ''
   const role =
@@ -74,6 +76,11 @@ function resolveActor(config) {
 function hardcodedAiReply(userText, locale = 'es') {
   const text = String(userText ?? '').toLowerCase()
   const es = !String(locale).toLowerCase().startsWith('en')
+  if (shouldEscalateToAdmin(userText)) {
+    return es
+      ? 'Listo, derivé tu consulta a administración. Te responderán por este mismo chat.'
+      : 'Done, I forwarded your request to management. They will reply in this same chat.'
+  }
   if (/admin|administraci|human|persona|hablar/.test(text)) {
     return es
       ? 'Puedo ayudarte con eso. Si prefieres hablar con administración, escribe “quiero hablar con un administrador” y te conectamos.'
@@ -86,8 +93,8 @@ function hardcodedAiReply(userText, locale = 'es') {
   }
   if (/reserva|espacio|piscina|guest|invitad|qr/.test(text)) {
     return es
-      ? 'Para reservar un espacio común ve a Generación / Espacios, elige fecha y horario, y agrega invitados (máx. 5) para el QR.'
-      : 'To book a common space go to Generation / Spaces, pick a date and time, and add guests (max 5) for the QR.'
+      ? 'Para reservar un espacio común ve a Servicios, elige el espacio, la fecha y el horario. Luego, en Generación, agrega a tus invitados (máx. 5) y comparte el enlace o el QR.'
+      : 'To book a common space go to Services and pick the space, date and time. Then, under Generation, add your guests (max 5) and share the link or QR code.'
   }
   if (/incidencia|incidente|fuga|ascensor|incident/.test(text)) {
     return es
@@ -100,7 +107,9 @@ function hardcodedAiReply(userText, locale = 'es') {
 }
 
 function shouldEscalateToAdmin(userText) {
-  return /admin|administraci|humano|persona real|hablar con/.test(String(userText ?? '').toLowerCase())
+  return /hablar con|quiero (un |una )?(administrador|administraci|humano|persona)|persona real|talk to (an? )?(admin|human)|speak (to|with)/.test(
+    String(userText ?? '').toLowerCase(),
+  )
 }
 
 function publicSupportChat(row) {
@@ -126,7 +135,7 @@ function publicSupportChat(row) {
   }
 }
 
-function pathParts(config) {
+export function pathParts(config) {
   const raw = String(config.url ?? '')
   const withoutQuery = raw.split('?')[0]
   return withoutQuery
@@ -142,7 +151,7 @@ function pathParts(config) {
     })
 }
 
-function readBody(config) {
+export function readBody(config) {
   const raw = config.data
   if (raw == null || raw === '') return {}
   if (typeof raw === 'object') return raw
@@ -153,7 +162,7 @@ function readBody(config) {
   }
 }
 
-function readParams(config) {
+export function readParams(config) {
   const params = config.params && typeof config.params === 'object' ? { ...config.params } : {}
   const raw = String(config.url ?? '')
   const query = raw.includes('?') ? raw.slice(raw.indexOf('?') + 1) : ''
@@ -165,7 +174,7 @@ function readParams(config) {
   return params
 }
 
-function ok(config, data, status = 200) {
+export function ok(config, data, status = 200) {
   return {
     data,
     status,
@@ -176,7 +185,7 @@ function ok(config, data, status = 200) {
   }
 }
 
-function fail(config, status, code, message, extra = {}) {
+export function fail(config, status, code, message, extra = {}) {
   const data = { code, message, ...extra }
   const error = new AxiosError(message ?? code, AxiosError.ERR_BAD_REQUEST, config, {}, {
     status,
@@ -188,7 +197,9 @@ function fail(config, status, code, message, extra = {}) {
   throw error
 }
 
-function publicUser(user) {
+export function publicUser(user) {
+  const isResident = user.role === 'resident'
+  const inviteAlive = isResident && !user.inviteUsedAt
   return {
     id: user.id,
     name: user.name,
@@ -197,6 +208,20 @@ function publicUser(user) {
     floor: user.floor ?? null,
     code: user.code ?? null,
     ownerAdminId: user.ownerAdminId ?? null,
+    // Mirror BuildingFex.Api UserResourceAssembler (admission, billing flag, invite, account status).
+    admissionDate: user.admissionDate ? String(user.admissionDate).slice(0, 10) : null,
+    billFromNextMonth: isResident ? Boolean(user.billFromNextMonth) : null,
+    hasCredentials: isResident
+      ? user.hasCredentials === true ||
+        user.authProvider === 'google' ||
+        Boolean(user.googleSub) ||
+        Boolean(user.email && user.password)
+      : null,
+    authProvider: user.authProvider || null,
+    inviteToken: inviteAlive ? (user.inviteToken ?? null) : null,
+    inviteExpiresAt: inviteAlive ? (user.inviteExpiresAt ?? null) : null,
+    accountStatus: String(user.accountStatus ?? '').toUpperCase() === 'DEACTIVATED' ? 'DEACTIVATED' : 'ACTIVE',
+    deactivatedAt: user.deactivatedAt ?? null,
   }
 }
 
@@ -214,7 +239,7 @@ function authPayload(user) {
   }
 }
 
-function ownerFromParams(params) {
+export function ownerFromParams(params) {
   const raw = params.ownerAdminId
   if (raw != null && String(raw).length) return String(raw)
   return getActiveDataOwnerId() ?? MOCK_OWNER_ID
@@ -239,6 +264,26 @@ function handleCollection(config, method, collection, id) {
     const match = queryCollection('financeSettings', ownerId ? { ownerAdminId: ownerId } : {})[0]
     if (!match) fail(config, 404, 'SETTINGS_NOT_FOUND', 'Settings not found')
     return ok(config, patchRow('financeSettings', match.id, body))
+  }
+
+  if (collection === 'receipts' && method === 'POST' && !id) {
+    // Mirrors the API (ReceiptsCompatController): resolve kind; one MONTHLY fee per resident and
+    // month (RNF011) — a duplicate returns the existing row; extra-charge receipts always insert.
+    const kind = resolveReceiptKind(body.kind, body.amount, body.extraCharges)
+    const row = { ...body, kind }
+    const month = String(row.billingMonth ?? '').trim().slice(0, 7)
+    if (kind === ReceiptKinds.MONTHLY && month) {
+      const ownerAdminId = String(row.ownerAdminId ?? ownerFromParams(params) ?? '')
+      const duplicate = queryCollection('receipts', {}).find(
+        (r) =>
+          String(r.ownerAdminId ?? ownerAdminId) === ownerAdminId &&
+          String(r.residentId) === String(row.residentId) &&
+          !isExtraReceipt(r) &&
+          String(r.billingMonth ?? '').slice(0, 7) === month,
+      )
+      if (duplicate) return ok(config, duplicate)
+    }
+    return ok(config, insertRow('receipts', row), 201)
   }
 
   if (!id) {
@@ -508,10 +553,6 @@ function handleV1(config, method, parts) {
     }
   }
 
-  // Excel import needs the real API (server-side parsing); the panel falls back to a local CSV template.
-  if (route.startsWith('residents/import')) {
-    fail(config, 501, 'IMPORT_PREVIEW_UNSUPPORTED', 'Excel import requires the BuildingFex API')
-  }
 
   if (route === 'subscription' && method === 'GET') {
     return ok(config, subscriptionSnapshot(ownerFromParams(params)))
@@ -639,13 +680,31 @@ function handleV1(config, method, parts) {
         String(body.ownerAdminId ?? '').trim() ||
         ownerFromParams(params) ||
         MOCK_OWNER_ID
+      const role = body.role || 'resident'
+      const code = String(body.code ?? '').trim()
+      if (
+        role === 'resident' &&
+        code &&
+        queryCollection('users', { role: 'resident', ownerAdminId: ownerId }).some(
+          (row) => String(row.code ?? '').trim() === code,
+        )
+      ) {
+        fail(config, 400, 'RESIDENT_CODE_ALREADY_EXISTS', 'Department already registered')
+      }
       const created = insertRow('users', {
         ...body,
         id: body.id || `resident-${Date.now()}`,
-        role: body.role || 'resident',
+        role,
         ownerAdminId: ownerId,
         email: body.email ?? '',
         password: body.password ?? '',
+        ...(role === 'resident'
+          ? {
+              inviteToken: body.inviteToken || `inv-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`,
+              inviteExpiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
+              accountStatus: 'ACTIVE',
+            }
+          : {}),
       })
       return ok(config, publicUser(created), 201)
     }
@@ -982,6 +1041,9 @@ function handleV1(config, method, parts) {
         uploadStatus: 'pending_upload',
         indexingStatus: 'none',
         uploadedAt: new Date().toISOString(),
+        documentType: body.documentType ? String(body.documentType).toUpperCase() : null,
+        documentStatus: 'PENDING_UPLOAD',
+        version: 1,
       })
       return ok(config, {
         id,
@@ -995,12 +1057,16 @@ function handleV1(config, method, parts) {
 
     const confirmMatch = rest.match(/^([^/]+)\/confirm$/)
     if (confirmMatch && method === 'POST') {
-      const row = patchRow('importUploads', confirmMatch[1], {
+      const current = findById('importUploads', confirmMatch[1])
+      if (!current) fail(config, 404, 'HTTP_404', 'Not found')
+      const row = patchRow('importUploads', current.id, {
         uploadStatus: 'confirmed',
         indexingStatus: 'none',
+        ...(current.documentStatus && current.documentStatus !== 'PENDING_UPLOAD'
+          ? {}
+          : { documentStatus: 'PUBLISHED', publishedAt: new Date().toISOString() }),
       })
-      if (!row) fail(config, 404, 'HTTP_404', 'Not found')
-      return ok(config, row)
+      return ok(config, uploadResource(row))
     }
 
     const downloadMatch = rest.match(/^([^/]+)\/download-url$/)
@@ -1010,7 +1076,7 @@ function handleV1(config, method, parts) {
       return ok(config, {
         id: row.id,
         fileName: row.fileName,
-        downloadUrl: `mock://download/${row.id}`,
+        downloadUrl: demoFileDataUrl(row.fileName, row.mimeType),
         expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
       })
     }
@@ -1019,15 +1085,22 @@ function handleV1(config, method, parts) {
     if (method === 'GET' && !id) {
       return ok(
         config,
-        queryCollection('importUploads', { ownerAdminId: ownerId }).filter(
-          (u) => u.uploadStatus !== 'pending_upload',
-        ),
+        queryCollection('importUploads', { ownerAdminId: ownerId })
+          .filter((u) => u.uploadStatus !== 'pending_upload')
+          .map(uploadResource),
       )
     }
     if (id && method === 'PATCH') {
-      const row = patchRow('importUploads', id, body)
+      const patch = { ...body }
+      if (patch.documentType != null) {
+        patch.documentType = String(patch.documentType).toUpperCase()
+        if (!['REGULATION', 'MINUTES', 'OTHER'].includes(patch.documentType)) {
+          fail(config, 400, 'INVALID_DOCUMENT_TYPE', 'Invalid document type')
+        }
+      }
+      const row = patchRow('importUploads', id, patch)
       if (!row) fail(config, 404, 'HTTP_404', 'Not found')
-      return ok(config, row)
+      return ok(config, uploadResource(row))
     }
     if (id && method === 'DELETE') {
       if (!removeRow('importUploads', id)) fail(config, 404, 'HTTP_404', 'Not found')
@@ -1047,7 +1120,7 @@ function mockIncidentEvent(type, status, comment, actor) {
     status,
     comment: comment || null,
     authorId: actor?.id ?? null,
-    authorName: null,
+    authorName: actor?.id ? (findById('users', actor.id)?.name ?? null) : null,
     authorRole: actor?.role ?? null,
     createdAt: new Date().toISOString(),
   }
@@ -1111,11 +1184,23 @@ function handleIncidentsAndAnnouncements(config, method, parts) {
     if (!String(body.description ?? '').trim()) {
       fail(config, 400, 'DESCRIPTION_REQUIRED', 'La descripción es obligatoria.')
     }
+    const isResident = actor.role === SessionRoles.RESIDENT
+    // Como IncidentCommandService: providerId → nombre/teléfono del proveedor; el residente no asigna.
+    const providerId = isResident ? '' : String(body.providerId ?? '').trim()
+    const provider = providerId ? findById('serviceProviders', providerId) : null
+    if (providerId && !provider) fail(config, 400, 'PROVIDER_NOT_FOUND', 'Proveedor no encontrado.')
+    const events = [mockIncidentEvent('reported', 'open', null, actor)]
+    if (provider) events.push(mockIncidentEvent('assigned', 'open', provider.name, actor))
     const row = {
       ...body,
       title: String(body.title ?? body.subject).trim(),
       status: 'open',
-      events: [mockIncidentEvent('reported', 'open', null, actor)],
+      ...(isResident ? { residentId: actor.id } : {}),
+      providerId: provider?.id ?? null,
+      provider: provider?.name ?? (isResident ? '' : String(body.provider ?? '')),
+      providerPhone: provider?.phone ?? null,
+      providerSpecialty: provider?.specialty ?? null,
+      events,
     }
     return ok(config, insertRow('incidents', row), 201)
   }
@@ -1196,6 +1281,9 @@ export async function localMockAdapter(config) {
   const parts = pathParts(config)
 
   try {
+    const operation = await handleOperations(config, method, parts)
+    if (operation) return operation
+
     if (parts[0] === 'api' && parts[1] === 'v1') {
       return handleV1(config, method, parts)
     }
@@ -1209,7 +1297,17 @@ export async function localMockAdapter(config) {
 
     fail(config, 404, 'HTTP_404', `No mock for /${parts.join('/')}`)
   } catch (error) {
-    if (error instanceof AxiosError) throw error
+    // Diagnostics for QA / devtools: every mock failure is kept in window.__mockErrors.
+    if (typeof window !== 'undefined') {
+      const list = (window.__mockErrors = window.__mockErrors || [])
+      list.push({
+        method,
+        url: String(config.url ?? ''),
+        status: error?.response?.status ?? null,
+        code: error?.response?.data?.code ?? String(error?.message ?? error),
+      })
+      if (list.length > 200) list.shift()
+    }
     throw error
   }
 }

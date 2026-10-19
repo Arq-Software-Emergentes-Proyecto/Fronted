@@ -8,6 +8,7 @@ import {
   isDocumentVisible,
   joinSupportOwner,
   onSupportChatUpdated,
+  realtimeAvailable,
 } from '@/residentCare/infrastructure/supportRealtime.js'
 
 const { t, locale } = useI18n()
@@ -105,7 +106,8 @@ function chatMeta(row) {
 
 let pollTimer = 0
 let stopHub = null
-let signalROk = false
+/** Set on unmount: async work resumed after an await must not (re)register anything. */
+let disposed = false
 
 function upsertChat(chat) {
   if (!chat?.id) return
@@ -166,11 +168,9 @@ watch(
 async function bindRealtime() {
   stopHub?.()
   stopHub = null
-  signalROk = false
-  if (!ownerId.value) return
-  const hub = await joinSupportOwner(ownerId.value)
-  if (!hub) return
-  signalROk = true
+  if (disposed || !ownerId.value) return
+  // The handler is kept across hub reconnections; polling covers the gaps
+  // (it runs whenever `realtimeAvailable` is false).
   stopHub = onSupportChatUpdated((payload) => {
     if (payload?.kind === 'admin') upsertChat({
       ...payload,
@@ -178,12 +178,14 @@ async function bindRealtime() {
       messages: payload.messages || [],
     })
   })
+  await joinSupportOwner(ownerId.value)
 }
 
 function startFallbackPolling() {
   if (pollTimer) window.clearInterval(pollTimer)
+  if (disposed) return
   pollTimer = window.setInterval(() => {
-    if (!isDocumentVisible() || signalROk) return
+    if (!isDocumentVisible() || realtimeAvailable.value) return
     void bindChats({ silent: true, incremental: true })
   }, 8000)
 }
@@ -191,9 +193,16 @@ function startFallbackPolling() {
 watch(ownerId, async () => {
   void loadAiUsage()
   await bindChats()
+  if (disposed) return
   await bindRealtime()
+  if (disposed) return
   startFallbackPolling()
 }, { immediate: true })
+
+// Back online after a reconnect / rebuild: catch up on what was missed while offline.
+watch(realtimeAvailable, (ok) => {
+  if (ok && !disposed) void bindChats({ silent: true, incremental: true })
+})
 
 function onVisibility() {
   if (isDocumentVisible()) void bindChats({ silent: true, incremental: true })
@@ -204,8 +213,11 @@ if (typeof document !== 'undefined') {
 }
 
 onUnmounted(() => {
+  disposed = true
   if (pollTimer) window.clearInterval(pollTimer)
+  pollTimer = 0
   stopHub?.()
+  stopHub = null
   if (typeof document !== 'undefined') {
     document.removeEventListener('visibilitychange', onVisibility)
   }
@@ -904,6 +916,24 @@ async function sendReply() {
 
   .ai-recent-list {
     max-height: 8rem;
+  }
+}
+
+/* Phone (stacked app nav, see AppShellView): the page scrolls and the conversation keeps a usable height. */
+@media (max-width: 720px) {
+  .app-view--ai {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .finance-page {
+    flex: none;
+  }
+
+  .ai-shell {
+    flex: none;
+    grid-template-rows: auto minmax(30rem, 75vh);
   }
 }
 </style>

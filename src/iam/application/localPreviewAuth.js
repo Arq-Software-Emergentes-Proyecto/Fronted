@@ -84,7 +84,7 @@ export function previewAdminAuthResult({ email, name } = {}) {
 export function previewResidentAuthResult({ email, name } = {}) {
   const profile = buildPreviewProfile({
     email: email || 'resident@demo.test',
-    name: name || 'Residente demo',
+    name: name || 'Ana Torres',
     role: SessionRoles.RESIDENT,
   })
   return {
@@ -104,7 +104,7 @@ export function buildPreviewProfile({ email, name, role }) {
   const trimmedEmail = String(email ?? '').trim()
   const displayName =
     String(name ?? '').trim() ||
-    (role === SessionRoles.RESIDENT ? 'Residente demo' : 'Admin demo')
+    (role === SessionRoles.RESIDENT ? 'Ana Torres' : 'Admin demo')
 
   if (role === SessionRoles.RESIDENT) {
     return {
