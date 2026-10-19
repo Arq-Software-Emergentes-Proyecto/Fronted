@@ -137,6 +137,28 @@ export function useFinancesStore() {
     });
   });
 
+  /**
+   * Status of one resident's maintenance fee for any month "yyyy-MM", with the same rules as
+   * `monthStatus` above (Paid | Pending | Overdue | Unbilled | Exempt). `row` is a resident,
+   * optionally carrying its late-fee-applied `receipts` (as in getResidentFinancialStatus).
+   */
+  function residentMonthStatus(row, monthKey) {
+    const settings = normalizeSettings(state.settings || {})
+    const todayStr = todayYmd()
+    const month = normalizeMonthKey(monthKey)
+    const receipts = Array.isArray(row?.receipts)
+      ? row.receipts
+      : state.receipts
+        .filter((r) => String(r.residentId) === String(row?.id))
+        .map((r) => applyLateFeeToReceipt(r, settings.lateFeePerDay, todayStr))
+    return monthPaymentStatus(
+      receiptForMonth(receipts, month),
+      findCharge(settings.monthlyCharges, month),
+      todayStr,
+      residentOwesMonth(row, month, settings),
+    )
+  }
+
   function isPaidStatus(status) {
     return status === 'Paid' || status === 'Pagado'
   }
@@ -442,6 +464,7 @@ export function useFinancesStore() {
     loadData,
     currentBillingMonthKey,
     getResidentFinancialStatus,
+    residentMonthStatus,
     generateInitialReceipt,
     setResidentBillFromNextMonth,
     generateMonthlyReceipts,

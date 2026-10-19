@@ -16,6 +16,7 @@ import {
   deleteJustCreatedFirebaseUser,
 } from '@/iam/infrastructure/firebaseAuth.js'
 import BuildingForm from '@/profiles/presentation/components/BuildingForm.vue'
+import DashboardHeroArt from '@/shared/presentation/components/dashboard/DashboardHeroArt.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -36,11 +37,13 @@ const isResidentLogin = computed(() => route.name === AppRouteNames.RESIDENT_LOG
 const isAdminLogin = computed(
   () => route.name === AppRouteNames.LOGIN && route.query.invite !== '1',
 )
-const authTab = computed(() => {
-  if (isRegister.value) return 'register'
-  if (isResidentLogin.value) return 'resident'
-  return 'login'
-})
+
+/** Left brand panel: short product benefits (decorative copy, same on every auth screen). */
+const heroBenefits = [
+  { key: 'auth.heroBenefitBilling', icon: 'pi pi-wallet' },
+  { key: 'auth.heroBenefitQr', icon: 'pi pi-qrcode' },
+  { key: 'auth.heroBenefitAi', icon: 'pi pi-sparkles' },
+]
 
 const isResidentInvite = computed(
   () => route.name === AppRouteNames.LOGIN && route.query.invite === '1',
@@ -239,6 +242,11 @@ watch(loginEmailError, (msg) => {
   if (!msg) loginErrorField.value = null
 }, { flush: 'sync' })
 
+/** "Session expired" is informational (blue notice); every other login message is an error. */
+const loginNoticeTone = computed(() =>
+  loginEmailError.value && loginEmailError.value === t('auth.sessionExpired') ? 'info' : 'error',
+)
+
 function setLoginError(message, field = null) {
   loginEmailError.value = message
   loginErrorField.value = field
@@ -313,6 +321,12 @@ function enterCompleteProfile({ token, identity, draft }) {
 
 /** US015: after a new admin registers, ask for the building, then go to plan selection. */
 const onboardingStep = ref(null) // null | 'building'
+
+/** Role pills only make sense on the sign-in / register / resident screens (not mid-onboarding). */
+const showRoleTabs = computed(
+  () => !isResidentInvite.value && !onboardingStep.value && !completeProfileMode.value,
+)
+const roleTab = computed(() => (isResidentLogin.value ? 'resident' : 'admin'))
 
 function onOnboardingBuildingSaved(building) {
   onboardingStep.value = null
@@ -623,439 +637,363 @@ watch(loginEmail, () => {
 })
 </script>
 
+
 <template>
   <div class="auth-page">
     <SkipLink />
-    <header class="auth-topbar">
-      <LocaleSwitch />
-    </header>
-    <main id="main-content" class="auth-main" role="main" tabindex="-1">
-      <div v-if="isResidentInvite" class="auth-shell">
-        <div v-if="inviteStep === 'welcome'" class="auth-card auth-card--centered">
-          <div class="auth-brand">
+
+    <div class="auth-panel">
+      <header class="auth-topbar">
+        <span class="auth-topbar__brand">
+          <span class="auth-badge auth-badge--sm">
             <img
               src="/logo-buildingfex.png"
               :alt="t('brand')"
-              class="auth-logo"
-              width="200"
-              height="48"
+              class="auth-badge__logo"
+              width="904"
+              height="276"
               decoding="async"
             />
-          </div>
+          </span>
+        </span>
+        <span class="auth-locale">
+          <LocaleSwitch />
+        </span>
+      </header>
 
-          <p v-if="inviteLoading" class="auth-subtitle">{{ t('auth.inviteLoading') }}</p>
-          <p v-else-if="inviteFetchError" class="auth-error" role="alert">
-            {{ inviteFetchError }}
-          </p>
-
-          <template v-else-if="inviteResident">
-            <h1 class="auth-title auth-title--center">{{ t('auth.inviteTitle') }}</h1>
-            <p class="auth-subtitle">{{ t('auth.inviteSubtitle') }}</p>
-
-            <ul class="auth-invite-list" role="list">
-              <li><strong>{{ t('app.residentNameLabel') }}:</strong> {{ inviteName }}</li>
-              <li><strong>{{ t('app.residentFloorLabel') }}:</strong> {{ inviteFloor }}</li>
-              <li><strong>{{ t('app.residentCodeLabel') }}:</strong> {{ inviteCodeDisplay }}</li>
-            </ul>
-
-            <Button
-              type="button"
-              class="auth-submit"
-              rounded
-              severity="info"
-              :label="t('auth.inviteAccept')"
-              @click="onResidentInviteAccept"
-            />
-          </template>
-        </div>
-
-        <div v-else class="auth-card auth-card--centered">
-          <div class="auth-brand">
-            <img
-              src="/logo-buildingfex.png"
-              :alt="t('brand')"
-              class="auth-logo"
-              width="200"
-              height="48"
-              decoding="async"
-            />
-          </div>
-          <h1 class="auth-title auth-title--center">{{ t('auth.inviteGoogleTitle') }}</h1>
-          <p class="auth-subtitle">{{ t('auth.inviteGoogleSubtitle') }}</p>
-
-          <div class="auth-form auth-form--narrow" :aria-label="t('auth.inviteGoogleAria')">
-            <p v-if="residentError" id="invite-error" class="auth-error" role="alert">{{ residentError }}</p>
-            <button
-              type="button"
-              class="auth-google"
-              :disabled="residentLoading"
-              @click="onResidentGoogleSignUp"
+      <main id="main-content" class="auth-main" role="main" tabindex="-1">
+        <div class="auth-shell" :class="{ 'auth-shell--wide': (isRegister && !onboardingStep) || completeProfileMode }">
+          <nav v-if="showRoleTabs" class="auth-roles" :aria-label="t('auth.roleTabsAria')" role="tablist">
+            <RouterLink
+              class="auth-role"
+              role="tab"
+              :class="{ 'auth-role--active': roleTab === 'admin' }"
+              :aria-selected="roleTab === 'admin'"
+              :to="{ name: AppRouteNames.LOGIN }"
             >
-              <span class="auth-google__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="18" height="18">
-                  <path fill="#4285F4" d="M23.49 12.27c0-.82-.07-1.64-.23-2.43H12v4.6h6.46a5.52 5.52 0 0 1-2.4 3.62v3h3.88c2.27-2.09 3.55-5.17 3.55-8.79Z" />
-                  <path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.95-2.94l-3.88-3c-1.08.72-2.47 1.14-4.07 1.14-3.13 0-5.78-2.11-6.73-4.96H1.27v3.09A12 12 0 0 0 12 24Z" />
-                  <path fill="#FBBC05" d="M5.27 14.24A7.2 7.2 0 0 1 4.89 12c0-.78.14-1.53.38-2.24V6.67H1.27A12 12 0 0 0 0 12c0 1.94.46 3.78 1.27 5.33l4-3.09Z" />
-                  <path fill="#EA4335" d="M12 4.75c1.76 0 3.34.6 4.59 1.79l3.44-3.44C17.95 1.14 15.23 0 12 0 7.31 0 3.23 2.69 1.27 6.67l4 3.09C6.22 6.86 8.87 4.75 12 4.75Z" />
-                </svg>
-              </span>
-              <span>{{ residentLoading ? t('auth.inviteGoogleLoading') : t('auth.inviteGoogleButton') }}</span>
-            </button>
+              <i class="pi pi-briefcase" aria-hidden="true" />
+              <span>{{ t('auth.roleAdmin') }}</span>
+            </RouterLink>
+            <RouterLink
+              class="auth-role"
+              role="tab"
+              :class="{ 'auth-role--active': roleTab === 'resident' }"
+              :aria-selected="roleTab === 'resident'"
+              :to="{ name: AppRouteNames.RESIDENT_LOGIN }"
+            >
+              <i class="pi pi-home" aria-hidden="true" />
+              <span>{{ t('auth.roleResident') }}</span>
+            </RouterLink>
+          </nav>
 
-            <p class="auth-divider" role="separator">{{ t('auth.orPasswordDivider') }}</p>
+          <!-- Resident invite (/login?invite=1&token=…) -->
+          <template v-if="isResidentInvite">
+            <section v-if="inviteStep === 'welcome'" class="auth-card">
+              <p class="auth-eyebrow">
+                <i class="pi pi-envelope" aria-hidden="true" />
+                {{ t('auth.inviteEyebrow') }}
+              </p>
+
+              <p v-if="inviteLoading" class="auth-notice auth-notice--info" role="status">
+                <i class="pi pi-spin pi-spinner auth-notice__icon" aria-hidden="true" />
+                <span>{{ t('auth.inviteLoading') }}</span>
+              </p>
+              <template v-else-if="inviteFetchError">
+                <p class="auth-notice auth-notice--error" role="alert">
+                  <i class="pi pi-exclamation-circle auth-notice__icon" aria-hidden="true" />
+                  <span>{{ inviteFetchError }}</span>
+                </p>
+                <p class="auth-helper">
+                  <RouterLink class="auth-link" :to="{ name: AppRouteNames.RESIDENT_LOGIN }">
+                    {{ t('auth.residentLoginLink') }}
+                  </RouterLink>
+                </p>
+              </template>
+
+              <template v-else-if="inviteResident">
+                <h1 class="auth-title">{{ t('auth.inviteTitle') }}</h1>
+                <p class="auth-subtitle">{{ t('auth.inviteSubtitle') }}</p>
+
+                <dl class="auth-invite" :aria-label="t('auth.inviteDetailsAria')">
+                  <div class="auth-invite__row">
+                    <dt>{{ t('app.residentNameLabel') }}</dt>
+                    <dd>{{ inviteName }}</dd>
+                  </div>
+                  <div class="auth-invite__row">
+                    <dt>{{ t('app.residentFloorLabel') }}</dt>
+                    <dd>{{ inviteFloor }}</dd>
+                  </div>
+                  <div class="auth-invite__row">
+                    <dt>{{ t('app.residentCodeLabel') }}</dt>
+                    <dd>{{ inviteCodeDisplay }}</dd>
+                  </div>
+                </dl>
+
+                <Button
+                  type="button"
+                  class="auth-submit"
+                  rounded
+                  :label="t('auth.inviteAccept')"
+                  @click="onResidentInviteAccept"
+                />
+              </template>
+            </section>
+
+            <section v-else class="auth-card">
+              <p class="auth-eyebrow">
+                <i class="pi pi-envelope" aria-hidden="true" />
+                {{ t('auth.inviteEyebrow') }}
+              </p>
+              <h1 class="auth-title">{{ t('auth.inviteGoogleTitle') }}</h1>
+              <p class="auth-subtitle">{{ t('auth.inviteGoogleSubtitle') }}</p>
+
+              <div class="auth-form" :aria-label="t('auth.inviteGoogleAria')">
+                <p v-if="residentError" id="invite-error" class="auth-notice auth-notice--error" role="alert">
+                  <i class="pi pi-exclamation-circle auth-notice__icon" aria-hidden="true" />
+                  <span>{{ residentError }}</span>
+                </p>
+                <button
+                  type="button"
+                  class="auth-google"
+                  :disabled="residentLoading"
+                  @click="onResidentGoogleSignUp"
+                >
+                  <span class="auth-google__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="18" height="18">
+                      <path fill="#4285F4" d="M23.49 12.27c0-.82-.07-1.64-.23-2.43H12v4.6h6.46a5.52 5.52 0 0 1-2.4 3.62v3h3.88c2.27-2.09 3.55-5.17 3.55-8.79Z" />
+                      <path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.95-2.94l-3.88-3c-1.08.72-2.47 1.14-4.07 1.14-3.13 0-5.78-2.11-6.73-4.96H1.27v3.09A12 12 0 0 0 12 24Z" />
+                      <path fill="#FBBC05" d="M5.27 14.24A7.2 7.2 0 0 1 4.89 12c0-.78.14-1.53.38-2.24V6.67H1.27A12 12 0 0 0 0 12c0 1.94.46 3.78 1.27 5.33l4-3.09Z" />
+                      <path fill="#EA4335" d="M12 4.75c1.76 0 3.34.6 4.59 1.79l3.44-3.44C17.95 1.14 15.23 0 12 0 7.31 0 3.23 2.69 1.27 6.67l4 3.09C6.22 6.86 8.87 4.75 12 4.75Z" />
+                    </svg>
+                  </span>
+                  <span>{{ residentLoading ? t('auth.inviteGoogleLoading') : t('auth.inviteGoogleButton') }}</span>
+                </button>
+
+                <p class="auth-divider" role="separator">{{ t('auth.orPasswordDivider') }}</p>
+
+                <form
+                  class="auth-form"
+                  :aria-label="t('auth.invitePasswordAria')"
+                  novalidate
+                  @submit.prevent="onResidentPasswordSignUp"
+                >
+                  <p class="auth-hint">{{ t('auth.invitePasswordHint') }}</p>
+                  <div class="auth-field">
+                    <label class="auth-label" for="inv-email">{{ t('auth.email') }}</label>
+                    <input
+                      id="inv-email"
+                      v-model="invitePwEmail"
+                      class="auth-input"
+                      type="email"
+                      name="email"
+                      autocomplete="email"
+                      :disabled="residentLoading"
+                      required
+                      :placeholder="t('auth.emailExample')"
+                      :aria-invalid="inviteErrorField === 'email' ? 'true' : 'false'"
+                      :aria-describedby="inviteErrorField === 'email' ? 'invite-error' : undefined"
+                    />
+                  </div>
+                  <div class="auth-field">
+                    <label class="auth-label" for="inv-password">{{ t('auth.password') }}</label>
+                    <input
+                      id="inv-password"
+                      v-model="invitePwPassword"
+                      class="auth-input"
+                      type="password"
+                      name="new-password"
+                      autocomplete="new-password"
+                      minlength="6"
+                      :disabled="residentLoading"
+                      required
+                      :placeholder="t('auth.passwordMinHint')"
+                      :aria-invalid="inviteErrorField === 'password' ? 'true' : 'false'"
+                      :aria-describedby="inviteErrorField === 'password' ? 'invite-error' : undefined"
+                    />
+                  </div>
+                  <div class="auth-field">
+                    <label class="auth-label" for="inv-confirm">{{ t('auth.passwordConfirmPlaceholder') }}</label>
+                    <input
+                      id="inv-confirm"
+                      v-model="invitePwConfirm"
+                      class="auth-input"
+                      type="password"
+                      name="confirm-password"
+                      autocomplete="new-password"
+                      minlength="6"
+                      :disabled="residentLoading"
+                      required
+                      :aria-invalid="inviteErrorField === 'confirm' ? 'true' : 'false'"
+                      :aria-describedby="inviteErrorField === 'confirm' ? 'invite-error' : undefined"
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    class="auth-submit"
+                    rounded
+                    :label="t('auth.invitePasswordSubmit')"
+                    :loading="residentLoading"
+                    :disabled="residentLoading"
+                  />
+                </form>
+              </div>
+            </section>
+          </template>
+
+          <!-- US015: building registration right after sign-up -->
+          <section v-else-if="onboardingStep === 'building'" class="auth-card">
+            <p class="auth-eyebrow">
+              <i class="pi pi-building" aria-hidden="true" />
+              {{ t('buildings.onboarding.step') }}
+            </p>
+            <h1 class="auth-title">{{ t('buildings.onboarding.title') }}</h1>
+            <p class="auth-subtitle">{{ t('buildings.onboarding.subtitle') }}</p>
+            <div class="auth-building">
+              <BuildingForm
+                :submit-label="t('buildings.onboarding.submit')"
+                show-skip
+                @saved="onOnboardingBuildingSaved"
+                @skip="onOnboardingSkip"
+              />
+            </div>
+          </section>
+
+          <!-- Auth ok but no business profile on the server yet -->
+          <section v-else-if="completeProfileMode" class="auth-card">
+            <h1 class="auth-title">{{ t('auth.completeProfileTitle') }}</h1>
+            <p class="auth-subtitle">{{ t('auth.completeProfileHint') }}</p>
 
             <form
-              class="auth-form auth-form--nested"
-              :aria-label="t('auth.invitePasswordAria')"
+              class="auth-form"
+              :aria-label="t('auth.ariaCompleteProfile')"
               novalidate
-              @submit.prevent="onResidentPasswordSignUp"
+              @submit.prevent="onCompleteProfileSubmit"
             >
-              <p class="auth-subtitle auth-subtitle--compact">{{ t('auth.invitePasswordHint') }}</p>
-              <div class="auth-field">
-                <input
-                  v-model="invitePwEmail"
-                  class="auth-input"
-                  type="email"
-                  name="email"
-                  autocomplete="email"
-                  :disabled="residentLoading"
-                  required
-                  :aria-label="t('auth.emailPlaceholder')"
-                  :placeholder="t('auth.emailPlaceholder')"
-                  :aria-invalid="inviteErrorField === 'email' ? 'true' : 'false'"
-                  :aria-describedby="inviteErrorField === 'email' ? 'invite-error' : undefined"
-                />
+              <div class="auth-grid">
+                <div class="auth-field">
+                  <label class="auth-label" for="reg-name">{{ t('auth.fullName') }}</label>
+                  <input
+                    id="reg-name"
+                    v-model="regName"
+                    class="auth-input"
+                    type="text"
+                    name="name"
+                    autocomplete="name"
+                    :disabled="completeProfileLoading"
+                    required
+                    v-bind="regFieldAttrs('name')"
+                    @input="clearRegError('name')"
+                  />
+                  <p v-if="regErrors.name" id="reg-name-error" class="bf-field-error">{{ t(regErrors.name) }}</p>
+                </div>
+                <div class="auth-field">
+                  <label class="auth-label" for="reg-email">{{ t('auth.email') }}</label>
+                  <input
+                    id="reg-email"
+                    v-model="regEmail"
+                    class="auth-input"
+                    type="email"
+                    name="email"
+                    autocomplete="email"
+                    :disabled="completeProfileLoading"
+                    required
+                    :placeholder="t('auth.emailExample')"
+                    v-bind="regFieldAttrs('email')"
+                    @input="clearRegError('email')"
+                  />
+                  <p v-if="regErrors.email" id="reg-email-error" class="bf-field-error">{{ t(regErrors.email) }}</p>
+                </div>
+                <div class="auth-field">
+                  <label class="auth-label" for="reg-dni">
+                    {{ t('auth.dniPlaceholder') }} <span class="auth-label__opt">({{ t('auth.optional') }})</span>
+                  </label>
+                  <input
+                    id="reg-dni"
+                    v-model="regDni"
+                    class="auth-input"
+                    type="text"
+                    name="dni"
+                    :disabled="completeProfileLoading"
+                    v-bind="regFieldAttrs('dni')"
+                    @input="clearRegError('dni')"
+                  />
+                  <p v-if="regErrors.dni" id="reg-dni-error" class="bf-field-error">{{ t(regErrors.dni) }}</p>
+                </div>
+                <div class="auth-field">
+                  <label class="auth-label" for="reg-company">
+                    {{ t('auth.companyPlaceholder') }} <span class="auth-label__opt">({{ t('auth.optional') }})</span>
+                  </label>
+                  <input
+                    id="reg-company"
+                    v-model="regCompany"
+                    class="auth-input"
+                    type="text"
+                    name="company"
+                    :disabled="completeProfileLoading"
+                    v-bind="regFieldAttrs('company')"
+                    @input="clearRegError('company')"
+                  />
+                  <p v-if="regErrors.company" id="reg-company-error" class="bf-field-error">{{ t(regErrors.company) }}</p>
+                </div>
+                <div class="auth-field">
+                  <label class="auth-label" for="reg-ruc">
+                    {{ t('auth.rucPlaceholder') }} <span class="auth-label__opt">({{ t('auth.optional') }})</span>
+                  </label>
+                  <input
+                    id="reg-ruc"
+                    v-model="regRuc"
+                    class="auth-input"
+                    type="text"
+                    name="ruc"
+                    :disabled="completeProfileLoading"
+                    v-bind="regFieldAttrs('ruc')"
+                    @input="clearRegError('ruc')"
+                  />
+                  <p v-if="regErrors.ruc" id="reg-ruc-error" class="bf-field-error">{{ t(regErrors.ruc) }}</p>
+                </div>
+                <div class="auth-field">
+                  <label class="auth-label" for="reg-address">
+                    {{ t('auth.addressPlaceholder') }} <span class="auth-label__opt">({{ t('auth.optional') }})</span>
+                  </label>
+                  <input
+                    id="reg-address"
+                    v-model="regAddress"
+                    class="auth-input"
+                    type="text"
+                    name="address"
+                    autocomplete="street-address"
+                    :disabled="completeProfileLoading"
+                    v-bind="regFieldAttrs('address')"
+                    @input="clearRegError('address')"
+                  />
+                  <p v-if="regErrors.address" id="reg-address-error" class="bf-field-error">{{ t(regErrors.address) }}</p>
+                </div>
               </div>
-              <div class="auth-field">
-                <input
-                  v-model="invitePwPassword"
-                  class="auth-input"
-                  type="password"
-                  name="new-password"
-                  autocomplete="new-password"
-                  minlength="6"
-                  :disabled="residentLoading"
-                  required
-                  :aria-label="t('auth.passwordPlaceholder')"
-                  :placeholder="t('auth.passwordPlaceholder')"
-                  :aria-invalid="inviteErrorField === 'password' ? 'true' : 'false'"
-                  :aria-describedby="inviteErrorField === 'password' ? 'invite-error' : undefined"
-                />
-              </div>
-              <div class="auth-field">
-                <input
-                  v-model="invitePwConfirm"
-                  class="auth-input"
-                  type="password"
-                  name="confirm-password"
-                  autocomplete="new-password"
-                  minlength="6"
-                  :disabled="residentLoading"
-                  required
-                  :aria-label="t('auth.passwordConfirmPlaceholder')"
-                  :placeholder="t('auth.passwordConfirmPlaceholder')"
-                  :aria-invalid="inviteErrorField === 'confirm' ? 'true' : 'false'"
-                  :aria-describedby="inviteErrorField === 'confirm' ? 'invite-error' : undefined"
-                />
-              </div>
+              <p v-if="completeProfileError" class="auth-notice auth-notice--error" role="alert">
+                <i class="pi pi-exclamation-circle auth-notice__icon" aria-hidden="true" />
+                <span>{{ completeProfileError }}</span>
+              </p>
               <Button
                 type="submit"
                 class="auth-submit"
                 rounded
-                severity="info"
-                :label="t('auth.invitePasswordSubmit')"
-                :loading="residentLoading"
-                :disabled="residentLoading"
+                :label="t('auth.completeProfileSubmit')"
+                :loading="completeProfileLoading"
+                :disabled="completeProfileLoading"
               />
             </form>
-          </div>
-        </div>
-      </div>
-      <div v-else class="auth-shell">
-        <nav class="auth-tabs" :aria-label="t('auth.tabsAria')" role="tablist">
-          <div class="auth-tabs__track">
-            <span
-              class="auth-tabs__pill"
-              :class="{
-                'auth-tabs__pill--register': authTab === 'register',
-                'auth-tabs__pill--resident': authTab === 'resident',
-              }"
-              aria-hidden="true"
-            />
-            <RouterLink
-              class="auth-tab"
-              role="tab"
-              :class="{ 'auth-tab--active': authTab === 'login' }"
-              :aria-selected="authTab === 'login'"
-              :to="{ name: AppRouteNames.LOGIN }"
-            >
-              {{ t('auth.loginTab') }}
-            </RouterLink>
-            <RouterLink
-              class="auth-tab"
-              role="tab"
-              :class="{ 'auth-tab--active': authTab === 'register' }"
-              :aria-selected="authTab === 'register'"
-              :to="{ name: AppRouteNames.REGISTER }"
-            >
-              {{ t('auth.registerTab') }}
-            </RouterLink>
-            <RouterLink
-              class="auth-tab"
-              role="tab"
-              :class="{ 'auth-tab--active': authTab === 'resident' }"
-              :aria-selected="authTab === 'resident'"
-              :to="{ name: AppRouteNames.RESIDENT_LOGIN }"
-            >
-              {{ t('auth.residentLoginTab') }}
-            </RouterLink>
-          </div>
-        </nav>
+          </section>
 
-        <div v-if="onboardingStep === 'building'" class="auth-card auth-card--centered">
-          <div class="auth-brand">
-            <img
-              src="/logo-buildingfex.png"
-              :alt="t('brand')"
-              class="auth-logo"
-              width="200"
-              height="48"
-              decoding="async"
-            />
-          </div>
-          <p class="auth-onboarding-step">{{ t('buildings.onboarding.step') }}</p>
-          <h1 class="auth-title auth-title--center">{{ t('buildings.onboarding.title') }}</h1>
-          <p class="auth-subtitle">{{ t('buildings.onboarding.subtitle') }}</p>
-          <div class="auth-form auth-form--narrow">
-            <BuildingForm
-              :submit-label="t('buildings.onboarding.submit')"
-              show-skip
-              @saved="onOnboardingBuildingSaved"
-              @skip="onOnboardingSkip"
-            />
-          </div>
-        </div>
+          <!-- Admin sign-in: two steps (email → password) -->
+          <section v-else-if="isAdminLogin" class="auth-card">
+            <h1 class="auth-title">{{ t('auth.loginTitle') }}</h1>
+            <p class="auth-subtitle">{{ t('auth.loginFirebaseHint') }}</p>
 
-        <div v-else-if="completeProfileMode" class="auth-card auth-card--centered">
-          <div class="auth-brand">
-            <img
-              src="/logo-buildingfex.png"
-              :alt="t('brand')"
-              class="auth-logo"
-              width="200"
-              height="48"
-              decoding="async"
-            />
-          </div>
-          <h1 class="auth-title auth-title--center">{{ t('auth.completeProfileTitle') }}</h1>
-          <p class="auth-subtitle">{{ t('auth.completeProfileHint') }}</p>
-
-          <form
-            class="auth-form auth-form--narrow"
-            :aria-label="t('auth.ariaCompleteProfile')"
-            novalidate
-            @submit.prevent="onCompleteProfileSubmit"
-          >
-            <div class="auth-field">
-              <input
-                v-model="regName"
-                class="auth-input"
-                type="text"
-                name="name"
-                autocomplete="name"
-                :disabled="completeProfileLoading"
-                required
-                :aria-label="t('auth.fullNamePlaceholder')"
-                :placeholder="t('auth.fullNamePlaceholder')"
-                v-bind="regFieldAttrs('name')"
-                @input="clearRegError('name')"
-              />
-              <p v-if="regErrors.name" id="reg-name-error" class="bf-field-error">{{ t(regErrors.name) }}</p>
-            </div>
-            <div class="auth-field">
-              <input
-                v-model="regEmail"
-                class="auth-input"
-                type="email"
-                name="email"
-                autocomplete="email"
-                :disabled="completeProfileLoading"
-                required
-                :aria-label="t('auth.emailPlaceholder')"
-                :placeholder="t('auth.emailPlaceholder')"
-                v-bind="regFieldAttrs('email')"
-                @input="clearRegError('email')"
-              />
-              <p v-if="regErrors.email" id="reg-email-error" class="bf-field-error">{{ t(regErrors.email) }}</p>
-            </div>
-            <div class="auth-field">
-              <input
-                v-model="regDni"
-                class="auth-input"
-                type="text"
-                name="dni"
-                :disabled="completeProfileLoading"
-                :aria-label="t('auth.dniPlaceholder')"
-                :placeholder="t('auth.dniPlaceholder')"
-                v-bind="regFieldAttrs('dni')"
-                @input="clearRegError('dni')"
-              />
-              <p v-if="regErrors.dni" id="reg-dni-error" class="bf-field-error">{{ t(regErrors.dni) }}</p>
-            </div>
-            <div class="auth-field">
-              <input
-                v-model="regCompany"
-                class="auth-input"
-                type="text"
-                name="company"
-                :disabled="completeProfileLoading"
-                :aria-label="t('auth.companyPlaceholder')"
-                :placeholder="t('auth.companyPlaceholder')"
-                v-bind="regFieldAttrs('company')"
-                @input="clearRegError('company')"
-              />
-              <p v-if="regErrors.company" id="reg-company-error" class="bf-field-error">{{ t(regErrors.company) }}</p>
-            </div>
-            <div class="auth-field">
-              <input
-                v-model="regRuc"
-                class="auth-input"
-                type="text"
-                name="ruc"
-                :disabled="completeProfileLoading"
-                :aria-label="t('auth.rucPlaceholder')"
-                :placeholder="t('auth.rucPlaceholder')"
-                v-bind="regFieldAttrs('ruc')"
-                @input="clearRegError('ruc')"
-              />
-              <p v-if="regErrors.ruc" id="reg-ruc-error" class="bf-field-error">{{ t(regErrors.ruc) }}</p>
-            </div>
-            <div class="auth-field">
-              <input
-                v-model="regAddress"
-                class="auth-input"
-                type="text"
-                name="address"
-                autocomplete="street-address"
-                :disabled="completeProfileLoading"
-                :aria-label="t('auth.addressPlaceholder')"
-                :placeholder="t('auth.addressPlaceholder')"
-                v-bind="regFieldAttrs('address')"
-                @input="clearRegError('address')"
-              />
-              <p v-if="regErrors.address" id="reg-address-error" class="bf-field-error">{{ t(regErrors.address) }}</p>
-            </div>
-            <p v-if="completeProfileError" class="auth-error" role="alert">{{ completeProfileError }}</p>
-            <Button
-              type="submit"
-              class="auth-submit"
-              :label="t('auth.completeProfileSubmit')"
-              :loading="completeProfileLoading"
-              :disabled="completeProfileLoading"
-            />
-          </form>
-        </div>
-
-        <div v-else-if="isAdminLogin" class="auth-card auth-card--centered">
-          <div class="auth-brand">
-            <img
-              src="/logo-buildingfex.png"
-              :alt="t('brand')"
-              class="auth-logo"
-              width="200"
-              height="48"
-              decoding="async"
-            />
-          </div>
-          <h1 class="auth-title auth-title--center">{{ t('auth.loginTitle') }}</h1>
-          <p class="auth-subtitle">{{ t('auth.loginFirebaseHint') }}</p>
-
-          <form class="auth-form auth-form--narrow" :aria-label="t('auth.ariaLogin')" novalidate @submit.prevent="handleLoginSubmit">
-            <div class="auth-field">
-              <input
-                v-model="loginEmail"
-                class="auth-input"
-                type="email"
-                name="email"
-                autocomplete="email"
-                :disabled="loginLoading"
-                required
-                :aria-label="t('auth.emailPlaceholder')"
-                :placeholder="t('auth.emailPlaceholder')"
-                :aria-invalid="loginErrorField === 'email' ? 'true' : 'false'"
-                :aria-describedby="loginErrorField === 'email' ? 'login-error' : undefined"
-              />
-            </div>
-            <div v-if="loginStep === 2" class="auth-field auth-field--step2">
-              <input
-                v-model="loginPassword"
-                class="auth-input"
-                type="password"
-                name="password"
-                autocomplete="current-password"
-                :disabled="loginLoading"
-                required
-                :aria-label="t('auth.passwordPlaceholder')"
-                :placeholder="t('auth.passwordPlaceholder')"
-                :aria-invalid="loginErrorField === 'password' ? 'true' : 'false'"
-                :aria-describedby="loginErrorField === 'password' ? 'login-error' : undefined"
-              />
-            </div>
-            <p v-if="loginEmailError" id="login-error" class="auth-error" role="alert">{{ loginEmailError }}</p>
-            <Button
-              type="submit"
-              class="auth-submit"
-              rounded
-              :label="loginStep === 1 ? t('auth.continue') : t('auth.signIn')"
-              :loading="loginLoading"
-              :disabled="loginLoading"
-              severity="info"
-            />
-          </form>
-        </div>
-
-        <div v-else-if="isResidentLogin" class="auth-card auth-card--centered">
-          <div class="auth-brand">
-            <img
-              src="/logo-buildingfex.png"
-              :alt="t('brand')"
-              class="auth-logo"
-              width="200"
-              height="48"
-              decoding="async"
-            />
-          </div>
-          <h1 class="auth-title auth-title--center">{{ t('auth.residentLoginTitle') }}</h1>
-          <p class="auth-subtitle">{{ t('auth.residentLoginSubtitle') }}</p>
-          <div class="auth-form auth-form--narrow" :aria-label="t('auth.residentLoginAria')">
-            <p v-if="loginEmailError" id="login-error" class="auth-error" role="alert">{{ loginEmailError }}</p>
-            <button
-              type="button"
-              class="auth-google"
-              :disabled="loginLoading"
-              @click="onLoginWithGoogle"
-            >
-              <span class="auth-google__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="18" height="18">
-                  <path fill="#4285F4" d="M23.49 12.27c0-.82-.07-1.64-.23-2.43H12v4.6h6.46a5.52 5.52 0 0 1-2.4 3.62v3h3.88c2.27-2.09 3.55-5.17 3.55-8.79Z" />
-                  <path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.95-2.94l-3.88-3c-1.08.72-2.47 1.14-4.07 1.14-3.13 0-5.78-2.11-6.73-4.96H1.27v3.09A12 12 0 0 0 12 24Z" />
-                  <path fill="#FBBC05" d="M5.27 14.24A7.2 7.2 0 0 1 4.89 12c0-.78.14-1.53.38-2.24V6.67H1.27A12 12 0 0 0 0 12c0 1.94.46 3.78 1.27 5.33l4-3.09Z" />
-                  <path fill="#EA4335" d="M12 4.75c1.76 0 3.34.6 4.59 1.79l3.44-3.44C17.95 1.14 15.23 0 12 0 7.31 0 3.23 2.69 1.27 6.67l4 3.09C6.22 6.86 8.87 4.75 12 4.75Z" />
-                </svg>
-              </span>
-              <span>{{ loginLoading ? t('auth.inviteGoogleLoading') : t('auth.inviteGoogleButton') }}</span>
-            </button>
-
-            <p class="auth-divider" role="separator">{{ t('auth.orPasswordDivider') }}</p>
-
-            <form
-              class="auth-form auth-form--nested"
-              :aria-label="t('auth.residentPasswordLoginAria')"
-              novalidate
-              @submit.prevent="onResidentPasswordLogin"
-            >
+            <form class="auth-form" :aria-label="t('auth.ariaLogin')" novalidate @submit.prevent="handleLoginSubmit">
               <div class="auth-field">
+                <label class="auth-label" for="login-email">{{ t('auth.email') }}</label>
                 <input
+                  id="login-email"
                   v-model="loginEmail"
                   class="auth-input"
                   type="email"
@@ -1063,14 +1001,15 @@ watch(loginEmail, () => {
                   autocomplete="email"
                   :disabled="loginLoading"
                   required
-                  :aria-label="t('auth.emailPlaceholder')"
-                  :placeholder="t('auth.emailPlaceholder')"
+                  :placeholder="t('auth.emailExample')"
                   :aria-invalid="loginErrorField === 'email' ? 'true' : 'false'"
                   :aria-describedby="loginErrorField === 'email' ? 'login-error' : undefined"
                 />
               </div>
-              <div class="auth-field">
+              <div v-if="loginStep === 2" class="auth-field auth-field--step2">
+                <label class="auth-label" for="login-password">{{ t('auth.password') }}</label>
                 <input
+                  id="login-password"
                   v-model="loginPassword"
                   class="auth-input"
                   type="password"
@@ -1078,385 +1017,526 @@ watch(loginEmail, () => {
                   autocomplete="current-password"
                   :disabled="loginLoading"
                   required
-                  :aria-label="t('auth.passwordPlaceholder')"
-                  :placeholder="t('auth.passwordPlaceholder')"
+                  :placeholder="t('auth.passwordEnter')"
                   :aria-invalid="loginErrorField === 'password' ? 'true' : 'false'"
                   :aria-describedby="loginErrorField === 'password' ? 'login-error' : undefined"
                 />
               </div>
+              <p
+                v-if="loginEmailError"
+                id="login-error"
+                class="auth-notice"
+                :class="`auth-notice--${loginNoticeTone}`"
+                role="alert"
+              >
+                <i
+                  class="pi auth-notice__icon"
+                  :class="loginNoticeTone === 'info' ? 'pi-info-circle' : 'pi-exclamation-circle'"
+                  aria-hidden="true"
+                />
+                <span>{{ loginEmailError }}</span>
+              </p>
               <Button
                 type="submit"
                 class="auth-submit"
                 rounded
-                severity="info"
-                :label="t('auth.signIn')"
+                :label="loginStep === 1 ? t('auth.continue') : t('auth.signIn')"
                 :loading="loginLoading"
                 :disabled="loginLoading"
               />
             </form>
-          </div>
-        </div>
 
-        <div v-else class="auth-card auth-card--centered">
-          <div class="auth-brand">
-            <img
-              src="/logo-buildingfex.png"
-              :alt="t('brand')"
-              class="auth-logo"
-              width="200"
-              height="48"
-              decoding="async"
-            />
-          </div>
-          <h1 class="auth-title auth-title--center">{{ t('auth.registerTitle') }}</h1>
-          <p class="auth-subtitle">{{ t('auth.registerFirebaseHint') }}</p>
+            <p class="auth-helper">
+              {{ t('auth.noAccountPrompt') }}
+              <RouterLink class="auth-link" :to="{ name: AppRouteNames.REGISTER }">
+                {{ t('auth.createAdminAccountLink') }}
+              </RouterLink>
+            </p>
+          </section>
 
-          <form class="auth-form auth-form--narrow" :aria-label="t('auth.ariaRegister')" novalidate @submit.prevent="onRegisterSubmit">
-            <div class="auth-field">
-              <input
-                v-model="regName"
-                class="auth-input"
-                type="text"
-                name="name"
-                autocomplete="name"
-                :disabled="registerLoading"
-                required
-                :aria-label="t('auth.fullNamePlaceholder')"
-                :placeholder="t('auth.fullNamePlaceholder')"
-                v-bind="regFieldAttrs('name')"
-                @input="clearRegError('name')"
-              />
-              <p v-if="regErrors.name" id="reg-name-error" class="bf-field-error">{{ t(regErrors.name) }}</p>
+          <!-- Resident sign-in: Google or email + password -->
+          <section v-else-if="isResidentLogin" class="auth-card">
+            <h1 class="auth-title">{{ t('auth.residentLoginTitle') }}</h1>
+            <p class="auth-subtitle">{{ t('auth.residentLoginSubtitle') }}</p>
+            <div class="auth-form" :aria-label="t('auth.residentLoginAria')">
+              <p
+                v-if="loginEmailError"
+                id="login-error"
+                class="auth-notice"
+                :class="`auth-notice--${loginNoticeTone}`"
+                role="alert"
+              >
+                <i
+                  class="pi auth-notice__icon"
+                  :class="loginNoticeTone === 'info' ? 'pi-info-circle' : 'pi-exclamation-circle'"
+                  aria-hidden="true"
+                />
+                <span>{{ loginEmailError }}</span>
+              </p>
+              <button
+                type="button"
+                class="auth-google"
+                :disabled="loginLoading"
+                @click="onLoginWithGoogle"
+              >
+                <span class="auth-google__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18">
+                    <path fill="#4285F4" d="M23.49 12.27c0-.82-.07-1.64-.23-2.43H12v4.6h6.46a5.52 5.52 0 0 1-2.4 3.62v3h3.88c2.27-2.09 3.55-5.17 3.55-8.79Z" />
+                    <path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.95-2.94l-3.88-3c-1.08.72-2.47 1.14-4.07 1.14-3.13 0-5.78-2.11-6.73-4.96H1.27v3.09A12 12 0 0 0 12 24Z" />
+                    <path fill="#FBBC05" d="M5.27 14.24A7.2 7.2 0 0 1 4.89 12c0-.78.14-1.53.38-2.24V6.67H1.27A12 12 0 0 0 0 12c0 1.94.46 3.78 1.27 5.33l4-3.09Z" />
+                    <path fill="#EA4335" d="M12 4.75c1.76 0 3.34.6 4.59 1.79l3.44-3.44C17.95 1.14 15.23 0 12 0 7.31 0 3.23 2.69 1.27 6.67l4 3.09C6.22 6.86 8.87 4.75 12 4.75Z" />
+                  </svg>
+                </span>
+                <span>{{ loginLoading ? t('auth.inviteGoogleLoading') : t('auth.inviteGoogleButton') }}</span>
+              </button>
+
+              <p class="auth-divider" role="separator">{{ t('auth.orPasswordDivider') }}</p>
+
+              <form
+                class="auth-form"
+                :aria-label="t('auth.residentPasswordLoginAria')"
+                novalidate
+                @submit.prevent="onResidentPasswordLogin"
+              >
+                <div class="auth-field">
+                  <label class="auth-label" for="res-email">{{ t('auth.email') }}</label>
+                  <input
+                    id="res-email"
+                    v-model="loginEmail"
+                    class="auth-input"
+                    type="email"
+                    name="email"
+                    autocomplete="email"
+                    :disabled="loginLoading"
+                    required
+                    :placeholder="t('auth.emailExample')"
+                    :aria-invalid="loginErrorField === 'email' ? 'true' : 'false'"
+                    :aria-describedby="loginErrorField === 'email' ? 'login-error' : undefined"
+                  />
+                </div>
+                <div class="auth-field">
+                  <label class="auth-label" for="res-password">{{ t('auth.password') }}</label>
+                  <input
+                    id="res-password"
+                    v-model="loginPassword"
+                    class="auth-input"
+                    type="password"
+                    name="password"
+                    autocomplete="current-password"
+                    :disabled="loginLoading"
+                    required
+                    :placeholder="t('auth.passwordEnter')"
+                    :aria-invalid="loginErrorField === 'password' ? 'true' : 'false'"
+                    :aria-describedby="loginErrorField === 'password' ? 'login-error' : undefined"
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  class="auth-submit"
+                  rounded
+                  :label="t('auth.signIn')"
+                  :loading="loginLoading"
+                  :disabled="loginLoading"
+                />
+              </form>
             </div>
-            <div class="auth-field">
-              <input
-                v-model="regEmail"
-                class="auth-input"
-                type="email"
-                name="email"
-                autocomplete="email"
+
+            <p class="auth-helper auth-helper--muted">
+              <i class="pi pi-envelope" aria-hidden="true" />
+              {{ t('auth.residentInviteHelp') }}
+            </p>
+          </section>
+
+          <!-- Admin registration (7 fields) -->
+          <section v-else class="auth-card">
+            <h1 class="auth-title">{{ t('auth.registerTitle') }}</h1>
+            <p class="auth-subtitle">{{ t('auth.registerFirebaseHint') }}</p>
+
+            <form class="auth-form" :aria-label="t('auth.ariaRegister')" novalidate @submit.prevent="onRegisterSubmit">
+              <div class="auth-grid">
+                <div class="auth-field">
+                  <label class="auth-label" for="reg-name">{{ t('auth.fullName') }}</label>
+                  <input
+                    id="reg-name"
+                    v-model="regName"
+                    class="auth-input"
+                    type="text"
+                    name="name"
+                    autocomplete="name"
+                    :disabled="registerLoading"
+                    required
+                    v-bind="regFieldAttrs('name')"
+                    @input="clearRegError('name')"
+                  />
+                  <p v-if="regErrors.name" id="reg-name-error" class="bf-field-error">{{ t(regErrors.name) }}</p>
+                </div>
+                <div class="auth-field">
+                  <label class="auth-label" for="reg-dni">{{ t('auth.dniPlaceholder') }}</label>
+                  <input
+                    id="reg-dni"
+                    v-model="regDni"
+                    class="auth-input"
+                    type="text"
+                    name="dni"
+                    autocomplete="off"
+                    inputmode="numeric"
+                    :disabled="registerLoading"
+                    required
+                    v-bind="regFieldAttrs('dni')"
+                    @input="clearRegError('dni')"
+                  />
+                  <p v-if="regErrors.dni" id="reg-dni-error" class="bf-field-error">{{ t(regErrors.dni) }}</p>
+                </div>
+                <div class="auth-field">
+                  <label class="auth-label" for="reg-email">{{ t('auth.email') }}</label>
+                  <input
+                    id="reg-email"
+                    v-model="regEmail"
+                    class="auth-input"
+                    type="email"
+                    name="email"
+                    autocomplete="email"
+                    :disabled="registerLoading"
+                    required
+                    :placeholder="t('auth.emailExample')"
+                    v-bind="regFieldAttrs('email')"
+                    @input="clearRegError('email')"
+                  />
+                  <p v-if="regErrors.email" id="reg-email-error" class="bf-field-error">{{ t(regErrors.email) }}</p>
+                </div>
+                <div class="auth-field">
+                  <label class="auth-label" for="reg-password">{{ t('auth.password') }}</label>
+                  <input
+                    id="reg-password"
+                    v-model="regPassword"
+                    class="auth-input"
+                    type="password"
+                    name="password"
+                    autocomplete="new-password"
+                    :disabled="registerLoading"
+                    required
+                    :placeholder="t('auth.passwordMinHint')"
+                    v-bind="regFieldAttrs('password')"
+                    @input="clearRegError('password')"
+                  />
+                  <p v-if="regErrors.password" id="reg-password-error" class="bf-field-error">{{ t(regErrors.password) }}</p>
+                </div>
+                <div class="auth-field">
+                  <label class="auth-label" for="reg-company">{{ t('auth.companyPlaceholder') }}</label>
+                  <input
+                    id="reg-company"
+                    v-model="regCompany"
+                    class="auth-input"
+                    type="text"
+                    name="company"
+                    autocomplete="organization"
+                    :disabled="registerLoading"
+                    required
+                    v-bind="regFieldAttrs('company')"
+                    @input="clearRegError('company')"
+                  />
+                  <p v-if="regErrors.company" id="reg-company-error" class="bf-field-error">{{ t(regErrors.company) }}</p>
+                </div>
+                <div class="auth-field">
+                  <label class="auth-label" for="reg-ruc">{{ t('auth.rucPlaceholder') }}</label>
+                  <input
+                    id="reg-ruc"
+                    v-model="regRuc"
+                    class="auth-input"
+                    type="text"
+                    name="ruc"
+                    autocomplete="off"
+                    inputmode="numeric"
+                    :disabled="registerLoading"
+                    required
+                    v-bind="regFieldAttrs('ruc')"
+                    @input="clearRegError('ruc')"
+                  />
+                  <p v-if="regErrors.ruc" id="reg-ruc-error" class="bf-field-error">{{ t(regErrors.ruc) }}</p>
+                </div>
+                <div class="auth-field auth-field--full">
+                  <label class="auth-label" for="reg-address">{{ t('auth.addressPlaceholder') }}</label>
+                  <input
+                    id="reg-address"
+                    v-model="regAddress"
+                    class="auth-input"
+                    type="text"
+                    name="address"
+                    autocomplete="street-address"
+                    :disabled="registerLoading"
+                    required
+                    v-bind="regFieldAttrs('address')"
+                    @input="clearRegError('address')"
+                  />
+                  <p v-if="regErrors.address" id="reg-address-error" class="bf-field-error">{{ t(regErrors.address) }}</p>
+                </div>
+              </div>
+              <p v-if="registerError" class="auth-notice auth-notice--error" role="alert">
+                <i class="pi pi-exclamation-circle auth-notice__icon" aria-hidden="true" />
+                <span>{{ registerError }}</span>
+              </p>
+              <Button
+                type="submit"
+                class="auth-submit"
+                rounded
+                :label="t('auth.createAccount')"
+                :loading="registerLoading"
                 :disabled="registerLoading"
-                required
-                :aria-label="t('auth.emailPlaceholder')"
-                :placeholder="t('auth.emailPlaceholder')"
-                v-bind="regFieldAttrs('email')"
-                @input="clearRegError('email')"
               />
-              <p v-if="regErrors.email" id="reg-email-error" class="bf-field-error">{{ t(regErrors.email) }}</p>
-            </div>
-            <div class="auth-field">
-              <input
-                v-model="regPassword"
-                class="auth-input"
-                type="password"
-                name="password"
-                autocomplete="new-password"
-                :disabled="registerLoading"
-                required
-                :aria-label="t('auth.passwordPlaceholder')"
-                :placeholder="t('auth.passwordPlaceholder')"
-                v-bind="regFieldAttrs('password')"
-                @input="clearRegError('password')"
-              />
-              <p v-if="regErrors.password" id="reg-password-error" class="bf-field-error">{{ t(regErrors.password) }}</p>
-            </div>
-            <div class="auth-field">
-              <input
-                v-model="regDni"
-                class="auth-input"
-                type="text"
-                name="dni"
-                autocomplete="off"
-                :disabled="registerLoading"
-                required
-                :aria-label="t('auth.dniPlaceholder')"
-                :placeholder="t('auth.dniPlaceholder')"
-                v-bind="regFieldAttrs('dni')"
-                @input="clearRegError('dni')"
-              />
-              <p v-if="regErrors.dni" id="reg-dni-error" class="bf-field-error">{{ t(regErrors.dni) }}</p>
-            </div>
-            <div class="auth-field">
-              <input
-                v-model="regAddress"
-                class="auth-input"
-                type="text"
-                name="address"
-                autocomplete="street-address"
-                :disabled="registerLoading"
-                required
-                :aria-label="t('auth.addressPlaceholder')"
-                :placeholder="t('auth.addressPlaceholder')"
-                v-bind="regFieldAttrs('address')"
-                @input="clearRegError('address')"
-              />
-              <p v-if="regErrors.address" id="reg-address-error" class="bf-field-error">{{ t(regErrors.address) }}</p>
-            </div>
-            <div class="auth-field">
-              <input
-                v-model="regCompany"
-                class="auth-input"
-                type="text"
-                name="company"
-                autocomplete="organization"
-                :disabled="registerLoading"
-                required
-                :aria-label="t('auth.companyPlaceholder')"
-                :placeholder="t('auth.companyPlaceholder')"
-                v-bind="regFieldAttrs('company')"
-                @input="clearRegError('company')"
-              />
-              <p v-if="regErrors.company" id="reg-company-error" class="bf-field-error">{{ t(regErrors.company) }}</p>
-            </div>
-            <div class="auth-field">
-              <input
-                v-model="regRuc"
-                class="auth-input"
-                type="text"
-                name="ruc"
-                autocomplete="off"
-                :disabled="registerLoading"
-                required
-                :aria-label="t('auth.rucPlaceholder')"
-                :placeholder="t('auth.rucPlaceholder')"
-                v-bind="regFieldAttrs('ruc')"
-                @input="clearRegError('ruc')"
-              />
-              <p v-if="regErrors.ruc" id="reg-ruc-error" class="bf-field-error">{{ t(regErrors.ruc) }}</p>
-            </div>
-            <p v-if="registerError" class="auth-error" role="alert">{{ registerError }}</p>
-            <Button
-              type="submit"
-              class="auth-submit"
-              rounded
-              :label="t('auth.createAccount')"
-              :loading="registerLoading"
-              :disabled="registerLoading"
-              severity="info"
-            />
-          </form>
+            </form>
+
+            <p class="auth-helper">
+              {{ t('auth.haveAccountPrompt') }}
+              <RouterLink class="auth-link" :to="{ name: AppRouteNames.LOGIN }">
+                {{ t('auth.signInLink') }}
+              </RouterLink>
+            </p>
+          </section>
         </div>
+      </main>
+    </div>
+
+    <!-- Brand panel (desktop only; after <main> in DOM so keyboard / SR users reach the form first) -->
+    <aside class="auth-aside" :aria-label="t('auth.heroAria')">
+      <span class="auth-badge">
+        <img
+          src="/logo-buildingfex.png"
+          :alt="t('brand')"
+          class="auth-badge__logo"
+          width="904"
+          height="276"
+          decoding="async"
+        />
+      </span>
+      <div class="auth-aside__body">
+        <p class="auth-aside__title">{{ t('auth.heroTitle') }}</p>
+        <p class="auth-aside__sub">{{ t('auth.heroSubtitle') }}</p>
+        <ul class="auth-benefits" role="list">
+          <li v-for="benefit in heroBenefits" :key="benefit.key" class="auth-benefits__item">
+            <span class="auth-benefits__icon" aria-hidden="true"><i :class="benefit.icon" /></span>
+            <span>{{ t(benefit.key) }}</span>
+          </li>
+        </ul>
       </div>
-    </main>
+      <div class="auth-aside__art">
+        <DashboardHeroArt />
+      </div>
+    </aside>
   </div>
 </template>
 
 <style scoped>
-.auth-onboarding-step {
-  margin: 0 0 0.25rem;
-  text-align: center;
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #0a84ff;
-}
-
+/* ---------- Shell: form panel (right) + navy brand panel (left, desktop) ---------- */
 .auth-page {
+  --auth-navy: #1e3a8a;
+  --auth-navy-hover: #172554;
+  --auth-ink: #0f172a;
+  --auth-muted: #64748b;
+  --auth-line: rgba(15, 23, 42, 0.07);
+  --auth-field-line: rgba(15, 23, 42, 0.16);
+
   min-height: 100vh;
   min-height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  background: var(--apple-bg-secondary, #f5f5f7);
-  font-family: var(--apple-font, -apple-system, system-ui, sans-serif);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  background: #f5f7fb;
+  color: var(--auth-ink);
+  font-family: var(--bf-font-body, var(--apple-font, system-ui, sans-serif));
   -webkit-font-smoothing: antialiased;
 }
 
+.auth-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Mobile: compact navy strip with the logo badge + language switch. */
 .auth-topbar {
   display: flex;
-  justify-content: flex-end;
-  padding: calc(env(safe-area-inset-top, 0px) + 0.85rem) 1.25rem 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: calc(env(safe-area-inset-top, 0px) + 0.85rem) 1rem 2.6rem;
+  background: var(--auth-navy);
+}
+
+.auth-locale {
+  display: inline-flex;
+  padding: 0.12rem;
+  border-radius: 999px;
+  background: #fff;
+}
+
+.auth-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.45rem 0.8rem;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.auth-badge--sm {
+  padding: 0.3rem 0.6rem;
+  border-radius: 12px;
+}
+
+.auth-badge__logo {
+  display: block;
+  height: 34px;
+  width: auto;
+}
+
+.auth-badge--sm .auth-badge__logo {
+  height: 26px;
 }
 
 .auth-main {
   flex: 1;
   display: flex;
-  align-items: center;
   justify-content: center;
-  padding: 1.25rem 1.25rem 2.5rem;
+  align-items: flex-start;
+  padding: 0 1rem 2.5rem;
+  margin-top: -1.75rem;
 }
 
+.auth-main:focus {
+  outline: none;
+}
+
+/* The white form card: role pills (when shown) + the active screen. */
 .auth-shell {
   width: 100%;
   max-width: 460px;
+  padding: 1.25rem 1.25rem 1.5rem;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid var(--auth-line);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-.auth-tabs {
-  margin-bottom: 1rem;
+.auth-shell--wide {
+  max-width: 620px;
 }
 
-.auth-tabs__track {
-  /* ~40% menos altura que antes (padding y gap escalados a 0.6) */
-  --tab-p: 0.21rem;
-  --tab-gap: 0.21rem;
+/* ---------- Brand panel ---------- */
+.auth-aside {
+  display: none;
+}
 
-  position: relative;
+/* ---------- Role pills ---------- */
+.auth-roles {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: var(--tab-gap);
-  padding: var(--tab-p);
+  margin: 0 0 1.35rem;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem;
+  padding: 0.25rem;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.06);
+  background: #e8eefc;
 }
 
-.auth-tabs__pill {
-  position: absolute;
-  top: var(--tab-p);
-  bottom: var(--tab-p);
-  left: var(--tab-p);
-  z-index: 0;
-  width: calc((100% - 2 * var(--tab-p) - 2 * var(--tab-gap)) / 3);
+.auth-role {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 2.5rem;
+  padding: 0.4rem 0.75rem;
   border-radius: 999px;
-  background: #ffffff;
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.07);
-  pointer-events: none;
-  transition: transform 0.42s cubic-bezier(0.34, 1.2, 0.64, 1);
-  will-change: transform;
-}
-
-.auth-tabs__pill--register {
-  transform: translateX(calc(100% + var(--tab-gap)));
-}
-
-.auth-tabs__pill--resident {
-  transform: translateX(calc(200% + 2 * var(--tab-gap)));
-}
-
-.auth-tab {
-  position: relative;
-  z-index: 1;
-  margin: 0;
-  text-align: center;
-  padding: 0.33rem 0.4rem;
-  font-size: 0.75rem;
-  line-height: 1.25;
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  color: var(--apple-text-secondary);
+  color: var(--auth-navy);
+  font-size: 0.875rem;
+  font-weight: 600;
   text-decoration: none;
-  border-radius: 999px;
-  transition:
-    color 0.28s ease,
-    font-weight 0.28s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
-.auth-tab:hover {
-  color: var(--apple-text);
+.auth-role .pi {
+  font-size: 0.85rem;
 }
 
-.auth-tab--active {
-  color: var(--apple-text);
-  font-weight: 700;
+.auth-role:hover:not(.auth-role--active) {
+  background: rgba(255, 255, 255, 0.55);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .auth-tabs__pill {
-    transition-duration: 0.01ms;
-  }
+.auth-role--active {
+  background: var(--auth-navy);
+  color: #fff;
+}
+
+.auth-role:focus-visible,
+.auth-link:focus-visible,
+.auth-google:focus-visible {
+  outline: 2px solid var(--auth-navy);
+  outline-offset: 2px;
 }
 
 .auth-card {
-  padding: 1.75rem 1.5rem 1.5rem;
-  border-radius: 20px;
-  background: #ffffff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.04),
-    0 12px 28px rgba(0, 0, 0, 0.06);
+  text-align: left;
 }
 
-.auth-card--centered {
-  text-align: center;
+/* ---------- Card content ---------- */
+.auth-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.85rem;
+  padding: 0.28rem 0.7rem;
+  border-radius: 999px;
+  background: #e8eefc;
+  color: var(--auth-navy);
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
-.auth-brand {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 1.35rem;
-}
-
-.auth-logo {
-  height: 44px;
-  width: auto;
-  max-width: min(220px, 72vw);
-  object-fit: contain;
-  object-position: center;
+.auth-eyebrow .pi {
+  font-size: 0.75rem;
 }
 
 .auth-title {
-  margin: 0 0 0.5rem;
-  font-size: clamp(1.35rem, 3vw, 1.6rem);
+  margin: 0 0 0.4rem;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.45rem;
   font-weight: 700;
-  letter-spacing: -0.03em;
-  line-height: 1.15;
-  color: #000000;
-}
-
-.auth-title--center {
-  text-align: center;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: var(--auth-ink);
 }
 
 .auth-subtitle {
-  margin: 0 0 1.5rem;
-  font-size: 0.9375rem;
-  line-height: 1.45;
-  letter-spacing: -0.015em;
-  color: #6e6e73;
-  text-align: center;
-}
-
-.auth-preview-hint {
-  margin: -1rem 0 1.25rem;
-  font-size: 0.8125rem;
-  line-height: 1.4;
-  letter-spacing: -0.01em;
-  color: #0071e3;
-  text-align: center;
+  margin: 0 0 1.35rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--auth-muted);
 }
 
 .auth-form {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.9rem;
 }
 
-.auth-form--narrow {
-  max-width: 100%;
-  margin: 0 auto;
-  width: 100%;
-}
-
-.auth-form--nested {
-  gap: 0.75rem;
-}
-
-.auth-subtitle--compact {
-  margin: 0;
-  font-size: 0.8125rem;
-}
-
-.auth-divider {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin: 0.25rem 0;
-  font-size: 0.8125rem;
-  color: #6e6e73;
-}
-
-.auth-divider::before,
-.auth-divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: #d2d2d7;
+.auth-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.9rem;
 }
 
 .auth-field {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  text-align: left;
+  min-width: 0;
+}
+
+.auth-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.auth-label__opt {
+  font-weight: 500;
+  color: var(--auth-muted);
 }
 
 .auth-field .bf-field-error {
@@ -1464,13 +1544,13 @@ watch(loginEmail, () => {
 }
 
 .auth-field--step2 {
-  animation: auth-field-in 0.35s cubic-bezier(0.25, 0.1, 0.25, 1) both;
+  animation: auth-field-in 0.3s ease both;
 }
 
 @keyframes auth-field-in {
   from {
     opacity: 0;
-    transform: translateY(-6px);
+    transform: translateY(-4px);
   }
   to {
     opacity: 1;
@@ -1480,106 +1560,348 @@ watch(loginEmail, () => {
 
 .auth-input {
   width: 100%;
-  box-sizing: border-box;
-  padding: 0.7rem 0.9rem;
-  font-size: 1rem;
-  font-family: inherit;
-  letter-spacing: -0.02em;
-  color: var(--apple-text);
-  background: #ffffff;
-  border: 1px solid #d2d2d7;
-  border-radius: 10px;
-  transition:
-    border-color 0.2s ease,
-    box-shadow 0.2s ease;
+  min-height: 2.75rem;
+  padding: 0.65rem 0.9rem;
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--auth-ink);
+  background: #fff;
+  border: 1px solid var(--auth-field-line);
+  border-radius: 12px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .auth-input::placeholder {
-  color: #86868b;
+  color: #94a3b8;
 }
 
 .auth-input:focus {
   outline: none;
-  border-color: rgba(var(--apple-blue-rgb), 0.55);
-  box-shadow: 0 0 0 3px rgba(var(--apple-blue-rgb), 0.15);
+  border-color: var(--auth-navy);
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.14);
 }
 
-.auth-error {
-  margin: -0.25rem 0 0;
+.auth-input:disabled {
+  background: #f8fafc;
+  cursor: not-allowed;
+}
+
+.auth-hint {
+  margin: 0;
   font-size: 0.8125rem;
-  line-height: 1.4;
-  color: #b42318;
-  text-align: center;
+  line-height: 1.45;
+  color: var(--auth-muted);
 }
 
-.auth-submit {
-  margin-top: 0.35rem;
+/* Inline notices (soft solid tints) */
+.auth-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0.7rem 0.85rem;
+  border-radius: 12px;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  font-weight: 500;
+}
+
+.auth-notice__icon {
+  flex-shrink: 0;
+  margin-top: 0.12rem;
+  font-size: 0.875rem;
+}
+
+.auth-notice--error {
+  background: #fde4e4;
+  color: #9f1c1c;
+}
+
+.auth-notice--info {
+  background: #e8eefc;
+  color: var(--auth-navy);
+}
+
+/* Primary pill (PrimeVue Button keeps its loading state) */
+.auth-submit.p-button {
   width: 100%;
+  min-height: 2.85rem;
+  margin-top: 0.25rem;
   justify-content: center;
+  border: 1px solid var(--auth-navy);
+  border-radius: 999px;
+  background: var(--auth-navy);
+  color: #fff;
+  font-weight: 600;
 }
 
-.auth-submit :deep(.p-button) {
-  width: 100%;
-  justify-content: center;
-  font-weight: 600 !important;
-  padding-top: 0.7rem !important;
-  padding-bottom: 0.7rem !important;
+.auth-submit.p-button:not(:disabled):hover {
+  border-color: var(--auth-navy-hover);
+  background: var(--auth-navy-hover);
+  color: #fff;
 }
 
-.auth-divider {
-  margin: 0.15rem 0 0;
-  font-size: 0.75rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #86868b;
-  text-align: center;
+.auth-submit.p-button:focus-visible {
+  outline: 2px solid var(--auth-navy);
+  outline-offset: 2px;
+  box-shadow: none;
 }
 
+.auth-submit :deep(.p-button-label) {
+  font-weight: 600;
+}
+
+/* Secondary pill: Google */
 .auth-google {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.65rem;
+  gap: 0.6rem;
   width: 100%;
-  min-height: 2.75rem;
+  min-height: 2.85rem;
   padding: 0.55rem 1rem;
-  border: 1px solid #dadce0;
+  border: 1px solid var(--auth-field-line);
   border-radius: 999px;
   background: #fff;
-  color: #1d1d1f;
+  color: var(--auth-ink);
   font: inherit;
-  font-size: 0.9375rem;
+  font-size: 0.9rem;
   font-weight: 600;
-  letter-spacing: -0.015em;
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .auth-google:hover:not(:disabled) {
-  background: #f8f9fa;
-  border-color: #c6c6c6;
+  background: #f5f7fb;
+  border-color: rgba(15, 23, 42, 0.24);
 }
 
 .auth-google:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
+  opacity: 0.6;
+  cursor: progress;
 }
 
 .auth-google__icon {
   display: inline-flex;
 }
 
-.auth-invite-list {
-  list-style: none;
-  margin: 0 0 1.25rem;
-  padding: 0.85rem 1rem;
-  text-align: left;
-  background: #f5f5f7;
-  border-radius: 12px;
+.auth-divider {
   display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  font-size: 0.95rem;
-  color: #1d1d1f;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.1rem 0;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--auth-muted);
+  text-align: center;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--auth-line);
+}
+
+.auth-helper {
+  margin: 1.25rem 0 0;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--auth-line);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--auth-muted);
+  text-align: center;
+}
+
+.auth-helper--muted .pi {
+  margin-right: 0.3rem;
+  font-size: 0.8rem;
+  vertical-align: -0.05em;
+}
+
+.auth-link {
+  color: var(--auth-navy);
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: 4px;
+}
+
+.auth-link:hover {
+  text-decoration: underline;
+}
+
+/* Invite details */
+.auth-invite {
+  margin: 0 0 1.25rem;
+  padding: 0.35rem 1rem;
+  border-radius: 14px;
+  background: #e8eefc;
+}
+
+.auth-invite__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.6rem 0;
+}
+
+.auth-invite__row + .auth-invite__row {
+  border-top: 1px solid rgba(30, 58, 138, 0.12);
+}
+
+.auth-invite dt {
+  font-size: 0.8125rem;
+  color: #475569;
+}
+
+.auth-invite dd {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--auth-ink);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- ≥ 600px: roomier card, 2-column register grid ---------- */
+@media (min-width: 600px) {
+  .auth-shell {
+    padding: 1.75rem 2rem 2rem;
+  }
+
+  .auth-title {
+    font-size: 1.6rem;
+  }
+
+  .auth-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.9rem 1rem;
+  }
+
+  .auth-field--full {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ---------- ≥ 960px: split layout ---------- */
+@media (min-width: 960px) {
+  .auth-page {
+    grid-template-columns: clamp(400px, 40vw, 560px) minmax(0, 1fr);
+  }
+
+  .auth-aside {
+    grid-column: 1;
+    grid-row: 1;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+    padding: 2.25rem 2.75rem 0;
+    overflow: hidden;
+    background: var(--auth-navy);
+    color: #fff;
+  }
+
+  .auth-aside .auth-badge {
+    align-self: flex-start;
+  }
+
+  .auth-aside__body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    max-width: 26rem;
+  }
+
+  .auth-aside__title {
+    margin: 0 0 0.75rem;
+    font-family: var(--bf-font-heading, inherit);
+    font-size: clamp(1.9rem, 2.6vw, 2.4rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+    color: #fff;
+  }
+
+  .auth-aside__sub {
+    margin: 0 0 1.75rem;
+    font-size: 0.975rem;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.78);
+  }
+
+  .auth-benefits {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+  }
+
+  .auth-benefits__item {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: #fff;
+  }
+
+  .auth-benefits__icon {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 50%;
+    background: #fff;
+    color: var(--auth-navy);
+  }
+
+  .auth-benefits__icon .pi {
+    font-size: 0.95rem;
+  }
+
+  .auth-aside__art {
+    width: 100%;
+    max-width: 440px;
+    aspect-ratio: 320 / 176;
+    margin: 0 auto;
+  }
+
+  .auth-panel {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .auth-topbar {
+    justify-content: flex-end;
+    padding: 1.25rem 1.5rem 0;
+    background: transparent;
+  }
+
+  .auth-topbar__brand {
+    display: none;
+  }
+
+  .auth-locale {
+    padding: 0;
+    background: transparent;
+  }
+
+  .auth-main {
+    align-items: center;
+    margin-top: 0;
+    padding: 1.5rem 2rem 3rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

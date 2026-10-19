@@ -1,0 +1,430 @@
+/*
+ * Incidents — PrimeVue Dialog shell (teleported to <body>, so unscoped and keyed by class).
+ * Mirrors the `.cme-dialog` look used by the redesigned collections view.
+ */
+.inc-dialog.p-dialog {
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  max-height: 90vh;
+}
+
+.inc-dialog .p-dialog-header {
+  padding: 1.1rem 1.25rem 0.6rem;
+  gap: 0.75rem;
+}
+
+.inc-dialog .p-dialog-title {
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.inc-dialog .p-dialog-content {
+  padding: 0.25rem 1.25rem 0.5rem;
+}
+
+.inc-dialog .p-dialog-footer {
+  padding: 0.75rem 1.25rem 1.1rem;
+  gap: 0.5rem;
+}
+
+.inc-dialog *,
+.inc-dialog *::before,
+.inc-dialog *::after {
+  box-sizing: border-box;
+}
+
+.inc-dialog .incd-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.inc-dialog .incd-form__row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.inc-dialog .incd-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.inc-dialog .incd-field > label,
+.inc-dialog .incd-field__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.inc-dialog .incd-field .p-inputtext,
+.inc-dialog .incd-field .p-select,
+.inc-dialog .incd-field .p-textarea {
+  border-radius: 12px;
+}
+
+.inc-dialog .incd-field .p-inputtext {
+  min-height: 2.6rem;
+}
+
+.inc-dialog .p-inputtext,
+.inc-dialog .p-select-label {
+  font-size: 0.9rem;
+}
+
+.inc-dialog .p-select {
+  border-radius: 12px;
+  min-height: 2.6rem;
+  align-items: center;
+}
+
+.inc-dialog .incd-field textarea {
+  width: 100%;
+  min-height: 6.5rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 12px;
+  background: #fff;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #0f172a;
+  resize: vertical;
+  outline: none;
+}
+
+.inc-dialog .incd-field textarea:focus {
+  border-color: #1e3a8a;
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.14);
+}
+
+.inc-dialog .incd-field textarea.is-invalid,
+.inc-dialog .incd-field .p-inputtext.is-invalid {
+  border-color: #d92d20;
+  box-shadow: 0 0 0 3px rgba(217, 45, 32, 0.12);
+}
+
+.inc-dialog .incd-field__hint,
+.inc-dialog .incd-hint {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: #6e6e73;
+}
+
+.inc-dialog .incd-field__error {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #b42318;
+}
+
+.inc-dialog .incd-alert {
+  margin: 0;
+  padding: 0.55rem 0.75rem;
+  border-radius: 12px;
+  background: #fde4e4;
+  color: #7f1d1d;
+  font-size: 0.8rem;
+}
+
+.inc-dialog .incd-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: 12px;
+  background: #e8eefc;
+  color: #1e3a8a;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.inc-dialog .incd-note--ok {
+  background: #e3f4e8;
+  color: #14532d;
+}
+
+.inc-dialog .incd-note--error {
+  background: #fde4e4;
+  color: #7f1d1d;
+}
+
+.inc-dialog .incd-note .pi {
+  margin-top: 0.12rem;
+  font-size: 0.75rem;
+}
+
+.inc-dialog .incd-text {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #0f172a;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.inc-dialog .incd-muted {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #6e6e73;
+}
+
+/* Detail blocks */
+.inc-dialog .incd-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.inc-dialog .incd-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.5rem;
+}
+
+.inc-dialog .incd-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 14px;
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  min-width: 0;
+}
+
+.inc-dialog .incd-block--resolved {
+  background: #e3f4e8;
+  border-color: transparent;
+}
+
+.inc-dialog .incd-block__title {
+  margin: 0;
+  font-size: 0.76rem;
+  font-weight: 650;
+  color: #475569;
+}
+
+.inc-dialog .incd-provider {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.inc-dialog .incd-provider__icon {
+  flex-shrink: 0;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 10px;
+  background: #fff;
+  color: #1e3a8a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+}
+
+.inc-dialog .incd-provider__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.inc-dialog .incd-provider__name {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 650;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.inc-dialog .incd-provider a {
+  color: #1e3a8a;
+  font-weight: 600;
+}
+
+/* Status segmented control */
+.inc-dialog .incd-segment {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.inc-dialog .incd-segment__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.42rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.inc-dialog .incd-segment__btn:hover:not(:disabled):not([aria-pressed='true']) {
+  background: #f1f5f9;
+}
+
+.inc-dialog .incd-segment__btn[aria-pressed='true'] {
+  background: #1e3a8a;
+  border-color: #1e3a8a;
+  color: #fff;
+}
+
+.inc-dialog .incd-segment__btn:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.inc-dialog .incd-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.inc-dialog .incd-segment__btn--open .incd-dot { color: #c2410c; }
+.inc-dialog .incd-segment__btn--in-progress .incd-dot { color: #1e3a8a; }
+.inc-dialog .incd-segment__btn--resolved .incd-dot { color: #15803d; }
+.inc-dialog .incd-segment__btn[aria-pressed='true'] .incd-dot { color: #fff; }
+
+.inc-dialog .incd-inline {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.inc-dialog .incd-inline > .p-select {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.inc-dialog .incd-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 2.45rem;
+  padding: 0.5rem 0.95rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  color: #1e3a8a;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.inc-dialog .incd-btn:hover:not(:disabled) {
+  background: #e8eefc;
+  border-color: transparent;
+}
+
+.inc-dialog .incd-btn--primary {
+  background: #1e3a8a;
+  border-color: #1e3a8a;
+  color: #fff;
+}
+
+.inc-dialog .incd-btn--primary:hover:not(:disabled) {
+  background: #172554;
+  border-color: #172554;
+}
+
+.inc-dialog .incd-btn--danger {
+  color: #b42318;
+}
+
+.inc-dialog .incd-btn--danger:hover:not(:disabled) {
+  background: #fde4e4;
+}
+
+.inc-dialog .incd-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.inc-dialog .incd-btn:focus-visible,
+.inc-dialog .incd-segment__btn:focus-visible {
+  outline: 2px solid #1e3a8a;
+  outline-offset: 2px;
+}
+
+.inc-dialog .incd-footer {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.inc-dialog .incd-field textarea.incd-textarea--compact {
+  min-height: 4.25rem;
+}
+
+.inc-dialog .incd-footer--end {
+  justify-content: flex-end;
+}
+
+/* Status / priority pills (shared by views and dialogs) */
+.inc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #334155;
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.inc-pill--open { background: #fdeee2; color: #9a3412; }
+.inc-pill--in-progress { background: #e8eefc; color: #1e3a8a; }
+.inc-pill--resolved { background: #e3f4e8; color: #15803d; }
+.inc-pill--low { background: #f1f5f9; color: #475569; }
+.inc-pill--medium { background: #fdf3dc; color: #92400e; }
+.inc-pill--high { background: #fdeee2; color: #9a3412; }
+.inc-pill--critical { background: #fde4e4; color: #b42318; }
+.inc-pill--soft { background: #f1f5f9; color: #475569; font-weight: 600; }
+
+.inc-pill__dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+@media (max-width: 480px) {
+  .inc-dialog .incd-form__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .inc-dialog .p-dialog-header,
+  .inc-dialog .p-dialog-content,
+  .inc-dialog .p-dialog-footer {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}

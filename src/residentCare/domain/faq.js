@@ -1,8 +1,10 @@
 export class Faq {
-  constructor({ id, questionKey, answerKey, keywords = [] }) {
+  constructor({ id, questionKey, answerKey, keywords = [], topic = '' }) {
     this.id = id;
     this.questionKey = questionKey;
     this.answerKey = answerKey;
+    /** Tema para los chips de filtro (ver FAQ_TOPICS); vacío = general. */
+    this.topic = topic;
     /** Términos de búsqueda (es/en, sin tildes) además del texto traducido. */
     this.keywords = keywords;
   }
@@ -20,17 +22,17 @@ export class ChatTicket {
 
 /** RF008: preguntas frecuentes de uso, alcance y contratación (textos en i18n supportResident.faqN*). */
 export const RESIDENT_FAQS = [
-  new Faq({ id: 'faq5', questionKey: 'supportResident.faq5Question', answerKey: 'supportResident.faq5Answer',
+  new Faq({ id: 'faq5', topic: 'payments', questionKey: 'supportResident.faq5Question', answerKey: 'supportResident.faq5Answer',
     keywords: ['pago', 'pagos', 'pagar', 'cuota', 'cuotas', 'conciliacion', 'recibo', 'deuda', 'mercado pago', 'tarjeta', 'finanzas', 'payment', 'pay', 'fee', 'receipt'] }),
-  new Faq({ id: 'faq6', questionKey: 'supportResident.faq6Question', answerKey: 'supportResident.faq6Answer',
+  new Faq({ id: 'faq6', topic: 'bookings', questionKey: 'supportResident.faq6Question', answerKey: 'supportResident.faq6Answer',
     keywords: ['reserva', 'reservas', 'reservar', 'area comun', 'piscina', 'parrilla', 'gimnasio', 'aforo', 'servicios', 'booking', 'reservation', 'common area', 'pool'] }),
-  new Faq({ id: 'faq7', questionKey: 'supportResident.faq7Question', answerKey: 'supportResident.faq7Answer',
+  new Faq({ id: 'faq7', topic: 'incidents', questionKey: 'supportResident.faq7Question', answerKey: 'supportResident.faq7Answer',
     keywords: ['incidencia', 'incidencias', 'reporte', 'reportar', 'falla', 'fuga', 'averia', 'mantenimiento', 'issue', 'incident', 'report', 'repair', 'leak'] }),
-  new Faq({ id: 'faq8', questionKey: 'supportResident.faq8Question', answerKey: 'supportResident.faq8Answer',
+  new Faq({ id: 'faq8', topic: 'guests', questionKey: 'supportResident.faq8Question', answerKey: 'supportResident.faq8Answer',
     keywords: ['invitado', 'invitados', 'visita', 'qr', 'codigo', 'generacion', 'acceso', 'guest', 'visitor', 'qr code'] }),
   new Faq({ id: 'faq9', questionKey: 'supportResident.faq9Question', answerKey: 'supportResident.faq9Answer',
     keywords: ['asistente', 'ia', 'chat', 'reglamento', 'actas', 'fuente', 'tope', 'consultas', 'administracion', 'junta', 'assistant', 'ai', 'rules', 'minutes', 'limit'] }),
-  new Faq({ id: 'faq10', questionKey: 'supportResident.faq10Question', answerKey: 'supportResident.faq10Answer',
+  new Faq({ id: 'faq10', topic: 'account', questionKey: 'supportResident.faq10Question', answerKey: 'supportResident.faq10Answer',
     keywords: ['idioma', 'ingles', 'espanol', 'cuenta', 'perfil', 'contrasena', 'sesion', 'invitacion', 'enlace', 'language', 'account', 'password', 'login'] }),
   new Faq({ id: 'faq1', questionKey: 'supportResident.faq1Question', answerKey: 'supportResident.faq1Answer',
     keywords: ['buildingfex', 'plataforma', 'que es', 'condominio', 'platform', 'what is'] }),
@@ -38,9 +40,22 @@ export const RESIDENT_FAQS = [
     keywords: ['plan', 'planes', 'suscripcion', 'precio', 'contratar', 'contratacion', 'departamentos', 'subscription', 'pricing', 'price'] }),
   new Faq({ id: 'faq3', questionKey: 'supportResident.faq3Question', answerKey: 'supportResident.faq3Answer',
     keywords: ['contacto', 'contactar', 'soporte', 'ayuda', 'equipo', 'correo', 'contact', 'support', 'help', 'team'] }),
-  new Faq({ id: 'faq4', questionKey: 'supportResident.faq4Question', answerKey: 'supportResident.faq4Answer',
+  new Faq({ id: 'faq4', topic: 'account', questionKey: 'supportResident.faq4Question', answerKey: 'supportResident.faq4Answer',
     keywords: ['datos', 'seguridad', 'privacidad', 'proteccion', 'data', 'security', 'privacy'] }),
 ]
+
+/** Chips de tema del encabezado de ayuda (residente). */
+export const FAQ_TOPICS = [
+  { id: 'payments', labelKey: 'supportResident.topicPayments', icon: 'pi-credit-card' },
+  { id: 'bookings', labelKey: 'supportResident.topicBookings', icon: 'pi-calendar' },
+  { id: 'incidents', labelKey: 'supportResident.topicIncidents', icon: 'pi-wrench' },
+  { id: 'guests', labelKey: 'supportResident.topicGuests', icon: 'pi-users' },
+  { id: 'account', labelKey: 'supportResident.topicAccount', icon: 'pi-user' },
+]
+
+export function filterFaqsByTopic(faqs, topic) {
+  return topic ? faqs.filter((faq) => faq.topic === topic) : faqs
+}
 
 /** Términos sugeridos por defecto cuando no hay coincidencias (US009 escenario 2). */
 export const DEFAULT_FAQ_SUGGESTIONS = {
