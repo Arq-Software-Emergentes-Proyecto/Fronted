@@ -251,7 +251,27 @@ function closeMenu({ restoreFocus = true } = {}) {
 }
 
 function onMenuKeydown(event) {
-  if (event.key === 'Escape' && isMenuOpen.value) closeMenu()
+  if (!isMenuOpen.value) return
+  if (event.key === 'Escape') {
+    closeMenu()
+    return
+  }
+  // Tab cycles inside the open panel (aria-modal).
+  if (event.key !== 'Tab') return
+  const panel = document.getElementById('app-sidebar')
+  const focusables = [...(panel?.querySelectorAll('a[href], button:not([disabled])') ?? [])].filter(
+    (el) => el.offsetParent !== null,
+  )
+  if (!focusables.length) return
+  const first = focusables[0]
+  const last = focusables[focusables.length - 1]
+  if (event.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement))) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && (document.activeElement === last || !panel.contains(document.activeElement))) {
+    event.preventDefault()
+    first.focus()
+  }
 }
 
 watch(isMenuOpen, (open) => {
