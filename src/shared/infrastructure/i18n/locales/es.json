@@ -858,7 +858,9 @@
       "spaceActionsFor": "Acciones de {name}"
     },
     "settingsClearSearch": "Limpiar búsqueda",
-    "generationPassClosedHint": "Ya no se puede registrar el ingreso con esta invitación."
+    "generationPassClosedHint": "Ya no se puede registrar el ingreso con esta invitación.",
+    "openMenu": "Abrir menú",
+    "closeMenu": "Cerrar menú"
   },
   "incidentStatusOpen": "Abierta",
   "incidentStatusInProgress": "En progreso",

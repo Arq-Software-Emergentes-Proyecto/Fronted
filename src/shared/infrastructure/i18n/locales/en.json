@@ -858,7 +858,9 @@
       "spaceActionsFor": "Actions for {name}"
     },
     "settingsClearSearch": "Clear search",
-    "generationPassClosedHint": "Check-in is no longer allowed with this invitation."
+    "generationPassClosedHint": "Check-in is no longer allowed with this invitation.",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu"
   },
   "incidentStatusOpen": "Open",
   "incidentStatusInProgress": "In Progress",

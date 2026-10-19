@@ -232,3 +232,9 @@ img {
   white-space: nowrap;
   border: 0;
 }
+
+/* Menú del celular abierto: la página de atrás no se desplaza. */
+html.bf-menu-open,
+html.bf-menu-open body {
+  overflow: hidden;
+}

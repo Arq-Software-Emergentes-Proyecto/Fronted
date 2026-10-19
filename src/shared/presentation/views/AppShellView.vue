@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import Toast from 'primevue/toast'
@@ -220,6 +220,61 @@ function onLogout() {
 function toggleAppLocale() {
   locale.value = locale.value === 'es' ? 'en' : 'es'
 }
+
+// Celular: el menú lateral se abre como panel flotante desde el botón de tres rayas.
+const MOBILE_QUERY = '(max-width: 720px)'
+const isMobile = ref(false)
+const isMenuOpen = ref(false)
+const menuButtonEl = ref(null)
+const menuCloseEl = ref(null)
+let mobileQuery = null
+
+const navBadgeCount = computed(() =>
+  appNavPrimaryItems.value.reduce((total, item) => total + (item.badge || 0), 0),
+)
+
+function syncMobile() {
+  isMobile.value = Boolean(mobileQuery?.matches)
+  if (!isMobile.value) isMenuOpen.value = false
+}
+
+async function openMenu() {
+  isMenuOpen.value = true
+  await nextTick()
+  menuCloseEl.value?.focus({ preventScroll: true })
+}
+
+function closeMenu({ restoreFocus = true } = {}) {
+  if (!isMenuOpen.value) return
+  isMenuOpen.value = false
+  if (restoreFocus) menuButtonEl.value?.focus({ preventScroll: true })
+}
+
+function onMenuKeydown(event) {
+  if (event.key === 'Escape' && isMenuOpen.value) closeMenu()
+}
+
+watch(isMenuOpen, (open) => {
+  document.documentElement.classList.toggle('bf-menu-open', open)
+})
+
+watch(
+  () => route.fullPath,
+  () => closeMenu({ restoreFocus: false }),
+)
+
+onMounted(() => {
+  mobileQuery = window.matchMedia(MOBILE_QUERY)
+  syncMobile()
+  mobileQuery.addEventListener('change', syncMobile)
+  document.addEventListener('keydown', onMenuKeydown)
+})
+
+onBeforeUnmount(() => {
+  mobileQuery?.removeEventListener('change', syncMobile)
+  document.removeEventListener('keydown', onMenuKeydown)
+  document.documentElement.classList.remove('bf-menu-open')
+})
 </script>
 
 <template>
@@ -249,7 +304,56 @@ function toggleAppLocale() {
       </template>
     </Toast>
     <BfConfirmDialog />
-    <aside class="app-shell__sidebar">
+    <header class="app-shell__mobilebar">
+      <button
+        ref="menuButtonEl"
+        type="button"
+        class="app-shell__menu-btn"
+        :aria-label="t('app.openMenu')"
+        :aria-expanded="isMenuOpen ? 'true' : 'false'"
+        aria-controls="app-sidebar"
+        @click="openMenu"
+      >
+        <span class="app-shell__menu-lines" aria-hidden="true"><span /><span /><span /></span>
+        <span v-if="navBadgeCount" class="app-shell__menu-dot" aria-hidden="true" />
+      </button>
+      <RouterLink
+        class="app-shell__mobilebar-brand"
+        :to="{ name: isResident ? AppRouteNames.APP_RESIDENT_DASHBOARD : AppRouteNames.APP_DASHBOARD }"
+      >
+        <img src="/logo-buildingfex.png" :alt="t('brand')" width="120" height="29" decoding="async" />
+      </RouterLink>
+      <RouterLink
+        class="app-shell__mobilebar-avatar"
+        :to="{ name: AppRouteNames.APP_SETTINGS }"
+        :aria-label="t('app.settings')"
+      >{{ sessionInitials }}</RouterLink>
+    </header>
+    <div
+      class="app-shell__backdrop"
+      :class="{ 'is-open': isMenuOpen }"
+      aria-hidden="true"
+      @click="closeMenu()"
+    />
+    <aside
+      id="app-sidebar"
+      class="app-shell__sidebar"
+      :class="{ 'is-open': isMenuOpen }"
+      :role="isMobile ? 'dialog' : undefined"
+      :aria-modal="isMobile ? 'true' : undefined"
+      :aria-label="isMobile ? t('app.sidebarNav') : undefined"
+      :inert="isMobile && !isMenuOpen"
+    >
+      <button
+        v-if="isMobile"
+        ref="menuCloseEl"
+        type="button"
+        class="app-shell__menu-close"
+        :aria-label="t('app.closeMenu')"
+        @click="closeMenu()"
+      >
+        <i class="pi pi-times" aria-hidden="true" />
+      </button>
       <header class="app-shell__top">
         <RouterLink 
           class="app-shell__brand" 
@@ -979,37 +1083,200 @@ function toggleAppLocale() {
 
 }
 
+/* ---------- Celular: barra superior + menú en panel flotante ---------- */
+.app-shell__mobilebar,
+.app-shell__backdrop,
+.app-shell__menu-close {
+  display: none;
+}
+
 @media (max-width: 720px) {
   .app-shell {
-    display: flex;
-    flex-direction: column;
+    --mobilebar-height: calc(3.6rem + 1px + env(safe-area-inset-top, 0px));
+    display: block;
+    padding-top: var(--mobilebar-height);
   }
 
-  .app-shell__sidebar {
+  /* Fija (no sticky): los contenedores con overflow de la página impiden que sticky se quede arriba. */
+  .app-shell__mobilebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 250;
+    box-sizing: border-box;
+    height: var(--mobilebar-height);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: calc(0.55rem + env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px)) 0.55rem
+      max(1rem, env(safe-area-inset-left, 0px));
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: saturate(1.4) blur(10px);
+    border-bottom: 1px solid var(--shell-border);
+  }
+
+  .app-shell__menu-btn {
     position: relative;
-    top: auto;
-    left: auto;
-    z-index: auto;
-    width: 100%;
+    flex-shrink: 0;
+    width: 2.5rem;
+    height: 2.5rem;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 1px solid var(--shell-border);
+    border-radius: 12px;
+    background: #ffffff;
+    color: var(--shell-text);
+    cursor: pointer;
+    transition: background-color 0.15s ease, transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .app-shell__menu-btn:active {
+    transform: scale(0.95);
+  }
+
+  .app-shell__menu-btn:focus-visible,
+  .app-shell__menu-close:focus-visible,
+  .app-shell__mobilebar-avatar:focus-visible {
+    outline: 2px solid #1e3a8a;
+    outline-offset: 2px;
+  }
+
+  .app-shell__menu-lines {
+    display: grid;
+    gap: 4px;
+    width: 18px;
+  }
+
+  .app-shell__menu-lines span {
+    display: block;
+    height: 2px;
+    border-radius: 2px;
+    background: currentColor;
+  }
+
+  .app-shell__menu-dot {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #e5484d;
+    box-shadow: 0 0 0 2px #ffffff;
+  }
+
+  .app-shell__mobilebar-brand {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .app-shell__mobilebar-brand img {
+    display: block;
+    width: auto;
+    height: 1.6rem;
+  }
+
+  .app-shell__mobilebar-avatar {
+    margin-left: auto;
+    flex-shrink: 0;
+    width: 2.1rem;
+    height: 2.1rem;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: #1e3a8a;
+    color: #ffffff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-decoration: none;
+  }
+
+  .app-shell__backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 310;
+    background: rgba(15, 23, 42, 0.35);
+    backdrop-filter: blur(3px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s ease;
+  }
+
+  .app-shell__backdrop.is-open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* El menú lateral pasa a ser un panel que entra desde la izquierda. */
+  .app-shell__sidebar {
+    position: fixed;
+    top: calc(10px + env(safe-area-inset-top, 0px));
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    left: calc(10px + env(safe-area-inset-left, 0px));
+    z-index: 320;
+    width: min(18.5rem, calc(100vw - 20px));
     min-width: 0;
     max-width: none;
     height: auto;
-    min-height: 0;
-    flex: 0 0 auto;
-    overflow-x: visible;
-    overflow-y: visible;
-    border-right: none;
-    border-bottom: 1px solid var(--shell-border);
+    padding: 1.1rem 0.9rem;
+    overflow-y: auto;
+    border: 1px solid var(--shell-border);
+    border-radius: 22px;
+    box-shadow: 0 24px 60px -12px rgba(15, 23, 42, 0.35);
+    transform: translate3d(calc(-100% - 24px), 0, 0);
+    visibility: hidden;
+    transition:
+      transform 0.42s cubic-bezier(0.5, 0, 0.75, 0),
+      visibility 0s linear 0.42s;
+  }
+
+  .app-shell__sidebar.is-open {
+    transform: none;
+    visibility: visible;
+    transition:
+      transform 0.55s cubic-bezier(0.16, 1, 0.3, 1),
+      visibility 0s;
+  }
+
+  .app-shell__menu-close {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    z-index: 1;
+    width: 2.125rem;
+    height: 2.125rem;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--shell-text);
+    cursor: pointer;
+  }
+
+  .app-shell__divider,
+  .app-shell__nav-cluster,
+  .app-shell__nav-track,
+  .app-shell__footer {
+    max-width: none;
+  }
+
+  .app-shell__nav-link {
+    font-size: 0.8125rem;
   }
 
   .app-shell__main {
     margin-left: 0;
-    flex: 1;
     min-width: 0;
     min-height: 0;
   }
 
-  /* Stacked nav + chat: let the page scroll instead of squeezing the conversation into the leftover height. */
+  /* Chat: let the page scroll instead of squeezing the conversation into the leftover height. */
   .app-shell--chat {
     height: auto;
     min-height: 100vh;
@@ -1022,39 +1289,16 @@ function toggleAppLocale() {
     max-height: none;
     overflow: visible;
   }
+}
 
-  .app-shell__divider,
-  .app-shell__nav-cluster,
-  .app-shell__nav-track,
-  .app-shell__footer {
-    max-width: min(16rem, 100%);
-  }
-
-  .app-shell__nav-link {
-    padding: 0.45rem 0.5rem;
-    font-size: 0.8125rem;
-  }
-
-  .app-shell__footer {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .app-shell__chip--footer,
-  .app-shell__chip--danger {
-    width: auto;
-    flex: 1 1 auto;
-    min-width: min(100%, 8rem);
-    justify-content: center;
-  }
-
-  .app-shell__lang-switch-btn {
-    flex: 1 1 100%;
-    max-width: 11.25rem;
+@media (max-width: 720px) and (prefers-reduced-motion: reduce) {
+  .app-shell__sidebar,
+  .app-shell__sidebar.is-open,
+  .app-shell__backdrop {
+    transition-duration: 0.01ms;
   }
 }
+
 .app-shell__nav-badge {
   position: absolute;
   top: 50%;
