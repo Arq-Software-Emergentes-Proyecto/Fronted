@@ -1200,7 +1200,21 @@
     "kpiActiveDepts": "Active units",
     "kpiAvailable": "Available",
     "kpiAccumulatedDebt": "Outstanding debt",
-    "incidentsEmpty": "No recent incidents."
+    "incidentsEmpty": "No recent incidents.",
+    "greeting": "Hi, {name}",
+    "quickActions": "Quick actions",
+    "quickGenerate": "Generate receipts",
+    "quickAnnouncement": "New announcement",
+    "quickIncidents": "View incidents",
+    "occupancy": "{pct}% occupancy",
+    "statusCritical": "Critical",
+    "statusHealthy": "Under control",
+    "statusNoBudget": "No budget",
+    "thresholdUsage": "{pct}% of the critical threshold",
+    "last6Months": "Last 6 months",
+    "net": "Net",
+    "openIncidents": "{n} unresolved",
+    "viewAll": "View all"
   },
   "residentFinance": {
     "totalDue": "Total due",

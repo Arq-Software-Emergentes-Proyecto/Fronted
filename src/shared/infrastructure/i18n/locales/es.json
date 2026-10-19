@@ -1200,7 +1200,21 @@
     "kpiActiveDepts": "Departamentos activos",
     "kpiAvailable": "Disponibles",
     "kpiAccumulatedDebt": "Deuda acumulada",
-    "incidentsEmpty": "No hay incidencias recientes."
+    "incidentsEmpty": "No hay incidencias recientes.",
+    "greeting": "Hola, {name}",
+    "quickActions": "Accesos rápidos",
+    "quickGenerate": "Generar recibos",
+    "quickAnnouncement": "Nuevo comunicado",
+    "quickIncidents": "Ver incidencias",
+    "occupancy": "{pct}% de ocupación",
+    "statusCritical": "Crítico",
+    "statusHealthy": "Bajo control",
+    "statusNoBudget": "Sin presupuesto",
+    "thresholdUsage": "{pct}% del umbral crítico",
+    "last6Months": "Últimos 6 meses",
+    "net": "Neto",
+    "openIncidents": "{n} sin resolver",
+    "viewAll": "Ver todas"
   },
   "residentFinance": {
     "totalDue": "Total a pagar",
