@@ -637,6 +637,8 @@ const chartOptions = ref({
 }
 
 .kpi-grid {
+  /* Containing block for absolutely positioned (visually-hidden) children so they stay in the scroller. */
+  position: relative;
   display: flex;
   flex-direction: row;
   gap: 0.85rem;

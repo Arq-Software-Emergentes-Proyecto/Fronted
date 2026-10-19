@@ -15,7 +15,7 @@ const savingKey = ref('')
 const rangeFilter = ref('all')
 const actionError = ref('')
 
-// Concierge QR validation (US027): VALID / EXPIRED ("Invitación Expirada") / CANCELLED.
+// Concierge QR validation (US027): VALID / NOT_YET_VALID / EXPIRED ("Invitación Expirada") / CANCELLED.
 const passInput = ref('')
 const passToken = ref('')
 const pass = ref(null)
@@ -84,6 +84,7 @@ function passExpired(r) {
 
 function checkInRefusalMessage(error) {
   if (error?.code === 'GUEST_PASS_EXPIRED') return t('socialSpaces.checkInRefusedExpired')
+  if (error?.code === 'GUEST_PASS_NOT_YET_VALID') return t('socialSpaces.checkInRefusedNotYetValid')
   if (error?.code === 'GUEST_PASS_CANCELLED') return t('socialSpaces.checkInRefusedCancelled')
   return t('socialSpaces.checkInError')
 }
@@ -127,6 +128,8 @@ async function onPassCheckIn(guestId, checkedIn = true) {
     passError.value = checkInRefusalMessage(error)
     if (error?.status === 410 && pass.value) {
       pass.value = { ...pass.value, valid: false, status: error?.payload?.status ?? 'EXPIRED' }
+    } else if (error?.code === 'GUEST_PASS_NOT_YET_VALID' && pass.value) {
+      pass.value = { ...pass.value, valid: false, status: 'NOT_YET_VALID' }
     }
   } finally {
     passSavingKey.value = ''
@@ -137,6 +140,7 @@ const passStatusLabel = computed(() => {
   const status = pass.value?.status
   if (status === 'VALID') return t('socialSpaces.passValid')
   if (status === 'CANCELLED') return t('socialSpaces.passCancelled')
+  if (status === 'NOT_YET_VALID') return t('socialSpaces.passNotYetValid')
   return t('socialSpaces.passExpired')
 })
 
@@ -167,7 +171,11 @@ async function onGuestCheckedIn(r, guest, checkedIn) {
       reservations.value[idx] = updated
     }
   } catch (error) {
-    if (error?.status === 410 || error?.code === 'GUEST_PASS_EXPIRED') {
+    if (
+      error?.status === 410 ||
+      error?.code === 'GUEST_PASS_EXPIRED' ||
+      error?.code === 'GUEST_PASS_NOT_YET_VALID'
+    ) {
       actionError.value = checkInRefusalMessage(error)
     }
     await load()
@@ -487,6 +495,11 @@ onMounted(load)
 .gen-pass-status--cancelled {
   background: #fdecea;
   color: #b42318;
+}
+
+.gen-pass-status--not_yet_valid {
+  background: #fff4e5;
+  color: #8a4b00;
 }
 
 .gen-validator .gen-card__title {

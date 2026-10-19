@@ -167,7 +167,8 @@ const calendarMonthLabel = computed(() => {
     month: 'long',
     year: 'numeric',
   })
-  return fmt.format(calendarMonth.value)
+  const label = fmt.format(calendarMonth.value)
+  return label.charAt(0).toUpperCase() + label.slice(1)
 })
 
 function formatFriendlyDate(dateKey) {
@@ -884,7 +885,9 @@ function goToGuests() {
 .resident-modal__title-suffix--block {
   display: block;
   margin: 0.15rem 0 0.7rem;
-  text-transform: capitalize;
+}
+.resident-modal__title-suffix--block::first-letter {
+  text-transform: uppercase;
 }
 
 .resident-modal__form {
@@ -1067,7 +1070,6 @@ function goToGuests() {
   font-weight: 600;
   font-size: 0.95rem;
   color: #1d1d1f;
-  text-transform: capitalize;
   letter-spacing: -0.01em;
 }
 
@@ -1288,7 +1290,6 @@ function goToGuests() {
   background: #e8f5e9;
   color: #1b7a3d;
   font-size: 0.825rem;
-  text-transform: capitalize;
 }
 
 .calendar__selected .pi {

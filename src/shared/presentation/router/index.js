@@ -44,6 +44,8 @@ const RESIDENT_APP_ROUTE_NAMES = new Set([
   AppRouteNames.APP_SETTINGS,
 ])
 
+const RESIDENT_SURFACE = 'resident'
+
 const PUBLIC_ROUTE_NAMES = new Set([
   AppRouteNames.LOGIN,
   AppRouteNames.REGISTER,
@@ -66,6 +68,9 @@ const router = createRouter({
     {
       path: AppPaths.APP,
       component: AppShellView,
+      // Guards decide from matched route records (vue-router matches paths
+      // case-insensitively, so string checks on `to.path` could be bypassed with /APP/...).
+      meta: { requiresAuth: true },
       children: [
         { path: '', name: AppRouteNames.APP_DASHBOARD, component: AppDashboardView },
         {
@@ -95,31 +100,37 @@ const router = createRouter({
           path: 'resident/dashboard',
           name: AppRouteNames.APP_RESIDENT_DASHBOARD,
           component: AppResidentDashboardView,
+          meta: { surface: RESIDENT_SURFACE },
         },
         {
           path: 'resident/finance',
           name: AppRouteNames.APP_RESIDENT_FINANCE,
           component: AppResidentFinanceView,
+          meta: { surface: RESIDENT_SURFACE },
         },
         {
           path: 'resident/services',
           name: AppRouteNames.APP_RESIDENT_SERVICES,
           component: AppResidentServicesView,
+          meta: { surface: RESIDENT_SURFACE },
         },
         {
           path: 'resident/generation',
           name: AppRouteNames.APP_RESIDENT_GENERATION,
           component: AppResidentGenerationView,
+          meta: { surface: RESIDENT_SURFACE },
         },
         {
           path: 'resident/incidents',
           name: AppRouteNames.APP_RESIDENT_INCIDENTS,
           component: AppResidentIncidentsView,
+          meta: { surface: RESIDENT_SURFACE },
         },
         {
           path: 'resident/support',
           name: AppRouteNames.APP_RESIDENT_SUPPORT,
           component: AppResidentSupportView,
+          meta: { surface: RESIDENT_SURFACE },
         },
       ],
     },
@@ -131,15 +142,21 @@ const router = createRouter({
   },
 })
 
-// Resident surface = /app/resident or /app/resident/*; admin pages like /app/resident-help share the prefix but not the segment.
+/** Protected /app shell (any casing of the URL — decided from matched records). */
+function requiresAuth(to) {
+  return to.matched.some((record) => record.meta?.requiresAuth)
+}
+
+// Resident surface = children tagged `surface: 'resident'` (/app/resident/*). Admin pages such as
+// /app/resident-help share the prefix but are not tagged, so they stay on the admin surface.
 function wantsResidentSurface(to) {
-  return to.path === '/app/resident' || to.path.startsWith('/app/resident/')
+  return to.matched.some((record) => record.meta?.surface === RESIDENT_SURFACE)
 }
 
 router.beforeEach((to) => {
   // Wireframe mode: keep login/register visible for screenshots; any submit still lets you in.
   // Only auto-provision a demo session when entering /app.
-  if (OPEN_WIREFRAME_ACCESS && to.path.startsWith('/app')) {
+  if (OPEN_WIREFRAME_ACCESS && requiresAuth(to)) {
     const hasValidPreviewSession =
       getSessionRole() &&
       getAccessToken() &&
@@ -166,7 +183,7 @@ router.beforeEach((to) => {
   if (PUBLIC_ROUTE_NAMES.has(to.name)) {
     return true
   }
-  if (!to.path.startsWith('/app')) {
+  if (!requiresAuth(to)) {
     return true
   }
 

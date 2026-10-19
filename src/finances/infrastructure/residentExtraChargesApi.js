@@ -2,7 +2,7 @@ import { apiClient } from '@/shared/infrastructure/api/apiClient.js'
 import { withOwnerParams } from '@/shared/infrastructure/api/ownerQuery.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
 import { apiError } from '@/shared/infrastructure/api/utils.js'
-import { currentStatementMonthKey, computeChargeDates } from '../domain/billingCycle.js'
+import { currentStatementMonthKey, computeChargeDates, todayYmd } from '../domain/billingCycle.js'
 
 function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100
@@ -41,10 +41,12 @@ async function applyExtraToReceipt(residentId, amount, title) {
   }
 
   const ownerId = getActiveDataOwnerId()
+  // kind 'extra': a standalone extra-charge receipt never counts as (or collides with) the monthly fee receipt.
   await apiClient.post('/receipts', {
     id: `extra-${Date.now()}`,
+    kind: 'extra',
     residentId,
-    issueDate: new Date().toISOString().slice(0, 10),
+    issueDate: todayYmd(),
     dueDate: dates.paymentDue || dates.billingEnd,
     amount: 0,
     extraCharges: amount,

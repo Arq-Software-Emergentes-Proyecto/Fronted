@@ -3,6 +3,7 @@ import {
   SUBSCRIPTION_PLAN_PRICES_PEN,
   SUBSCRIPTION_PLAN_RESIDENT_LIMITS,
 } from '@/billing/domain/subscriptionPlans.js'
+import { suggestPlanForDepartments } from '@/billing/domain/planCatalog.js'
 import { createSeedDb, MOCK_DB_VERSION } from './seed.js'
 
 export const MOCK_DB_STORAGE_KEY = 'buildingfex.localMockDb.v2'
@@ -293,6 +294,7 @@ export function subscriptionSnapshot(ownerId) {
   }
   const trialMsLeft = new Date(row.trialEndsAt).getTime() - Date.now()
   const trialExpired = !isPaid && trialMsLeft <= 0
+  const building = queryCollection('buildings', { ownerAdminId: ownerId })[0] ?? null
   return {
     planId,
     residentLimit,
@@ -309,8 +311,8 @@ export function subscriptionSnapshot(ownerId) {
     maxDepartments: residentLimit,
     monthlyAiQueries: SUBSCRIPTION_PLAN_AI_QUERY_CAPS[planId] ?? 150,
     billableDepartments: residentsCount,
-    buildingId: null,
-    suggestedPlanId: null,
+    buildingId: building?.id ?? null,
+    suggestedPlanId: building ? suggestPlanForDepartments(building.departmentCount) : null,
   }
 }
 

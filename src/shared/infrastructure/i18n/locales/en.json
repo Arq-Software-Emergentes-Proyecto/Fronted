@@ -283,7 +283,9 @@
     "netBalanceMonth": "Month",
     "netIncome": "Income (payments received)",
     "netExpenses": "Operating expenses",
-    "netBalanceHint": "Income minus operating expenses recorded in {month}."
+    "netBalanceHint": "Income minus operating expenses recorded in {month}.",
+    "netBalanceLoadError": "Could not load the balance for this month. Try again.",
+    "netBalanceMonthInvalid": "Pick a valid month (YYYY-MM)."
   },
   "a11y": {
     "skipToContent": "Skip to main content"
@@ -357,6 +359,7 @@
     "passValid": "Valid invitation",
     "passExpired": "Invitation Expired",
     "passCancelled": "Booking cancelled",
+    "passNotYetValid": "Invitation not valid yet",
     "passNotFound": "Invitation not found",
     "validatorTitle": "Validate invitation (QR)",
     "validatorHint": "Scan the guest's QR or paste the invitation link / code.",
@@ -365,11 +368,13 @@
     "validatorCheckInAll": "Check in everyone",
     "validatorHost": "Host",
     "checkInRefusedExpired": "Invitation Expired: check-in is not allowed.",
+    "checkInRefusedNotYetValid": "Invitation not valid yet: check-in opens on the booking date, 1 hour before the start time.",
     "checkInRefusedCancelled": "The booking was cancelled: check-in is not allowed.",
     "checkInError": "Could not register the check-in.",
     "guestCancelledTitle": "Booking cancelled",
     "guestCancelledBody": "The resident cancelled this booking; the invitation is no longer valid.",
-    "guestExpiredBody": "Access with this link and QR code ended 2 hours after the booking finished."
+    "guestExpiredBody": "Access with this link and QR code ended 2 hours after the booking finished.",
+    "guestNotYetValidBody": "Your pass becomes valid on the booking date, 1 hour before the start time. Keep this link and show it at the front desk then."
   },
   "app": {
     "residentAccountDeactivated": "Account deactivated",
@@ -619,6 +624,7 @@
     "settingsPlanChangeError": "Could not change plan.",
     "settingsPlanDowngradeError": "Cannot downgrade: you have more residents than the new plan allows.",
     "settingsPlanCheckoutError": "Could not start Mercado Pago checkout.",
+    "settingsPlanCheckoutUnavailable": "Mercado Pago payments are not available right now. Please try again later.",
     "settingsPlanConfirmError": "Could not confirm payment. If you already paid, wait a few minutes or contact support.",
     "settingsPlanPaymentFailed": "Payment was rejected or cancelled.",
     "settingsPlanPaymentPending": "Payment pending. We will notify you when it is confirmed.",
@@ -668,6 +674,8 @@
     "incidentsResolved": "Resolved",
     "incidentsEmpty": "You have no incidents registered.",
     "announcementsTitle": "Announcements",
+    "announcementsPrev": "Previous announcement",
+    "announcementsNext": "Next announcement",
     "announcementsEmpty": "No active announcements at this time.",
     "profileTitle": "Your data",
     "financeTitle": "Resident Finances",
@@ -712,6 +720,7 @@
   },
   "auth": {
     "accountDeactivated": "Your account was deactivated by the building administration.",
+    "sessionExpired": "Your session expired. Please sign in again.",
     "tabsAria": "Sign in, admin register, or resident login",
     "loginTab": "Sign in",
     "registerTab": "Admin register",
@@ -1321,6 +1330,7 @@
     "loading": "Loading files…",
     "loadError": "Could not load the file list.",
     "uploadError": "Could not save the file.",
+    "storageUnavailable": "File storage is not available right now. Please try again later.",
     "deleteError": "Could not delete the file.",
     "fileTooLarge": "This file exceeds the maximum size ({max}).",
     "mimeNotAllowed": "File type not allowed. Use PDF, text, CSV, JSON, or image.",

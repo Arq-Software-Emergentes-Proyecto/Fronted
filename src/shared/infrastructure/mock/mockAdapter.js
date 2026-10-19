@@ -18,7 +18,8 @@ import {
   upsertSubscription,
 } from './mockDb.js'
 import { MOCK_OWNER_ID } from './seed.js'
-import { handleOperations, uploadResource } from './mockOperations.js'
+import { isExtraReceipt, ReceiptKinds, resolveReceiptKind } from '@/finances/domain/receipt.js'
+import { demoFileDataUrl, handleOperations, uploadResource } from './mockOperations.js'
 
 function headerValue(headers, name) {
   if (!headers || typeof headers !== 'object') return ''
@@ -75,6 +76,11 @@ export function resolveActor(config) {
 function hardcodedAiReply(userText, locale = 'es') {
   const text = String(userText ?? '').toLowerCase()
   const es = !String(locale).toLowerCase().startsWith('en')
+  if (shouldEscalateToAdmin(userText)) {
+    return es
+      ? 'Listo, derivé tu consulta a administración. Te responderán por este mismo chat.'
+      : 'Done, I forwarded your request to management. They will reply in this same chat.'
+  }
   if (/admin|administraci|human|persona|hablar/.test(text)) {
     return es
       ? 'Puedo ayudarte con eso. Si prefieres hablar con administración, escribe “quiero hablar con un administrador” y te conectamos.'
@@ -87,8 +93,8 @@ function hardcodedAiReply(userText, locale = 'es') {
   }
   if (/reserva|espacio|piscina|guest|invitad|qr/.test(text)) {
     return es
-      ? 'Para reservar un espacio común ve a Generación / Espacios, elige fecha y horario, y agrega invitados (máx. 5) para el QR.'
-      : 'To book a common space go to Generation / Spaces, pick a date and time, and add guests (max 5) for the QR.'
+      ? 'Para reservar un espacio común ve a Servicios, elige el espacio, la fecha y el horario. Luego, en Generación, agrega a tus invitados (máx. 5) y comparte el enlace o el QR.'
+      : 'To book a common space go to Services and pick the space, date and time. Then, under Generation, add your guests (max 5) and share the link or QR code.'
   }
   if (/incidencia|incidente|fuga|ascensor|incident/.test(text)) {
     return es
@@ -101,7 +107,9 @@ function hardcodedAiReply(userText, locale = 'es') {
 }
 
 function shouldEscalateToAdmin(userText) {
-  return /admin|administraci|humano|persona real|hablar con/.test(String(userText ?? '').toLowerCase())
+  return /hablar con|quiero (un |una )?(administrador|administraci|humano|persona)|persona real|talk to (an? )?(admin|human)|speak (to|with)/.test(
+    String(userText ?? '').toLowerCase(),
+  )
 }
 
 function publicSupportChat(row) {
@@ -256,6 +264,26 @@ function handleCollection(config, method, collection, id) {
     const match = queryCollection('financeSettings', ownerId ? { ownerAdminId: ownerId } : {})[0]
     if (!match) fail(config, 404, 'SETTINGS_NOT_FOUND', 'Settings not found')
     return ok(config, patchRow('financeSettings', match.id, body))
+  }
+
+  if (collection === 'receipts' && method === 'POST' && !id) {
+    // Mirrors the API (ReceiptsCompatController): resolve kind; one MONTHLY fee per resident and
+    // month (RNF011) — a duplicate returns the existing row; extra-charge receipts always insert.
+    const kind = resolveReceiptKind(body.kind, body.amount, body.extraCharges)
+    const row = { ...body, kind }
+    const month = String(row.billingMonth ?? '').trim().slice(0, 7)
+    if (kind === ReceiptKinds.MONTHLY && month) {
+      const ownerAdminId = String(row.ownerAdminId ?? ownerFromParams(params) ?? '')
+      const duplicate = queryCollection('receipts', {}).find(
+        (r) =>
+          String(r.ownerAdminId ?? ownerAdminId) === ownerAdminId &&
+          String(r.residentId) === String(row.residentId) &&
+          !isExtraReceipt(r) &&
+          String(r.billingMonth ?? '').slice(0, 7) === month,
+      )
+      if (duplicate) return ok(config, duplicate)
+    }
+    return ok(config, insertRow('receipts', row), 201)
   }
 
   if (!id) {
@@ -1048,7 +1076,7 @@ function handleV1(config, method, parts) {
       return ok(config, {
         id: row.id,
         fileName: row.fileName,
-        downloadUrl: `mock://download/${row.id}`,
+        downloadUrl: demoFileDataUrl(row.fileName, row.mimeType),
         expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
       })
     }

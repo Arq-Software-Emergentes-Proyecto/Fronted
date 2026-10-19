@@ -476,6 +476,17 @@ async function initSettings() {
   await loadServiceProviders()
 }
 
+/** Mercado Pago not configured / gateway down: friendly copy instead of the raw server text. */
+function isPaymentGatewayUnavailable(err) {
+  const code = String(err?.code ?? '')
+  return (
+    code.startsWith('MP_') ||
+    code === 'NETWORK_ERROR' ||
+    code === 'TIMEOUT' ||
+    ['HTTP_404', 'HTTP_405', 'HTTP_502', 'HTTP_503', 'HTTP_504'].includes(code)
+  )
+}
+
 async function selectPlan(planId) {
   if (!isAdmin.value || planLoading.value || planCheckoutPlanId.value) return
   if (selectedPlanId.value === planId && !isPaidSubscriptionPlan(planId)) return
@@ -517,7 +528,9 @@ async function selectPlan(planId) {
             count: error.payload?.residentsCount ?? residentsCount.value,
             max: error.payload?.residentLimit ?? '',
           })
-        : error?.payload?.message || error?.message || t('app.settingsPlanCheckoutError')
+        : isPaymentGatewayUnavailable(error)
+          ? t('app.settingsPlanCheckoutUnavailable')
+          : error?.payload?.message || t('app.settingsPlanCheckoutError')
   } finally {
     if (!checkout?.initPoint) planCheckoutPlanId.value = null
   }

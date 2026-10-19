@@ -77,7 +77,8 @@ export const reservationsApi = {
     const cleanSpaceId = String(spaceId ?? '').trim()
     if (!cleanSpaceId) return { removed: 0 }
     const { data } = await apiClient.get('/reservations', {
-      params: withOwnerParams({ spaceId: cleanSpaceId }),
+      // includeCancelled: purge also the cancelled (soft-deleted) rows, or they are orphaned.
+      params: withOwnerParams({ spaceId: cleanSpaceId, includeCancelled: true }),
     })
     const items = Array.isArray(data) ? data : []
     await Promise.all(
@@ -94,7 +95,8 @@ export const reservationsApi = {
     const cleanResidentId = String(residentId ?? '').trim()
     if (!cleanResidentId) return { removed: 0 }
     const { data } = await apiClient.get('/reservations', {
-      params: withOwnerParams({ residentId: cleanResidentId }),
+      // includeCancelled: purge also the cancelled (soft-deleted) rows, or they are orphaned.
+      params: withOwnerParams({ residentId: cleanResidentId, includeCancelled: true }),
     })
     const items = Array.isArray(data) ? data : []
     await Promise.all(

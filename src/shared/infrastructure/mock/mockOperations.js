@@ -18,6 +18,7 @@ import {
   toMonthKey,
 } from '@/finances/domain/billingCycle.js'
 import { parseDepartmentNumber } from '@/shared/domain/departmentNumber.js'
+import { isExtraReceipt } from '@/finances/domain/receipt.js'
 import { SUBSCRIPTION_PLAN_AI_QUERY_CAPS } from '@/billing/domain/subscriptionPlans.js'
 import {
   findById,
@@ -144,6 +145,8 @@ function billableCharge(ownerId, monthKey) {
 }
 
 function receiptCoversMonth(row, monthKey) {
+  // Like the API's Receipt.CoversMonth: an extra-charge receipt never covers the month's fee.
+  if (isExtraReceipt(row)) return false
   const billing = monthKeyOf(row.billingMonth)
   if (billing) return billing === monthKey
   return String(row.dueDate ?? '').startsWith(shiftMonth(monthKey, 1))
@@ -204,6 +207,24 @@ function buildReceiptPdf(lines) {
   const bytes = new Uint8Array(out.length)
   for (let i = 0; i < out.length; i += 1) bytes[i] = out.charCodeAt(i) & 0xff
   return bytes
+}
+
+/** Demo download for an uploaded document (the preview never stores the binary): PDF or text placeholder. */
+export function demoFileDataUrl(fileName, mimeType) {
+  const name = String(fileName || 'archivo')
+  const lines = [
+    'BuildingFex - Vista previa',
+    `Archivo: ${name}`,
+    'En el modo demo los archivos no se guardan en el servidor;',
+    'con la API real se descarga el archivo original.',
+  ]
+  if (/pdf/i.test(String(mimeType)) || /\.pdf$/i.test(name)) {
+    const bytes = buildReceiptPdf(lines)
+    let binary = ''
+    for (const b of bytes) binary += String.fromCharCode(b)
+    return `data:application/pdf;base64,${btoa(binary)}`
+  }
+  return `data:text/plain;charset=utf-8,${encodeURIComponent(lines.join('\n'))}`
 }
 
 function pdfResponse(config, fileName, lines) {
@@ -272,6 +293,7 @@ function handleFinances(config, method, rest) {
         extraCharges: 0,
         concept: 'Mantenimiento',
         billingMonth: charge.month,
+        kind: 'monthly',
       })
       created += 1
     })
@@ -1158,11 +1180,73 @@ async function handleRosterImport(config, method, rest) {
   return ok(config, { created: created.length, totalRows: rows.length, residents: created.map(publicUser) }, 201)
 }
 
+/* --------------------------------------------------------- Reservations */
+
+const MAX_GUESTS = 5
+
+function hhmm(value) {
+  const [h, m] = String(value ?? '').split(':').map(Number)
+  return Number.isFinite(h) ? h * 60 + (m || 0) : NaN
+}
+
+function isActiveReservation(r) {
+  return String(r.status ?? 'CONFIRMED').toUpperCase() !== 'CANCELLED' && !r.cancelledAt
+}
+
+/** ReservationPolicy.CanHostGuests: max 5 invitados y aforo (titular + invitados). */
+function checkGuests(config, space, guestCount) {
+  if (guestCount > MAX_GUESTS) {
+    fail(config, 400, 'RESERVATION_TOO_MANY_GUESTS', `Máximo ${MAX_GUESTS} invitados por reserva.`)
+  }
+  const capacity = Number(space?.capacity)
+  if (capacity > 0 && guestCount + 1 > capacity) {
+    fail(config, 409, 'RESERVATION_CAPACITY_EXCEEDED', 'La cantidad de personas supera el aforo del espacio.')
+  }
+}
+
+/** ReservationPolicy.CanReserve on create; guest list changes re-check the capacity. */
+function handleReservations(config, method, id) {
+  const body = readBody(config)
+  if (!id && method === 'POST') {
+    const space = findById('socialSpaces', body.spaceId)
+    if (!space) fail(config, 404, 'SPACE_NOT_FOUND', 'Espacio no encontrado.')
+    if (String(space.status ?? '').toUpperCase() === 'MAINTENANCE') {
+      fail(config, 409, 'SPACE_UNDER_MAINTENANCE', 'El espacio está en mantenimiento.')
+    }
+    const start = hhmm(body.startTime)
+    const end = hhmm(body.endTime)
+    if (!body.date || Number.isNaN(start) || Number.isNaN(end) || start >= end) {
+      fail(config, 400, 'RESERVATION_TIME_INVALID', 'Horario inválido.')
+    }
+    const sameDay = listCollection('reservations').filter(
+      (r) => String(r.spaceId) === String(space.id) && r.date === body.date && isActiveReservation(r),
+    )
+    if (sameDay.some((r) => hhmm(r.startTime) < end && start < hhmm(r.endTime))) {
+      fail(config, 409, 'RESERVATION_OVERLAP', 'Traslape de horario: la reserva se cruza con otra existente.')
+    }
+    const maxPerDay = Number(space.maxReservationsPerDay)
+    if (maxPerDay > 0 && sameDay.length >= maxPerDay) {
+      fail(config, 409, 'RESERVATION_DAY_FULL', 'El espacio alcanzó su límite de reservas para esa fecha.')
+    }
+    checkGuests(config, space, Array.isArray(body.guests) ? body.guests.length : 0)
+    return null // valid → generic CRUD insert
+  }
+  if (id && method === 'PATCH' && Array.isArray(body.guests)) {
+    const current = findById('reservations', id)
+    if (!current) return null
+    checkGuests(config, findById('socialSpaces', current.spaceId), body.guests.length)
+  }
+  return null
+}
+
 /* --------------------------------------------------------------- Router */
 
 export async function handleOperations(config, method, parts) {
   if (parts[0] === 'teamWorkers') {
     return handleTeamWorkers(config, method, parts[1], parts[2])
+  }
+  if (parts[0] === 'reservations') {
+    return handleReservations(config, method, parts[1])
   }
   if (parts[0] !== 'api' || parts[1] !== 'v1') return null
   const route = parts.slice(2).join('/')

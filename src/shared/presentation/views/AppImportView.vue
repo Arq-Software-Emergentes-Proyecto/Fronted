@@ -256,6 +256,7 @@ async function ingestFiles(fileList) {
     if (code === 'QUOTA_EXCEEDED') uploadError.value = t('importView.quotaExceeded')
     else if (code === 'MIME_NOT_ALLOWED') uploadError.value = t('importView.mimeNotAllowed')
     else if (code === 'FILE_TOO_LARGE') uploadError.value = t('importView.fileTooLarge', { max: maxSizeLabel.value })
+    else if (code === 'STORAGE_NOT_CONFIGURED' || err?.status === 503) uploadError.value = t('importView.storageUnavailable')
     else uploadError.value = t('importView.uploadError')
   } finally {
     uploading.value = false
@@ -491,8 +492,11 @@ async function onDownload(file) {
     document.body.appendChild(a)
     a.click()
     a.remove()
-  } catch {
-    uploadError.value = t('importView.downloadError')
+  } catch (err) {
+    uploadError.value =
+      err?.code === 'STORAGE_NOT_CONFIGURED' || err?.status === 503
+        ? t('importView.storageUnavailable')
+        : t('importView.downloadError')
   } finally {
     downloadingId.value = null
   }
@@ -694,7 +698,7 @@ onMounted(loadList)
               <p class="import-dropzone__hint">
                 {{
                   t('importView.uploadToFolderHint', {
-                    name: folderDisplayName(homeFolder),
+                    name: folderDisplayName(selectedFolder),
                   })
                 }}
               </p>
@@ -1282,8 +1286,10 @@ onMounted(loadList)
   margin: 0;
   font-size: 0.75rem;
   font-weight: 600;
-  text-transform: capitalize;
   color: #86868b;
+}
+.import-date-group__title::first-letter {
+  text-transform: uppercase;
 }
 
 .r-list {

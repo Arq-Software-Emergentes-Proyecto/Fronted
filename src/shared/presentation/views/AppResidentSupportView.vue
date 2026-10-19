@@ -10,6 +10,7 @@ import {
   joinSupportChat,
   joinSupportOwner,
   onSupportChatUpdated,
+  realtimeAvailable,
 } from '@/residentCare/infrastructure/supportRealtime.js'
 
 const { t, locale } = useI18n()
@@ -102,7 +103,8 @@ async function scrollAiToBottom() {
 let pollTimer = 0
 let creatingBlankLock = false
 let stopHub = null
-let signalROk = false
+/** Set on unmount: async work resumed after an await must not (re)register anything. */
+let disposed = false
 
 function upsertLocalChat(chat) {
   if (!chat?.id) return
@@ -171,7 +173,7 @@ function startFallbackPolling() {
   stopFallbackPolling()
   pollTimer = window.setInterval(() => {
     if (!isDocumentVisible()) return
-    if (signalROk) return
+    if (realtimeAvailable.value) return
     void refreshAiChats({ silent: true, incremental: true })
     void refreshAdminThread()
   }, 8000)
@@ -185,11 +187,9 @@ function stopFallbackPolling() {
 async function bindRealtime() {
   stopHub?.()
   stopHub = null
-  signalROk = false
-  if (!ownerId.value) return
-  const hub = await joinSupportOwner(ownerId.value)
-  if (!hub) return
-  signalROk = true
+  if (disposed || !ownerId.value) return
+  // The handler is kept across hub reconnections; polling covers the gaps
+  // (it runs whenever `realtimeAvailable` is false).
   stopHub = onSupportChatUpdated((payload) => {
     if (!payload?.id) return
     if (payload.kind === 'ai' && payload.residentId === residentId.value) {
@@ -203,17 +203,29 @@ async function bindRealtime() {
       adminThreadMessages.value = payload.messages || []
     }
   })
+  await joinSupportOwner(ownerId.value)
+  if (disposed) return
   if (activeAiChatId.value) await joinSupportChat(activeAiChatId.value)
 }
 
 watch([ownerId, residentId], async () => {
   await refreshAiChats()
+  if (disposed) return
   await bindRealtime()
+  if (disposed) return
   startFallbackPolling()
 }, { immediate: true })
 
+// Back online after a reconnect / rebuild: catch up on what was missed while offline.
+watch(realtimeAvailable, (ok) => {
+  if (!ok || disposed) return
+  void refreshAiChats({ silent: true, incremental: true })
+  void refreshAdminThread()
+})
+
 watch(activeAiChatId, async (id) => {
   if (id) await joinSupportChat(id)
+  if (disposed) return
   void refreshAdminThread()
 })
 
@@ -238,8 +250,10 @@ if (typeof document !== 'undefined') {
 }
 
 onUnmounted(() => {
+  disposed = true
   stopFallbackPolling()
   stopHub?.()
+  stopHub = null
   if (typeof document !== 'undefined') {
     document.removeEventListener('visibilitychange', onVisibility)
   }
@@ -1222,6 +1236,24 @@ function onAiSuggestion(kind) {
 
   .ai-recent-list {
     max-height: 8rem;
+  }
+}
+
+/* Phone (stacked app nav, see AppShellView): the page scrolls and the conversation keeps a usable height. */
+@media (max-width: 720px) {
+  .app-view--ai {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .finance-page {
+    flex: none;
+  }
+
+  .ai-shell {
+    flex: none;
+    grid-template-rows: auto minmax(30rem, 75vh);
   }
 }
 </style>

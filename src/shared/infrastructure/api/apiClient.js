@@ -41,9 +41,24 @@ apiClient.interceptors.request.use((config) => {
   return config
 })
 
+/**
+ * With `responseType: 'blob'` (PDF / template downloads) an error body arrives as a Blob,
+ * so its JSON `{ code }` would be invisible. Parse it back when it is JSON.
+ */
+async function readErrorPayload(data) {
+  if (typeof Blob === 'undefined' || !(data instanceof Blob)) return data
+  const type = String(data.type || '').toLowerCase()
+  if (!type.includes('json')) return data
+  try {
+    return JSON.parse(await data.text())
+  } catch {
+    return data
+  }
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (error.code === 'ECONNABORTED') {
       const timeoutError = new Error('TIMEOUT')
       timeoutError.code = 'TIMEOUT'
@@ -56,7 +71,7 @@ apiClient.interceptors.response.use(
       return Promise.reject(networkError)
     }
 
-    const payload = error.response.data
+    const payload = await readErrorPayload(error.response.data)
     const apiCode =
       payload && typeof payload === 'object' && typeof payload.code === 'string'
         ? payload.code

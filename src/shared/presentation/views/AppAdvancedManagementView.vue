@@ -274,12 +274,13 @@ async function onRosterImported(createdResidents) {
   if (!Array.isArray(createdResidents) || !createdResidents.length) return
   residents.value = [...createdResidents, ...residents.value]
   await refreshPlanLimit()
-  for (const resident of createdResidents) {
-    try {
-      await financesStore.generateInitialReceipt(resident)
-    } catch (error) {
-      console.warn('Initial receipt failed for imported resident', resident.id, error)
-    }
+  // One idempotent server-side run for the current month instead of ~3 requests per resident:
+  // MonthlyBillingService applies the same admission-date / bill-from-next-month rule
+  // (ResidentOwesMonth) and skips residents already billed.
+  try {
+    await financesStore.generateMonthlyReceipts()
+  } catch (error) {
+    console.warn('Initial receipts generation failed after roster import', error?.code || error)
   }
 }
 

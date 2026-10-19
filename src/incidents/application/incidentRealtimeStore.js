@@ -1,8 +1,10 @@
-import { reactive } from 'vue'
+import { reactive, watch } from 'vue'
 import {
   joinSupportOwner,
   onSupportHubEvent,
+  realtimeAvailable,
 } from '@/residentCare/infrastructure/supportRealtime.js'
+import { onSessionIdentityChange } from '@/iam/application/sessionStore.js'
 import { IncidentRealtimeEvent } from '@/incidents/domain/model/incidentConstants.js'
 
 /**
@@ -20,6 +22,7 @@ const state = reactive({
 const listeners = new Set()
 let unsubscribers = []
 let startingFor = null
+let generation = 0
 
 function emit(type, payload) {
   listeners.forEach((fn) => {
@@ -35,12 +38,16 @@ function emit(type, payload) {
 export async function startIncidentRealtime(ownerAdminId, { countUnseen = false } = {}) {
   const owner = ownerAdminId ? String(ownerAdminId) : null
   if (!owner) return
-  if (state.ownerId === owner && state.connected) return
+  if (state.ownerId === owner && unsubscribers.length) return
   if (startingFor === owner) return
   startingFor = owner
+  const gen = generation
   try {
-    const hub = await joinSupportOwner(owner)
-    if (!hub) return
+    // Listeners are kept by supportRealtime across (re)connections, so they are bound even
+    // if the hub is not up yet; it joins the owner group whenever it connects.
+    await joinSupportOwner(owner)
+    // Logged out / user changed while joining: don't bind listeners for the old tenant.
+    if (gen !== generation) return
     unsubscribers.forEach((off) => off())
     unsubscribers = [
       onSupportHubEvent(IncidentRealtimeEvent.CREATED, (payload) => {
@@ -53,19 +60,30 @@ export async function startIncidentRealtime(ownerAdminId, { countUnseen = false 
       }),
     ]
     state.ownerId = owner
-    state.connected = true
+    state.connected = realtimeAvailable.value
   } finally {
-    startingFor = null
+    if (gen === generation) startingFor = null
   }
 }
 
 export function stopIncidentRealtime() {
+  generation += 1
+  startingFor = null
   unsubscribers.forEach((off) => off())
   unsubscribers = []
   state.connected = false
   state.ownerId = null
   state.unseenCount = 0
+  state.lastCreated = null
 }
+
+// Listeners survive hub reconnections; just mirror availability for the UI.
+watch(realtimeAvailable, (ok) => {
+  state.connected = !!ok && !!state.ownerId
+})
+
+// Logout / forced logout / different user: never keep the previous tenant's listeners.
+onSessionIdentityChange(() => stopIncidentRealtime())
 
 /** handler(type, payload); devuelve función para desuscribirse. */
 export function onIncidentRealtime(handler) {

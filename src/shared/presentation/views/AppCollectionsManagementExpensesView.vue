@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Button from 'primevue/button'
 import Column from 'primevue/column'
@@ -19,6 +19,7 @@ import { adminManagementExpensesApi } from '@/finances/infrastructure/adminManag
 import { sharedUtilityServicesApi } from '@/finances/infrastructure/sharedUtilityServicesApi.js'
 import { useFinancesStore } from '@/finances/application/financesStore.js'
 import { financesApi } from '@/finances/infrastructure/financesApi.js'
+import { OPEN_WIREFRAME_ACCESS } from '@/iam/application/localPreviewAuth.js'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 
 const { t, locale } = useI18n()
@@ -97,20 +98,53 @@ function localMonthBalance(month) {
   return { month, income, expenses: spent, net: income - spent }
 }
 
+const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/
+/** Request sequence: only the latest month request may update the card. */
+let balanceSeq = 0
+let balanceDebounce = 0
+
 async function loadMonthBalance() {
-  const month = monthKeyOf(balanceMonth.value) || currentMonthInput()
+  const raw = String(balanceMonth.value ?? '').trim()
+  // An empty picker means "current month"; anything else must be a real YYYY-MM.
+  const month = raw ? raw : currentMonthInput()
+  const seq = ++balanceSeq
+  if (!MONTH_RE.test(month)) {
+    balanceLoading.value = false
+    balanceError.value = t('financeOps.netBalanceMonthInvalid')
+    return
+  }
   balanceLoading.value = true
   balanceError.value = ''
   try {
-    monthBalance.value = await financesApi.getMonthlyBalance(month)
+    const result = await financesApi.getMonthlyBalance(month)
+    if (seq !== balanceSeq) return
+    monthBalance.value = result
   } catch {
-    monthBalance.value = localMonthBalance(month)
+    if (seq !== balanceSeq) return
+    if (OPEN_WIREFRAME_ACCESS) {
+      // Demo without backend: same criterion as the Income vs Expenses chart.
+      monthBalance.value = localMonthBalance(month)
+    } else {
+      monthBalance.value = { month, income: 0, expenses: 0, net: 0 }
+      balanceError.value = t('financeOps.netBalanceLoadError')
+    }
   } finally {
-    balanceLoading.value = false
+    if (seq === balanceSeq) balanceLoading.value = false
   }
 }
 
-watch(balanceMonth, () => loadMonthBalance())
+watch(balanceMonth, () => {
+  if (balanceDebounce) window.clearTimeout(balanceDebounce)
+  balanceDebounce = window.setTimeout(() => {
+    balanceDebounce = 0
+    void loadMonthBalance()
+  }, 300)
+})
+onBeforeUnmount(() => {
+  if (balanceDebounce) window.clearTimeout(balanceDebounce)
+  balanceDebounce = 0
+  balanceSeq += 1
+})
 
 const balanceMonthLabel = computed(() => {
   const [y, m] = monthKeyOf(balanceMonth.value).split('-').map(Number)

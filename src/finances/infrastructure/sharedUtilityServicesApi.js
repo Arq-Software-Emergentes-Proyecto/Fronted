@@ -2,6 +2,7 @@ import { apiClient } from '@/shared/infrastructure/api/apiClient.js'
 import { withOwnerParams } from '@/shared/infrastructure/api/ownerQuery.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
 import { apiError } from '@/shared/infrastructure/api/utils.js'
+import { todayYmd } from '@/finances/domain/billingCycle.js'
 
 const VALID_TYPES = new Set(['water', 'electricity'])
 
@@ -54,7 +55,7 @@ async function distributeAcrossDepartments(amount) {
 
   const perResidentShare = round2(amount / residentCount)
   const dueDate = `${monthPrefix}-28`
-  const issueDate = new Date().toISOString().split('T')[0]
+  const issueDate = todayYmd()
 
   await Promise.all(
     residents.map(async (resident) => {
@@ -70,6 +71,8 @@ async function distributeAcrossDepartments(amount) {
       } else {
         await apiClient.post('/receipts', {
           id: Date.now() + Math.floor(Math.random() * 1000),
+          // Standalone shared-service charge: never counts as the month's maintenance fee.
+          kind: 'extra',
           residentId: resident.id,
           issueDate,
           dueDate,
