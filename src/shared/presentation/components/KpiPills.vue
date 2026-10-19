@@ -43,9 +43,9 @@ function tooltip(item) {
       </h2>
       <h2 v-else class="kpi-pill__label">{{ item.label }}</h2>
       <span class="kpi-pill__icon" aria-hidden="true"><i class="pi" :class="item.icon" /></span>
+      <!-- Sin espacios entre el número y el total: se lee "4/40" como una sola cifra. -->
       <p class="kpi-pill__value" :class="{ 'is-alert': item.alert }">
-        {{ item.value }}
-        <small v-if="item.total != null">/ {{ item.total }}</small>
+        <span>{{ item.value }}</span><small v-if="item.total != null" class="kpi-pill__total">/{{ item.total }}</small>
       </p>
       <p v-if="item.hint" class="bf-sr-only">{{ item.hint }}</p>
       <RouterLink v-if="item.link" class="kpi-pill__link" :to="item.link.to">
@@ -111,11 +111,12 @@ function tooltip(item) {
   color: #b42318;
 }
 
-.kpi-pill__value small {
-  font-size: 0.8rem;
-  font-weight: 600;
+.kpi-pill__total {
+  margin-left: 0.08em;
+  font-size: 0.74em;
+  font-weight: 700;
   color: #64748b;
-  letter-spacing: 0;
+  letter-spacing: -0.01em;
 }
 
 /* Heading first in the markup for screen readers, shown after the number. */
@@ -159,11 +160,18 @@ function tooltip(item) {
   outline-offset: 2px;
 }
 
-/* Compacta, en la fila del encabezado. */
+/*
+ * Compacta, en la fila del encabezado. Cada pastilla mide al menos lo que su contenido (nunca se
+ * enciman); si no caben al lado de los botones, el grupo baja a su propia fila.
+ */
 .kpi-pills--inline {
-  flex: 1 1 36rem;
-  min-width: 0;
+  flex: 1 1 auto;
+  grid-template-columns: repeat(var(--pill-count, 4), minmax(max-content, 1fr));
   gap: 0.5rem;
+}
+
+.kpi-pills--inline .kpi-pill__label {
+  white-space: nowrap;
 }
 
 .kpi-pills--inline .kpi-pill {
@@ -181,10 +189,6 @@ function tooltip(item) {
   font-size: 1.02rem;
 }
 
-.kpi-pills--inline .kpi-pill__value small {
-  font-size: 0.72rem;
-}
-
 .kpi-pills--inline .kpi-pill__label {
   font-size: 0.76rem;
   line-height: 1.15;
@@ -196,6 +200,18 @@ function tooltip(item) {
   }
 }
 
+/* Pantallas medianas: no caben al lado de los botones; van en su propia fila, en partes iguales. */
+@media (min-width: 721px) and (max-width: 1180px) {
+  .kpi-pills--inline {
+    flex-basis: 100%;
+    min-width: 0;
+    grid-template-columns: repeat(var(--pill-count, 4), minmax(0, 1fr));
+  }
+  .kpi-pills--inline .kpi-pill__label {
+    white-space: normal;
+  }
+}
+
 @media (max-width: 720px) {
   .kpi-pills {
     gap: 0.5rem;
@@ -204,7 +220,11 @@ function tooltip(item) {
   .kpi-pills--inline {
     order: 2;
     flex-basis: 100%;
+    min-width: 0;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .kpi-pills--inline .kpi-pill__label {
+    white-space: normal;
   }
   /* Number above the name so amounts like "S/ 565.00" fit in half the width. */
   .kpi-pill {
