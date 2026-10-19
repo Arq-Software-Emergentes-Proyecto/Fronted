@@ -454,6 +454,7 @@ const agendaItems = computed(() => {
       icon: 'pi-flag',
       badge: inc.total,
       title: t('dashboard.agendaIncidentsTitle', { n: inc.total }, inc.total),
+      short: t('dashboard.agendaIncidentsShort'),
       detail: t('dashboard.agendaIncidentsDetail', { open: inc.open, progress: inc.inProgress }),
       action: t('dashboard.agendaIncidentsAction'),
       to: { name: AppRouteNames.APP_INCIDENTS },
@@ -466,6 +467,7 @@ const agendaItems = computed(() => {
       icon: 'pi-comments',
       badge: pendingChats.value,
       title: t('dashboard.agendaChatsTitle', { n: pendingChats.value }, pendingChats.value),
+      short: t('dashboard.agendaChatsShort'),
       detail: t('dashboard.agendaChatsDetail'),
       action: t('dashboard.agendaChatsAction'),
       to: { name: AppRouteNames.APP_RESIDENT_HELP },
@@ -478,6 +480,7 @@ const agendaItems = computed(() => {
       icon: 'pi-wallet',
       badge: '!',
       title: t('dashboard.agendaBudgetTitle'),
+      short: t('dashboard.agendaBudgetShort'),
       detail: t('dashboard.agendaBudgetDetail'),
       action: t('dashboard.agendaBudgetAction'),
       to: { name: AppRouteNames.APP_FINANCE },
@@ -491,6 +494,7 @@ const agendaItems = computed(() => {
       icon: 'pi-exclamation-circle',
       badge: n,
       title: t('dashboard.agendaOverdueTitle', { n }, n),
+      short: t('dashboard.agendaOverdueShort'),
       detail: t('dashboard.agendaOverdueDetail', { amount: nfPen.value(kpi.value.totalDebt) }),
       action: t('dashboard.agendaOverdueAction'),
       to: { name: AppRouteNames.APP_FINANCE },
@@ -505,6 +509,7 @@ const agendaItems = computed(() => {
       icon: 'pi-calendar',
       badge: n,
       title: t('dashboard.agendaGuestsTitle', { n }, n),
+      short: t('dashboard.agendaGuestsShort'),
       detail: t('dashboard.agendaGuestsDetail', { space: spaceName(first.spaceId), time: first.startTime || '—' }),
       action: t('dashboard.agendaGuestsAction'),
       to: { name: AppRouteNames.APP_GENERATION },
@@ -661,14 +666,20 @@ const chartOptions = ref({
         </div>
       </div>
       <ul v-if="agendaItems.length" class="agenda__grid" role="list">
-        <li v-for="item in agendaItems" :key="item.key" class="agenda-item" :class="`agenda-item--${item.tone}`">
+        <li
+          v-for="item in agendaItems"
+          :key="item.key"
+          class="agenda-item"
+          :class="`agenda-item--${item.tone}`"
+          :title="`${item.title} · ${item.detail}`"
+        >
           <span class="agenda-item__icon" aria-hidden="true">
             <i class="pi" :class="item.icon"></i>
             <b>{{ item.badge }}</b>
           </span>
           <div class="agenda-item__text">
-            <strong>{{ item.title }}</strong>
-            <span>{{ item.detail }}</span>
+            <strong aria-hidden="true">{{ item.short }}</strong>
+            <span class="visually-hidden">{{ item.title }} · {{ item.detail }}</span>
           </div>
           <RouterLink :to="item.to" class="agenda-item__action">{{ item.action }}</RouterLink>
         </li>
@@ -1572,25 +1583,23 @@ const chartOptions = ref({
   list-style: none;
   margin: 0;
   padding: 0;
+  /* Una sola fila de pills del mismo ancho, sin importar cuántos pendientes haya. */
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
-  gap: 0.7rem;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 0.6rem;
 }
 
 .agenda-item {
   --agenda-ink: #1e3a8a;
   --agenda-bg: #e8eefc;
   --agenda-badge: #1e3a8a;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  grid-template-areas:
-    'icon text'
-    'icon action';
-  align-items: start;
-  column-gap: 0.75rem;
-  row-gap: 0.55rem;
-  padding: 0.85rem 0.9rem;
-  border-radius: 14px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.45rem 0.4rem 0.5rem;
+  border-radius: 999px;
   background: var(--agenda-bg);
 }
 
@@ -1601,14 +1610,14 @@ const chartOptions = ref({
 .agenda-item--green { --agenda-ink: #15803d; --agenda-bg: #e3f4e8; --agenda-badge: #16a34a; }
 
 .agenda-item__icon {
-  grid-area: icon;
   position: relative;
   flex-shrink: 0;
-  width: 2.4rem;
-  height: 2.4rem;
-  border-radius: 12px;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
   background: #fff;
   color: var(--agenda-ink);
+  font-size: 0.85rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1616,43 +1625,38 @@ const chartOptions = ref({
 
 .agenda-item__icon b {
   position: absolute;
-  top: -0.35rem;
-  right: -0.35rem;
-  min-width: 1.15rem;
-  height: 1.15rem;
+  top: -0.3rem;
+  right: -0.3rem;
+  min-width: 1.1rem;
+  height: 1.1rem;
   padding: 0 0.25rem;
   border-radius: 999px;
   background: var(--agenda-badge);
   color: #fff;
-  font-size: 0.66rem;
+  font-size: 0.64rem;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .agenda-item__text {
-  grid-area: text;
   min-width: 0;
+  flex: 1;
 }
 
 .agenda-item__text strong {
   display: block;
-  font-size: 0.86rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
   letter-spacing: -0.01em;
   color: #0f172a;
 }
 
-.agenda-item__text span {
-  display: block;
-  margin-top: 0.1rem;
-  font-size: 0.74rem;
-  color: #6e6e73;
-}
-
 .agenda-item__action {
-  grid-area: action;
-  justify-self: start;
-  padding: 0.35rem 0.75rem;
+  flex-shrink: 0;
+  padding: 0.32rem 0.75rem;
   border-radius: 999px;
   background: #fff;
   color: var(--agenda-ink);
@@ -1719,6 +1723,10 @@ const chartOptions = ref({
 
 /* ---------- Responsive ---------- */
 @media (max-width: 1180px) {
+  .agenda__grid {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .dash-hero {
     padding-right: 1.6rem;
   }
@@ -1750,6 +1758,9 @@ const chartOptions = ref({
   .dash-action {
     flex: 1 1 auto;
     justify-content: center;
+  }
+  .agenda__grid {
+    grid-template-columns: minmax(0, 1fr);
   }
   .kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

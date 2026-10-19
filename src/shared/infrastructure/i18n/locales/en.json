@@ -1239,7 +1239,12 @@
     "heroStatusClear": "All clear today",
     "deltaThisMonth": "{delta} this month",
     "deltaFlat": "No change this month",
-    "deltaVsMonth": "{delta} vs. {month}"
+    "deltaVsMonth": "{delta} vs. {month}",
+    "agendaIncidentsShort": "Incidents",
+    "agendaChatsShort": "Pending chats",
+    "agendaBudgetShort": "Monthly fee",
+    "agendaOverdueShort": "Overdue debt",
+    "agendaGuestsShort": "Guests today"
   },
   "residentFinance": {
     "totalDue": "Total due",
