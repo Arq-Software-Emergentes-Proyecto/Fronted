@@ -5,6 +5,7 @@ import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.j
 import { spacesApi } from '@/socialSpaces/infrastructure/spacesApi.js'
 import { reservationInviteExpiresAtMs } from '@/shared/infrastructure/api/utils.js'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
+import KpiPills from '@/shared/presentation/components/KpiPills.vue'
 
 const { t, locale } = useI18n()
 
@@ -296,41 +297,44 @@ async function onPassCheckIn(guestId, checkedIn = true) {
   }
 }
 
-const statPills = computed(() => [
-  {
-    key: 'reservations',
-    tone: 'blue',
-    icon: 'pi-calendar',
-    label: t('app.generationStatReservations'),
-    value: summary.value.reservations,
-    hint: t('app.generationStatReservationsHint', { n: summary.value.withGuests }, summary.value.withGuests),
-  },
-  {
-    key: 'expected',
-    tone: 'amber',
-    icon: 'pi-users',
-    label: t('app.generationStatExpected'),
-    value: summary.value.expected,
-    hint: t('app.generationStatExpectedHint'),
-  },
-  {
-    key: 'entered',
-    tone: 'green',
-    icon: 'pi-sign-in',
-    label: t('app.generationStatEntered'),
-    value: summary.value.entered,
-    total: summary.value.expected,
-    hint: t('app.generationStatEnteredHint', { n: summary.value.pending }, summary.value.pending),
-  },
-  {
-    key: 'expired',
-    tone: 'red',
-    icon: 'pi-ban',
-    label: t('app.generationStatExpired'),
-    value: summary.value.expired,
-    hint: t('app.generationStatExpiredHint'),
-  },
-])
+const statPills = computed(() => {
+  const shown = (n) => (loading.value && !reservations.value.length ? '…' : n)
+  return [
+    {
+      key: 'reservations',
+      tone: 'blue',
+      icon: 'pi-calendar',
+      label: t('app.generationStatReservations'),
+      value: shown(summary.value.reservations),
+      hint: t('app.generationStatReservationsHint', { n: summary.value.withGuests }, summary.value.withGuests),
+    },
+    {
+      key: 'expected',
+      tone: 'amber',
+      icon: 'pi-users',
+      label: t('app.generationStatExpected'),
+      value: shown(summary.value.expected),
+      hint: t('app.generationStatExpectedHint'),
+    },
+    {
+      key: 'entered',
+      tone: 'green',
+      icon: 'pi-sign-in',
+      label: t('app.generationStatEntered'),
+      value: shown(summary.value.entered),
+      total: summary.value.expected || null,
+      hint: t('app.generationStatEnteredHint', { n: summary.value.pending }, summary.value.pending),
+    },
+    {
+      key: 'expired',
+      tone: 'red',
+      icon: 'pi-ban',
+      label: t('app.generationStatExpired'),
+      value: shown(summary.value.expired),
+      hint: t('app.generationStatExpiredHint'),
+    },
+  ]
+})
 
 const passStatusKey = computed(() => {
   const status = String(pass.value?.status || 'EXPIRED').toUpperCase()
@@ -493,23 +497,7 @@ onMounted(load)
     />
 
     <!-- Summary of the selected day -->
-    <section class="gen-stats" :aria-label="selectedDayLong" :aria-busy="loading ? 'true' : 'false'">
-      <article
-        v-for="stat in statPills"
-        :key="stat.key"
-        class="gen-stat"
-        :class="`gen-stat--${stat.tone}`"
-        :title="stat.hint"
-      >
-        <h2 class="gen-stat__label">{{ stat.label }}</h2>
-        <span class="gen-stat__icon" aria-hidden="true"><i class="pi" :class="stat.icon" /></span>
-        <p class="gen-stat__value">
-          {{ loading && !reservations.length ? '…' : stat.value }}
-          <small v-if="stat.total">/ {{ stat.total }}</small>
-        </p>
-        <p class="bf-sr-only">{{ stat.hint }}</p>
-      </article>
-    </section>
+    <KpiPills :items="statPills" :aria-label="selectedDayLong" :busy="loading" />
 
     <div class="gen-layout">
       <!-- Validate invitation (QR) -->
@@ -1058,73 +1046,6 @@ onMounted(load)
 
 .gen-alert__close:hover {
   background: #fff;
-}
-
-/* ---------- Summary pills ---------- */
-.gen-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.6rem;
-}
-
-.gen-stat {
-  --stat-bg: #f1f5f9;
-  --stat-ink: #334155;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.45rem 1rem 0.45rem 0.5rem;
-  border-radius: 999px;
-  background: var(--stat-bg);
-}
-
-.gen-stat--blue { --stat-bg: #e8eefc; --stat-ink: #1e3a8a; }
-.gen-stat--amber { --stat-bg: #fdf3dc; --stat-ink: #b45309; }
-.gen-stat--green { --stat-bg: #e3f4e8; --stat-ink: #15803d; }
-.gen-stat--red { --stat-bg: #fde4e4; --stat-ink: #b42318; }
-
-.gen-stat__icon {
-  flex-shrink: 0;
-  width: 2.1rem;
-  height: 2.1rem;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.85rem;
-  background: #fff;
-  color: var(--stat-ink);
-}
-
-.gen-stat__value {
-  flex-shrink: 0;
-  margin: 0;
-  color: #0f172a;
-  font-family: var(--bf-font-heading, inherit);
-  font-weight: 700;
-  font-size: 1.2rem;
-  letter-spacing: -0.02em;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-
-.gen-stat__value small {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #64748b;
-  letter-spacing: 0;
-}
-
-/* Heading first in the markup for screen readers, shown after the number. */
-.gen-stat__label {
-  order: 1;
-  min-width: 0;
-  margin: 0;
-  color: #334155;
-  font-weight: 600;
-  font-size: 0.8rem;
-  line-height: 1.2;
 }
 
 /* ---------- Layout ---------- */
@@ -1793,11 +1714,6 @@ onMounted(load)
 }
 
 /* ---------- Responsive ---------- */
-@media (max-width: 1180px) {
-  .gen-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
 
 @media (max-width: 1000px) {
   .gen-layout {
@@ -1835,12 +1751,6 @@ onMounted(load)
   .gen-head__controls > .gen-btn--primary {
     width: 100%;
     order: -1;
-  }
-  .gen-stats {
-    gap: 0.5rem;
-  }
-  .gen-stat {
-    padding-right: 0.75rem;
   }
   .gen-card {
     padding: 1rem;

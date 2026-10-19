@@ -7,6 +7,7 @@ import AnnouncementForm from '../components/AnnouncementForm.vue'
 import AnnouncementsList from '../components/AnnouncementsList.vue'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
+import KpiPills from '@/shared/presentation/components/KpiPills.vue'
 import {
   expiresWithinWeek,
   isAnnouncementExpired,
@@ -264,18 +265,7 @@ onMounted(fetchAnnouncements)
     <p v-else-if="loading && !loaded" class="inf-status" role="status">{{ t('information.loading') }}</p>
 
     <template v-else-if="loaded">
-      <section class="inf-stats" :aria-label="t('information.summaryAria')">
-        <article v-for="stat in stats" :key="stat.key" class="inf-stat" :class="`inf-stat--${stat.tone}`">
-          <div class="inf-stat__head">
-            <h2 class="inf-stat__label">{{ stat.label }}</h2>
-            <span class="inf-stat__icon" :class="`inf-stat__icon--${stat.tone}`">
-              <i class="pi" :class="stat.icon" aria-hidden="true" />
-            </span>
-          </div>
-          <p class="inf-stat__value">{{ stat.value }}</p>
-          <p class="inf-stat__hint">{{ stat.hint }}</p>
-        </article>
-      </section>
+      <KpiPills :items="stats" :aria-label="t('information.summaryAria')" />
 
       <section class="inf-card">
         <div class="inf-toolbar">
@@ -531,78 +521,6 @@ onMounted(fetchAnnouncements)
   font-weight: 600;
 }
 
-/* ---------- Summary ---------- */
-.inf-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-
-.inf-stat {
-  background: var(--stat-bg, #f1f5f9);
-  border-radius: 16px;
-  padding: 1rem 1.1rem 1.05rem;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.inf-stat--blue { --stat-bg: #e8eefc; }
-.inf-stat--red { --stat-bg: #fde4e4; }
-.inf-stat--amber { --stat-bg: #fdf3dc; }
-.inf-stat--orange { --stat-bg: #fdeee2; }
-
-.inf-stat__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.55rem;
-}
-
-.inf-stat__label {
-  margin: 0;
-  color: #475569;
-  font-weight: 600;
-  font-size: 0.8rem;
-}
-
-.inf-stat__icon {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  font-size: 0.85rem;
-  background: #fff;
-}
-
-.inf-stat__icon--blue { color: #1e3a8a; }
-.inf-stat__icon--red { color: #b42318; }
-.inf-stat__icon--amber { color: #b45309; }
-.inf-stat__icon--orange { color: #c2410c; }
-
-.inf-stat__value {
-  margin: 0 0 0.4rem;
-  color: #0f172a;
-  font-family: var(--bf-font-heading, inherit);
-  font-weight: 700;
-  font-size: 1.65rem;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-  font-variant-numeric: tabular-nums;
-}
-
-.inf-stat__hint {
-  margin: auto 0 0;
-  color: #6e6e73;
-  font-size: 0.75rem;
-  font-weight: 500;
-  line-height: 1.35;
-}
-
 /* ---------- Content card ---------- */
 .inf-card {
   padding: 1.1rem 1.15rem 1.2rem;
@@ -792,11 +710,6 @@ onMounted(fetchAnnouncements)
 }
 
 /* ---------- Responsive ---------- */
-@media (max-width: 1100px) {
-  .inf-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
 
 @media (max-width: 720px) {
   .app-view {
@@ -808,20 +721,6 @@ onMounted(fetchAnnouncements)
   }
   .inf-head__actions .inf-btn--primary {
     flex: 1;
-  }
-  .inf-stats {
-    gap: 0.55rem;
-  }
-  .inf-stat {
-    padding: 0.8rem 0.85rem 0.85rem;
-  }
-  .inf-stat__value {
-    font-size: 1.4rem;
-  }
-  .inf-stat__icon {
-    width: 1.75rem;
-    height: 1.75rem;
-    font-size: 0.75rem;
   }
   .inf-card {
     padding: 0.9rem 0.8rem 1rem;

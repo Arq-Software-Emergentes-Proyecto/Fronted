@@ -35,6 +35,7 @@ import {
 } from '@/incidents/application/incidentRealtimeStore.js'
 import { teamWorkersApi } from '@/team/infrastructure/teamWorkersApi.js'
 import { teamTasksApi } from '@/team/infrastructure/teamTasksApi.js'
+import KpiPills from '@/shared/presentation/components/KpiPills.vue'
 
 const { t, locale } = useI18n()
 
@@ -225,6 +226,45 @@ const summary = computed(() => {
     }
   }
   return { open, inProgress, resolvedMonth, unassigned }
+})
+
+const kpiPills = computed(() => {
+  const pending = loading.value && !incidents.value.length
+  const shown = (n) => (pending ? '…' : n)
+  return [
+    {
+      key: 'open',
+      tone: 'orange',
+      icon: 'pi-exclamation-circle',
+      label: t('incidentFlow.summaryOpen'),
+      value: shown(summary.value.open),
+      hint: t('incidentFlow.summaryOpenHint'),
+    },
+    {
+      key: 'inProgress',
+      tone: 'blue',
+      icon: 'pi-sync',
+      label: t('incidentFlow.summaryInProgress'),
+      value: shown(summary.value.inProgress),
+      hint: t('incidentFlow.summaryInProgressHint'),
+    },
+    {
+      key: 'resolvedMonth',
+      tone: 'green',
+      icon: 'pi-check-circle',
+      label: t('incidentFlow.summaryResolvedMonth'),
+      value: shown(summary.value.resolvedMonth),
+      hint: t('incidentFlow.summaryResolvedMonthHint', { month: monthLabel.value }),
+    },
+    {
+      key: 'unassigned',
+      tone: 'amber',
+      icon: 'pi-wrench',
+      label: t('incidentFlow.summaryUnassigned'),
+      value: shown(summary.value.unassigned),
+      hint: t('incidentFlow.summaryUnassignedHint'),
+    },
+  ]
 })
 
 // US024: campos obligatorios marcados en rojo; envío bloqueado mientras falten.
@@ -592,40 +632,7 @@ onBeforeUnmount(() => stopRealtime())
         {{ error }}
       </p>
 
-      <section class="inc-summary" :aria-label="t('incidentFlow.summaryAria')">
-        <article class="inc-stat inc-stat--orange">
-          <div class="inc-stat__head">
-            <h2 class="inc-stat__label">{{ t('incidentFlow.summaryOpen') }}</h2>
-            <span class="inc-stat__icon inc-stat__icon--orange"><i class="pi pi-exclamation-circle" aria-hidden="true" /></span>
-          </div>
-          <p class="inc-stat__value">{{ loading && !incidents.length ? '…' : summary.open }}</p>
-          <p class="inc-stat__hint">{{ t('incidentFlow.summaryOpenHint') }}</p>
-        </article>
-        <article class="inc-stat inc-stat--blue">
-          <div class="inc-stat__head">
-            <h2 class="inc-stat__label">{{ t('incidentFlow.summaryInProgress') }}</h2>
-            <span class="inc-stat__icon inc-stat__icon--blue"><i class="pi pi-sync" aria-hidden="true" /></span>
-          </div>
-          <p class="inc-stat__value">{{ loading && !incidents.length ? '…' : summary.inProgress }}</p>
-          <p class="inc-stat__hint">{{ t('incidentFlow.summaryInProgressHint') }}</p>
-        </article>
-        <article class="inc-stat inc-stat--green">
-          <div class="inc-stat__head">
-            <h2 class="inc-stat__label">{{ t('incidentFlow.summaryResolvedMonth') }}</h2>
-            <span class="inc-stat__icon inc-stat__icon--green"><i class="pi pi-check-circle" aria-hidden="true" /></span>
-          </div>
-          <p class="inc-stat__value">{{ loading && !incidents.length ? '…' : summary.resolvedMonth }}</p>
-          <p class="inc-stat__hint">{{ t('incidentFlow.summaryResolvedMonthHint', { month: monthLabel }) }}</p>
-        </article>
-        <article class="inc-stat inc-stat--amber">
-          <div class="inc-stat__head">
-            <h2 class="inc-stat__label">{{ t('incidentFlow.summaryUnassigned') }}</h2>
-            <span class="inc-stat__icon inc-stat__icon--amber"><i class="pi pi-wrench" aria-hidden="true" /></span>
-          </div>
-          <p class="inc-stat__value">{{ loading && !incidents.length ? '…' : summary.unassigned }}</p>
-          <p class="inc-stat__hint">{{ t('incidentFlow.summaryUnassignedHint') }}</p>
-        </article>
-      </section>
+      <KpiPills :items="kpiPills" :aria-label="t('incidentFlow.summaryAria')" :busy="loading" />
 
       <section class="inc-card" aria-labelledby="inc-list-title">
         <div class="inc-card__head">
@@ -1216,78 +1223,6 @@ onBeforeUnmount(() => stopRealtime())
   color: #6e6e73;
 }
 
-/* ---------- Summary ---------- */
-.inc-summary {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-
-.inc-stat {
-  background: var(--stat-bg, #f1f5f9);
-  border-radius: 16px;
-  padding: 1rem 1.1rem 1.05rem;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.inc-stat--blue { --stat-bg: #e8eefc; }
-.inc-stat--green { --stat-bg: #e3f4e8; }
-.inc-stat--orange { --stat-bg: #fdeee2; }
-.inc-stat--amber { --stat-bg: #fdf3dc; }
-
-.inc-stat__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.55rem;
-}
-
-.inc-stat__label {
-  margin: 0;
-  color: #475569;
-  font-weight: 600;
-  font-size: 0.8rem;
-}
-
-.inc-stat__icon {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  font-size: 0.85rem;
-  background: #fff;
-}
-
-.inc-stat__icon--blue { color: #1e3a8a; }
-.inc-stat__icon--green { color: #15803d; }
-.inc-stat__icon--orange { color: #c2410c; }
-.inc-stat__icon--amber { color: #b45309; }
-
-.inc-stat__value {
-  margin: 0 0 0.35rem;
-  color: #0f172a;
-  font-family: var(--bf-font-heading, inherit);
-  font-weight: 700;
-  font-size: 1.65rem;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-  font-variant-numeric: tabular-nums;
-}
-
-.inc-stat__hint {
-  margin: auto 0 0;
-  color: #6e6e73;
-  font-size: 0.75rem;
-  font-weight: 500;
-  line-height: 1.35;
-}
-
 /* ---------- List card ---------- */
 .inc-card {
   padding: 1.1rem 1.25rem 1.15rem;
@@ -1787,9 +1722,6 @@ onBeforeUnmount(() => stopRealtime())
 
 /* ---------- Responsive ---------- */
 @media (max-width: 1100px) {
-  .inc-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   .inc-toolbar__right {
     width: 100%;
     flex-wrap: wrap;
@@ -1900,15 +1832,6 @@ onBeforeUnmount(() => stopRealtime())
   }
   .inc-head__actions .inc-btn--primary {
     flex: 1;
-  }
-  .inc-summary {
-    gap: 0.55rem;
-  }
-  .inc-stat {
-    padding: 0.8rem 0.85rem 0.85rem;
-  }
-  .inc-stat__value {
-    font-size: 1.35rem;
   }
   .inc-card {
     padding: 1rem 0.85rem;

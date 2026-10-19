@@ -16,6 +16,7 @@ import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import { RouterLink } from 'vue-router'
 import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import ResidentImportPanel from '@/residents/presentation/components/ResidentImportPanel.vue'
+import KpiPills from '@/shared/presentation/components/KpiPills.vue'
 
 const { t, locale } = useI18n()
 const financesStore = useFinancesStore()
@@ -785,12 +786,6 @@ const statusCounts = computed(() => {
   return counts
 })
 
-const planUsagePct = computed(() => {
-  const cap = Number(residentPlanLimitCap.value) || 0
-  if (cap <= 0) return 100
-  return Math.min(100, Math.round((totalResidents.value / cap) * 100))
-})
-
 const remainingSlots = computed(() =>
   Math.max(0, (Number(residentPlanLimitCap.value) || 0) - totalResidents.value),
 )
@@ -799,6 +794,59 @@ const spaceCounts = computed(() => {
   let maintenance = 0
   for (const space of spaces.value) if (space.status === 'MAINTENANCE') maintenance += 1
   return { available: spaces.value.length - maintenance, maintenance }
+})
+
+const kpiPills = computed(() => {
+  const residentsValue = isLoading.value ? '…' : totalResidents.value
+  const spacesValue = isLoadingSpaces.value ? '…' : spaces.value.length
+  const spacesHint = [
+    t('app.advancedMgmt.statSpacesAvailable', { n: spaceCounts.value.available }, spaceCounts.value.available),
+    spaceCounts.value.maintenance
+      ? t('app.advancedMgmt.statSpacesMaintenance', { n: spaceCounts.value.maintenance })
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  return [
+    {
+      key: 'residents',
+      tone: isAtPlanLimit.value ? 'red' : 'blue',
+      icon: 'pi-users',
+      label: t('app.advancedMgmt.statResidents'),
+      value: residentsValue,
+      total: residentPlanLimitCap.value,
+      hint: isAtPlanLimit.value
+        ? t('app.advancedMgmt.statResidentsFull')
+        : t('app.advancedMgmt.statResidentsLeft', { n: remainingSlots.value }, remainingSlots.value),
+      link: isAtPlanLimit.value ? { to: upgradePlanRoute, label: t('billing.upgradeCta') } : null,
+    },
+    {
+      key: 'active',
+      tone: 'green',
+      icon: 'pi-check-circle',
+      label: t('app.advancedMgmt.statActive'),
+      value: isLoading.value ? '…' : statusCounts.value.active,
+      hint: t('app.advancedMgmt.statActiveHint'),
+    },
+    {
+      key: 'pending',
+      tone: 'amber',
+      icon: 'pi-envelope',
+      label: t('app.advancedMgmt.statPending'),
+      value: isLoading.value ? '…' : statusCounts.value.pending,
+      hint: statusCounts.value.pending
+        ? t('app.advancedMgmt.statPendingHint')
+        : t('app.advancedMgmt.statPendingNone'),
+    },
+    {
+      key: 'spaces',
+      tone: 'orange',
+      icon: 'pi-building',
+      label: t('app.advancedMgmt.statSpaces'),
+      value: spacesValue,
+      hint: spacesHint,
+    },
+  ]
 })
 
 /* Tabs: Residentes | Espacios comunes */
@@ -924,73 +972,7 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
     </header>
 
     <!-- Summary -->
-    <section class="adv-stats" :aria-label="t('app.advancedMgmt.summaryLabel')">
-      <article class="adv-stat" :class="isAtPlanLimit ? 'adv-stat--red' : 'adv-stat--blue'">
-        <div class="adv-stat__head">
-          <h2 class="adv-stat__label">{{ t('app.advancedMgmt.statResidents') }}</h2>
-          <span class="adv-stat__icon" :class="isAtPlanLimit ? 'is-red' : 'is-blue'">
-            <i class="pi pi-users" aria-hidden="true" />
-          </span>
-        </div>
-        <p class="adv-stat__value">
-          {{ isLoading ? '…' : totalResidents }}<span class="adv-stat__of"> / {{ residentPlanLimitCap }}</span>
-        </p>
-        <div
-          class="adv-meter"
-          role="progressbar"
-          :aria-valuenow="planUsagePct"
-          aria-valuemin="0"
-          aria-valuemax="100"
-          :aria-label="t('app.advancedMgmt.planMeterLabel')"
-        >
-          <span class="adv-meter__fill" :class="{ 'is-full': isAtPlanLimit }" :style="{ width: `${planUsagePct}%` }" />
-        </div>
-        <p class="adv-stat__hint">
-          <template v-if="isAtPlanLimit">
-            {{ t('app.advancedMgmt.statResidentsFull') }}
-            <RouterLink class="adv-stat__link" :to="upgradePlanRoute">
-              {{ t('billing.upgradeCta') }}
-              <i class="pi pi-arrow-right" aria-hidden="true" />
-            </RouterLink>
-          </template>
-          <template v-else>{{ t('app.advancedMgmt.statResidentsLeft', { n: remainingSlots }, remainingSlots) }}</template>
-        </p>
-      </article>
-
-      <article class="adv-stat adv-stat--green">
-        <div class="adv-stat__head">
-          <h2 class="adv-stat__label">{{ t('app.advancedMgmt.statActive') }}</h2>
-          <span class="adv-stat__icon is-green"><i class="pi pi-check-circle" aria-hidden="true" /></span>
-        </div>
-        <p class="adv-stat__value">{{ isLoading ? '…' : statusCounts.active }}</p>
-        <p class="adv-stat__hint">{{ t('app.advancedMgmt.statActiveHint') }}</p>
-      </article>
-
-      <article class="adv-stat adv-stat--amber">
-        <div class="adv-stat__head">
-          <h2 class="adv-stat__label">{{ t('app.advancedMgmt.statPending') }}</h2>
-          <span class="adv-stat__icon is-amber"><i class="pi pi-envelope" aria-hidden="true" /></span>
-        </div>
-        <p class="adv-stat__value">{{ isLoading ? '…' : statusCounts.pending }}</p>
-        <p class="adv-stat__hint">
-          {{ statusCounts.pending ? t('app.advancedMgmt.statPendingHint') : t('app.advancedMgmt.statPendingNone') }}
-        </p>
-      </article>
-
-      <article class="adv-stat adv-stat--orange">
-        <div class="adv-stat__head">
-          <h2 class="adv-stat__label">{{ t('app.advancedMgmt.statSpaces') }}</h2>
-          <span class="adv-stat__icon is-orange"><i class="pi pi-building" aria-hidden="true" /></span>
-        </div>
-        <p class="adv-stat__value">{{ isLoadingSpaces ? '…' : spaces.length }}</p>
-        <p class="adv-stat__hint">
-          {{ t('app.advancedMgmt.statSpacesAvailable', { n: spaceCounts.available }, spaceCounts.available) }}
-          <template v-if="spaceCounts.maintenance">
-            · {{ t('app.advancedMgmt.statSpacesMaintenance', { n: spaceCounts.maintenance }) }}
-          </template>
-        </p>
-      </article>
-    </section>
+    <KpiPills :items="kpiPills" :aria-label="t('app.advancedMgmt.summaryLabel')" />
 
     <!-- Residents | Common spaces -->
     <section class="adv-card">
@@ -2255,128 +2237,11 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
   cursor: not-allowed;
 }
 
-/* ---------- Summary cards ---------- */
-.adv-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-
-.adv-stat {
-  background: var(--stat-bg, #f1f5f9);
-  border-radius: 16px;
-  padding: 1rem 1.1rem 1.05rem;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.adv-stat--blue { --stat-bg: #e8eefc; }
-.adv-stat--green { --stat-bg: #e3f4e8; }
-.adv-stat--amber { --stat-bg: #fdf3dc; }
-.adv-stat--orange { --stat-bg: #fdeee2; }
-.adv-stat--red { --stat-bg: #fde4e4; }
-
-.adv-stat__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.55rem;
-}
-
-.adv-stat__label {
-  margin: 0;
-  color: #475569;
-  font-weight: 600;
-  font-size: 0.8rem;
-  font-family: inherit;
-  letter-spacing: 0;
-}
-
-.adv-stat__icon {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  font-size: 0.85rem;
-  background: #fff;
-}
-
 .is-blue { color: #1e3a8a; }
 .is-green { color: #15803d; }
 .is-amber { color: #b45309; }
 .is-orange { color: #c2410c; }
 .is-red { color: #b42318; }
-
-.adv-stat__value {
-  margin: 0 0 0.4rem;
-  color: #0f172a;
-  font-family: var(--bf-font-heading, inherit);
-  font-weight: 700;
-  font-size: 1.65rem;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.adv-stat__of {
-  font-size: 1rem;
-  font-weight: 600;
-  color: #64748b;
-  letter-spacing: 0;
-}
-
-.adv-stat__hint {
-  margin: auto 0 0;
-  color: #6e6e73;
-  font-size: 0.75rem;
-  font-weight: 500;
-  line-height: 1.35;
-}
-
-.adv-stat__link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  margin-left: 0.15rem;
-  color: #1e3a8a;
-  font-weight: 700;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.adv-stat__link .pi {
-  font-size: 0.65rem;
-}
-
-.adv-stat__link:hover {
-  text-decoration: underline;
-}
-
-.adv-meter {
-  height: 6px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.9);
-  overflow: hidden;
-  margin-bottom: 0.5rem;
-}
-
-.adv-meter__fill {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: #1e3a8a;
-  transition: width 0.4s ease;
-}
-
-.adv-meter__fill.is-full {
-  background: #b42318;
-}
 
 /* ---------- Main card + tabs ---------- */
 .adv-card {
@@ -3684,11 +3549,6 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
 }
 
 /* ---------- Responsive ---------- */
-@media (max-width: 1100px) {
-  .adv-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
 
 @media (max-width: 720px) {
   .app-view {
@@ -3710,15 +3570,6 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
   .adv-head__actions .adv-btn--primary {
     grid-column: 1 / -1;
     order: -1;
-  }
-  .adv-stats {
-    gap: 0.6rem;
-  }
-  .adv-stat {
-    padding: 0.85rem 0.9rem 0.9rem;
-  }
-  .adv-stat__value {
-    font-size: 1.4rem;
   }
   .adv-card {
     padding: 1rem 0.85rem;
@@ -3856,7 +3707,6 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
 
 @media (prefers-reduced-motion: reduce) {
   .adv-btn,
-  .adv-meter__fill,
   .adv-action,
   .adv-action[data-tip]::after {
     transition: none;
