@@ -2165,5 +2165,20 @@
   "announcementFeed": {
     "emptyCarousel": "No news at the moment",
     "emptyCarouselAlt": "Illustration: no active announcements"
+  },
+  "feedback": {
+    "added": "Added",
+    "saved": "Saved",
+    "sent": "Sent",
+    "published": "Published",
+    "uploaded": "Uploaded",
+    "created": "Created",
+    "registered": "Registered",
+    "booked": "Booking confirmed",
+    "residentAdded": "Resident added",
+    "residentsImported": "Residents added",
+    "spaceAdded": "Space added",
+    "changesSaved": "Changes saved",
+    "done": "Done"
   }
 }

@@ -17,6 +17,7 @@ import { RouterLink } from 'vue-router'
 import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import ResidentImportPanel from '@/residents/presentation/components/ResidentImportPanel.vue'
 import KpiPills from '@/shared/presentation/components/KpiPills.vue'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const { t, locale } = useI18n()
 const financesStore = useFinancesStore()
@@ -99,7 +100,7 @@ function closeAddResidentModal() {
   isAddResidentModalOpen.value = false
 }
 
-async function onAddResidentSubmit() {
+async function onAddResidentSubmit(event) {
   if (isSubmitting.value) return
 
   const name = residentForm.name.trim()
@@ -126,8 +127,10 @@ async function onAddResidentSubmit() {
     })
     await refreshPlanLimit()
     await financesStore.generateInitialReceipt(newResident)
-    residents.value = [newResident, ...residents.value]
+    await confirmSuccess(event, t('feedback.residentAdded'))
     isAddResidentModalOpen.value = false
+    residents.value = [newResident, ...residents.value]
+    markFresh('resident', newResident.id)
   } catch (error) {
     if (error?.code === 'RESIDENT_CODE_ALREADY_EXISTS') {
       residentFieldErrors.department = 'app.addResidentCodeExists'
@@ -276,6 +279,7 @@ const bulkMode = ref('file')
 async function onRosterImported(createdResidents) {
   if (!Array.isArray(createdResidents) || !createdResidents.length) return
   residents.value = [...createdResidents, ...residents.value]
+  createdResidents.forEach((resident) => markFresh('resident', resident.id))
   await refreshPlanLimit()
   // One idempotent server-side run for the current month instead of ~3 requests per resident:
   // MonthlyBillingService applies the same admission-date / bill-from-next-month rule
@@ -309,7 +313,7 @@ function parseBulkLine(line) {
   return { name, department: parsed.department }
 }
 
-async function onBulkResidentsSubmit() {
+async function onBulkResidentsSubmit(event) {
   if (isSubmittingBulk.value) return
 
   const lines = bulkResidentsText.value
@@ -371,7 +375,9 @@ async function onBulkResidentsSubmit() {
   }
 
   if (created.length) {
+    await confirmSuccess(event, t('feedback.residentsImported'))
     residents.value = [...created, ...residents.value]
+    created.forEach((resident) => markFresh('resident', resident.id))
     const failedLines = results
       .filter((r) => r.status === 'error')
       .map((r) => r.raw)
@@ -525,7 +531,7 @@ function clearAddSpaceImage() {
   spaceForm.imageUrl = ''
 }
 
-async function onAddSpaceSubmit() {
+async function onAddSpaceSubmit(event) {
   if (isSubmittingSpace.value) return
 
   const name = spaceForm.name.trim()
@@ -546,8 +552,10 @@ async function onAddSpaceSubmit() {
       rules: spaceForm.rules,
       maxReservationsPerDay: spaceForm.maxReservationsPerDay,
     })
-    spaces.value = [newSpace, ...spaces.value]
+    await confirmSuccess(event, t('feedback.spaceAdded'))
     isAddSpaceModalOpen.value = false
+    spaces.value = [newSpace, ...spaces.value]
+    markFresh('space', newSpace.id)
   } catch (error) {
     if (error?.code === 'SPACE_NAME_REQUIRED') {
       spaceNameInvalid.value = true
@@ -601,7 +609,7 @@ function clearEditSpaceImage() {
   editSpaceForm.imageUrl = ''
 }
 
-async function onEditSpaceSubmit() {
+async function onEditSpaceSubmit(event) {
   if (isSubmittingEditSpace.value) return
 
   const name = editSpaceForm.name.trim()
@@ -624,10 +632,12 @@ async function onEditSpaceSubmit() {
       status: editSpaceForm.status,
       maxReservationsPerDay: editSpaceForm.maxReservationsPerDay,
     })
+    await confirmSuccess(event, t('feedback.changesSaved'))
+    isEditSpaceModalOpen.value = false
     spaces.value = spaces.value.map((space) =>
       space.id === updated.id ? updated : space,
     )
-    isEditSpaceModalOpen.value = false
+    markFresh('space', updated.id)
   } catch (error) {
     if (error?.code === 'SPACE_NAME_REQUIRED') {
       editSpaceNameInvalid.value = true
@@ -1079,7 +1089,7 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
               </thead>
               <tbody>
                 <template v-for="resident in filteredResidents" :key="resident.id">
-                  <tr :class="{ 'has-invite': accessLinks[resident.id] }">
+                  <tr :class="{ 'has-invite': accessLinks[resident.id], 'bf-fresh': isFresh('resident', resident.id) }">
                     <td class="c-main">
                       <div class="adv-person">
                         <span class="adv-avatar" :class="`is-${residentStatus(resident)}`" aria-hidden="true">
@@ -1236,7 +1246,12 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
           </div>
         </div>
         <ul v-else class="adv-spaces" role="list">
-          <li v-for="space in spaces" :key="space.id" class="adv-space">
+          <li
+            v-for="space in spaces"
+            :key="space.id"
+            class="adv-space"
+            :class="{ 'bf-fresh': isFresh('space', space.id) }"
+          >
             <div class="adv-space__media">
               <img
                 v-if="space.imageUrl"

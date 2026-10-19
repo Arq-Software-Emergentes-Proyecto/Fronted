@@ -2165,5 +2165,20 @@
   "announcementFeed": {
     "emptyCarousel": "No hay novedades por el momento",
     "emptyCarouselAlt": "Ilustración: sin comunicados vigentes"
+  },
+  "feedback": {
+    "added": "Agregado",
+    "saved": "Guardado",
+    "sent": "Enviado",
+    "published": "Publicado",
+    "uploaded": "Subido",
+    "created": "Creado",
+    "registered": "Registrado",
+    "booked": "Reserva confirmada",
+    "residentAdded": "Residente agregado",
+    "residentsImported": "Residentes agregados",
+    "spaceAdded": "Espacio agregado",
+    "changesSaved": "Cambios guardados",
+    "done": "Listo"
   }
 }
