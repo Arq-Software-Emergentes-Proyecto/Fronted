@@ -1,9 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import Button from 'primevue/button'
-import Column from 'primevue/column'
-import DataTable from 'primevue/datatable'
 import Dialog from 'primevue/dialog'
 import Select from 'primevue/select'
 import InputNumber from 'primevue/inputnumber'
@@ -146,14 +143,35 @@ onBeforeUnmount(() => {
   balanceSeq += 1
 })
 
-const balanceMonthLabel = computed(() => {
-  const [y, m] = monthKeyOf(balanceMonth.value).split('-').map(Number)
+const intlLocale = computed(() => (locale.value === 'es' ? 'es-PE' : 'en-US'))
+
+/** Month the page is looking at, always a valid YYYY-MM (falls back to the current month). */
+const selectedMonthKey = computed(() => {
+  const key = monthKeyOf(balanceMonth.value)
+  return MONTH_RE.test(key) ? key : currentMonthInput()
+})
+
+/** Month stepper (replaces the native month input, which renders in the browser's language). */
+function shiftBalanceMonth(delta) {
+  const [y, m] = selectedMonthKey.value.split('-').map(Number)
+  const d = new Date(y, m - 1 + delta, 1)
+  balanceMonth.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/** Localized month name for use mid-sentence ("octubre de 2026" / "October 2026"). */
+const balanceMonthText = computed(() => {
+  const [y, m] = selectedMonthKey.value.split('-').map(Number)
   if (!y || !m) return ''
-  const label = new Date(y, m - 1, 1).toLocaleDateString(locale.value === 'es' ? 'es-PE' : 'en-US', {
+  return new Date(y, m - 1, 1).toLocaleDateString(intlLocale.value, {
     month: 'long',
     year: 'numeric',
   })
-  return label.charAt(0).toUpperCase() + label.slice(1)
+})
+
+/** Same label capitalized, for the stepper ("Octubre de 2026"). */
+const balanceMonthLabel = computed(() => {
+  const label = balanceMonthText.value
+  return label ? label.charAt(0).toUpperCase() + label.slice(1) : ''
 })
 
 const serviceForm = reactive({
@@ -250,9 +268,96 @@ const nfDate = computed(
     const d =
       /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(s) ? new Date(`${s}T12:00:00`) : new Date(s)
     if (!Number.isFinite(d.getTime())) return s
-    return new Intl.DateTimeFormat(locale.value === 'es' ? 'es-PE' : 'en-US').format(d)
+    // "7 oct. 2026" / "Oct 7, 2026"
+    return new Intl.DateTimeFormat(intlLocale.value, {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    }).format(d)
   },
 )
+
+/* ---------- Presentation helpers (tabs, lists) ---------- */
+
+const activeTab = ref('expenses')
+const TAB_KEYS = ['expenses', 'services', 'fixed']
+
+const tabs = computed(() => [
+  { key: 'expenses', label: t('collectionsMgmt.tabExpenses'), count: expenses.value.length },
+  { key: 'services', label: t('collectionsMgmt.tabServices'), count: sharedServices.value.length },
+  { key: 'fixed', label: t('collectionsMgmt.tabFixed'), count: fixedRecipients.value.length },
+])
+
+function selectTab(key) {
+  activeTab.value = key
+}
+
+/** WAI-ARIA tabs: arrows move between tabs, Home/End jump to the ends. */
+function onTabKeydown(event) {
+  const idx = TAB_KEYS.indexOf(activeTab.value)
+  let next = -1
+  if (event.key === 'ArrowRight') next = (idx + 1) % TAB_KEYS.length
+  else if (event.key === 'ArrowLeft') next = (idx - 1 + TAB_KEYS.length) % TAB_KEYS.length
+  else if (event.key === 'Home') next = 0
+  else if (event.key === 'End') next = TAB_KEYS.length - 1
+  if (next < 0) return
+  event.preventDefault()
+  activeTab.value = TAB_KEYS[next]
+  document.getElementById(`cme-tab-${TAB_KEYS[next]}`)?.focus()
+}
+
+/** Expenses tab: only the selected month by default, so its total matches "Gastos del mes". */
+const expensesOnlyMonth = ref(true)
+
+const sortedExpenses = computed(() =>
+  [...expenses.value].sort((a, b) =>
+    String(b.purchaseDate ?? '').localeCompare(String(a.purchaseDate ?? '')),
+  ),
+)
+
+const visibleExpenses = computed(() =>
+  expensesOnlyMonth.value
+    ? sortedExpenses.value.filter((e) => monthKeyOf(e.purchaseDate) === selectedMonthKey.value)
+    : sortedExpenses.value,
+)
+
+const visibleExpensesTotal = computed(() =>
+  visibleExpenses.value.reduce((sum, e) => sum + (Number(e.amount) || 0), 0),
+)
+
+function serviceSplitText(row) {
+  const total = nfCurrency.value(Number(row.amount) || 0)
+  const count = Number(row.residentCount) || 0
+  if (count <= 0) return t('collectionsMgmt.serviceNoUnits', { total })
+  const share = nfCurrency.value(Number(row.perResidentShare) || 0)
+  return t('collectionsMgmt.serviceSplit', { total, share, count }, count)
+}
+
+function intervalDaysOf(row) {
+  return Math.max(1, Math.floor(Number(row?.intervalDays) || 0))
+}
+
+function initialsOf(name) {
+  const parts = String(name ?? '').trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return '?'
+  const first = parts[0].charAt(0)
+  const last = parts.length > 1 ? parts[parts.length - 1].charAt(0) : ''
+  return `${first}${last}`.toUpperCase()
+}
+
+const historyOpen = ref(false)
+
+const fixedHistoryTotal = computed(() =>
+  fixedHistoryRows.value.reduce((sum, h) => sum + (Number(h.amount) || 0), 0),
+)
+
+function refreshAll() {
+  loadData()
+  loadCosts()
+  loadSharedServices()
+  loadFixedRecipients()
+  void loadMonthBalance()
+}
 
 async function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -344,7 +449,8 @@ async function loadFixedRecipients() {
 function resetForm() {
   form.name = ''
   form.amount = null
-  form.purchaseDate = ''
+  // Most expenses are recorded the day they happen: start from today (still editable).
+  form.purchaseDate = formatLocalYYYYMMDD()
   form.invoicePhotoUrl = ''
   submitError.value = ''
   clearFieldErrors()
@@ -617,389 +723,363 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="app-view">
-    <div class="header-with-actions">
-      <div>
-        <h1 class="app-view__title">{{ t('app.collectionsManagementExpenses') }}</h1>
+  <div class="app-view cme">
+    <header class="cme-head">
+      <div class="cme-head__text">
+        <h1 class="cme-head__title">{{ t('collectionsMgmt.pageTitle') }}</h1>
+        <p class="cme-head__sub">{{ t('collectionsMgmt.pageSubtitle') }}</p>
       </div>
-      <Button
-        icon="pi pi-refresh"
-        rounded
-        text
-        severity="secondary"
-        :loading="state.isLoading"
-        @click="loadData(); loadCosts(); loadSharedServices(); loadFixedRecipients();"
-      />
-    </div>
+      <div class="cme-head__controls">
+        <div class="cme-head__nav">
+          <div class="cme-month" role="group" :aria-label="t('collectionsMgmt.monthSelectorLabel')">
+            <button
+              type="button"
+              class="cme-month__step"
+              :aria-label="t('financeAdmin.monthPrev')"
+              :title="t('financeAdmin.monthPrev')"
+              @click="shiftBalanceMonth(-1)"
+            >
+              <i class="pi pi-chevron-left" aria-hidden="true" />
+            </button>
+            <span class="cme-month__label" aria-live="polite">
+              <i class="pi pi-calendar" aria-hidden="true" />
+              {{ balanceMonthLabel }}
+            </span>
+            <button
+              type="button"
+              class="cme-month__step"
+              :aria-label="t('financeAdmin.monthNext')"
+              :title="t('financeAdmin.monthNext')"
+              @click="shiftBalanceMonth(1)"
+            >
+              <i class="pi pi-chevron-right" aria-hidden="true" />
+            </button>
+          </div>
+          <button
+            type="button"
+            class="cme-icon-btn"
+            :aria-label="t('collectionsMgmt.refresh')"
+            :title="t('collectionsMgmt.refresh')"
+            :disabled="state.isLoading"
+            @click="refreshAll"
+          >
+            <i class="pi" :class="state.isLoading ? 'pi-spin pi-spinner' : 'pi-refresh'" aria-hidden="true" />
+          </button>
+        </div>
+        <div class="cme-head__actions" role="group" :aria-label="t('collectionsMgmt.headerActions')">
+          <button type="button" class="cme-btn" @click="openServiceModal">
+            <i class="pi pi-bolt" aria-hidden="true" />
+            {{ t('sharedServices.addService') }}
+          </button>
+          <button type="button" class="cme-btn" @click="openFixedModal">
+            <i class="pi pi-user-plus" aria-hidden="true" />
+            {{ t('collectionsMgmt.addFixedPayout') }}
+          </button>
+          <button type="button" class="cme-btn cme-btn--primary" @click="openModal">
+            <i class="pi pi-plus" aria-hidden="true" />
+            {{ t('collectionsMgmt.registerExpense') }}
+          </button>
+        </div>
+      </div>
+    </header>
 
-    <p v-if="state.isLoading" class="app-view__status">{{ t('collectionsMgmt.loading') }}</p>
+    <p v-if="state.isLoading && !state.receipts.length" class="cme-status" role="status">
+      {{ t('collectionsMgmt.loading') }}
+    </p>
     <LoadErrorRetry
       v-else-if="state.error"
       :message="t('collectionsMgmt.loadError')"
-      @retry="loadData(); loadCosts(); loadSharedServices(); loadFixedRecipients();"
+      :loading="state.isLoading"
+      @retry="refreshAll"
     />
 
     <template v-else>
-      <div class="collections-page">
-        <section
-          class="collections-hero"
-          aria-labelledby="collections-balance-heading"
-        >
-          <h2 id="collections-balance-heading" class="collections-hero__title">
-            {{ t('collectionsMgmt.netAfterExpenses') }}
+      <!-- 1. Month summary: income − expenses = balance -->
+      <section class="cme-summary" aria-labelledby="cme-summary-title" :aria-busy="balanceLoading ? 'true' : 'false'">
+        <div class="cme-section-head">
+          <h2 id="cme-summary-title" class="cme-section-title">
+            {{ t('collectionsMgmt.summaryTitle', { month: balanceMonthText }) }}
           </h2>
-          <p class="collections-hero__amount">{{ nfCurrency(balanceAfterAll) }}</p>
-          <ul class="collections-hero__rows" aria-describedby="collections-balance-heading">
-            <li class="collections-hero__row">
-              <span class="collections-hero__row-label">{{
-                t('collectionsMgmt.grossCollectedShort')
-              }}</span>
-              <span class="collections-hero__row-value">{{ nfCurrency(grossCollected) }}</span>
-            </li>
-            <li class="collections-hero__row">
-              <span class="collections-hero__row-label">{{
-                t('collectionsMgmt.expensesTotalShort')
-              }}</span>
-              <span class="collections-hero__row-value">{{ nfCurrency(totalCosts) }}</span>
-            </li>
-            <li class="collections-hero__row">
-              <span class="collections-hero__row-label">{{
-                t('collectionsMgmt.fixedPaidShort')
-              }}</span>
-              <span class="collections-hero__row-value">{{ nfCurrency(totalFixedPaid) }}</span>
-            </li>
-          </ul>
-          <p class="collections-hero__hint">{{ t('collectionsMgmt.amountHint') }}</p>
-        </section>
+          <p class="cme-section-hint">{{ t('collectionsMgmt.summaryHint') }}</p>
+        </div>
 
-        <section class="collections-net" aria-labelledby="collections-net-heading">
-          <header class="collections-net__head">
-            <h2 id="collections-net-heading" class="collections-hero__title">
-              {{ t('financeOps.netBalanceTitle') }}
-            </h2>
-            <label class="collections-net__month">
-              <span>{{ t('financeOps.netBalanceMonth') }}</span>
-              <input v-model="balanceMonth" type="month" class="collections-net__input" />
-            </label>
-          </header>
-          <p
-            class="collections-hero__amount"
-            :class="{ 'collections-net__amount--negative': monthBalance.net < 0 }"
-            aria-live="polite"
-          >
-            {{ balanceLoading ? '…' : nfCurrency(monthBalance.net) }}
-          </p>
-          <ul class="collections-hero__rows">
-            <li class="collections-hero__row">
-              <span class="collections-hero__row-label">{{ t('financeOps.netIncome') }}</span>
-              <span class="collections-hero__row-value">{{ nfCurrency(monthBalance.income) }}</span>
-            </li>
-            <li class="collections-hero__row">
-              <span class="collections-hero__row-label">{{ t('financeOps.netExpenses') }}</span>
-              <span class="collections-hero__row-value">− {{ nfCurrency(monthBalance.expenses) }}</span>
-            </li>
-          </ul>
-          <p class="collections-hero__hint">
-            {{ t('financeOps.netBalanceHint', { month: balanceMonthLabel }) }}
-          </p>
-          <p v-if="balanceError" class="collections-form__error" role="alert">{{ balanceError }}</p>
-        </section>
+        <div class="cme-eq">
+          <article class="cme-stat cme-stat--green">
+            <div class="cme-stat__head">
+              <h3 class="cme-stat__label">{{ t('collectionsMgmt.incomeLabel') }}</h3>
+              <span class="cme-stat__icon cme-stat__icon--green"><i class="pi pi-arrow-down" aria-hidden="true" /></span>
+            </div>
+            <p class="cme-stat__value">{{ balanceLoading ? '…' : nfCurrency(monthBalance.income) }}</p>
+            <p class="cme-stat__hint">{{ t('collectionsMgmt.incomeHint') }}</p>
+          </article>
 
-        <section class="collections-panel" aria-labelledby="collections-costs-heading">
-          <header class="collections-panel__head">
-            <h2 id="collections-costs-heading" class="collections-panel__title">
-              {{ t('collectionsMgmt.expensesSectionTitle') }}
-            </h2>
-            <button
-              type="button"
-              class="collections-panel__btn"
-              @click="openModal"
+          <span class="cme-eq__op" role="img" :aria-label="t('collectionsMgmt.opMinus')">−</span>
+
+          <article class="cme-stat cme-stat--orange">
+            <div class="cme-stat__head">
+              <h3 class="cme-stat__label">{{ t('collectionsMgmt.expensesLabel') }}</h3>
+              <span class="cme-stat__icon cme-stat__icon--orange"><i class="pi pi-arrow-up" aria-hidden="true" /></span>
+            </div>
+            <p class="cme-stat__value">{{ balanceLoading ? '…' : nfCurrency(monthBalance.expenses) }}</p>
+            <p class="cme-stat__hint">{{ t('collectionsMgmt.expensesHint') }}</p>
+          </article>
+
+          <span class="cme-eq__op" role="img" :aria-label="t('collectionsMgmt.opEquals')">=</span>
+
+          <article class="cme-stat" :class="monthBalance.net < 0 ? 'cme-stat--red' : 'cme-stat--green'">
+            <div class="cme-stat__head">
+              <h3 class="cme-stat__label">{{ t('collectionsMgmt.netLabel') }}</h3>
+              <span class="cme-stat__icon" :class="monthBalance.net < 0 ? 'cme-stat__icon--red' : 'cme-stat__icon--green'">
+                <i class="pi" :class="monthBalance.net < 0 ? 'pi-arrow-down-right' : 'pi-check'" aria-hidden="true" />
+              </span>
+            </div>
+            <p
+              class="cme-stat__value"
+              :class="{ 'is-negative': monthBalance.net < 0 }"
+              aria-live="polite"
             >
-              {{ t('collectionsMgmt.addCost') }}
-            </button>
-          </header>
+              {{ balanceLoading ? '…' : nfCurrency(monthBalance.net) }}
+            </p>
+            <p class="cme-stat__hint">
+              {{ monthBalance.net < 0 ? t('collectionsMgmt.netHintNegative') : t('collectionsMgmt.netHintPositive') }}
+            </p>
+          </article>
+        </div>
+        <p v-if="balanceError" class="cme-inline-error" role="alert">{{ balanceError }}</p>
+      </section>
 
-        <Dialog
-          v-model:visible="modalOpen"
-          modal
-          :header="t('collectionsMgmt.modalTitle')"
-          class="collections-cost-dialog"
-          :style="{ width: 'min(26rem, 92vw)' }"
-          :draggable="false"
-        >
-          <div class="collections-form">
-            <div class="collections-form__field">
-              <label for="collections-cost-name">{{ t('collectionsMgmt.nameLabel') }}</label>
-              <InputText
-                id="collections-cost-name"
-                v-model="form.name"
-                class="collections-form__input"
-                autocomplete="off"
-                :invalid="Boolean(fieldErrors.name)"
-                :aria-invalid="Boolean(fieldErrors.name)"
-                aria-describedby="collections-cost-name-error"
-                fluid
-              />
-              <small v-if="fieldErrors.name" id="collections-cost-name-error" class="collections-form__field-error">
-                {{ fieldErrors.name }}
-              </small>
+      <!-- 2. All-time cash balance -->
+      <section class="cme-cash" aria-labelledby="cme-cash-title">
+        <div class="cme-cash__main">
+          <span class="cme-cash__icon"><i class="pi pi-wallet" aria-hidden="true" /></span>
+          <div class="cme-cash__text">
+            <div class="cme-cash__title-row">
+              <h2 id="cme-cash-title" class="cme-cash__title">{{ t('collectionsMgmt.cashTitle') }}</h2>
+              <span class="cme-pill">{{ t('collectionsMgmt.cashBadge') }}</span>
             </div>
-            <div class="collections-form__field">
-              <label for="collections-cost-amount">{{ t('collectionsMgmt.priceLabel') }}</label>
-              <InputNumber
-                id="collections-cost-amount"
-                v-model="form.amount"
-                class="collections-form__input-num w-full"
-                :min="0"
-                mode="decimal"
-                :maxFractionDigits="2"
-                :invalid="Boolean(fieldErrors.amount)"
-                :aria-invalid="Boolean(fieldErrors.amount)"
-                aria-describedby="collections-cost-amount-error"
-                fluid
-              />
-              <small v-if="fieldErrors.amount" id="collections-cost-amount-error" class="collections-form__field-error">
-                {{ fieldErrors.amount }}
-              </small>
-            </div>
-            <div class="collections-form__field">
-              <label for="collections-cost-date">{{ t('collectionsMgmt.purchaseDateLabel') }}</label>
-              <InputText
-                id="collections-cost-date"
-                v-model="form.purchaseDate"
-                class="collections-form__input collections-form__input--date"
-                type="date"
-                :invalid="Boolean(fieldErrors.purchaseDate)"
-                :aria-invalid="Boolean(fieldErrors.purchaseDate)"
-                fluid
-              />
-              <small v-if="fieldErrors.purchaseDate" class="collections-form__field-error">
-                {{ fieldErrors.purchaseDate }}
-              </small>
-            </div>
-            <div class="collections-form__field collections-form__field--photo">
-              <span class="collections-form__photo-label">{{ t('collectionsMgmt.invoiceLabel') }}</span>
-              <p class="collections-form__hint">{{ t('collectionsMgmt.invoiceHint') }}</p>
-              <label class="collections-form__file">
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-                  class="collections-form__file-input"
-                  :disabled="processingPhoto || saving"
-                  @change="onInvoiceChange"
-                />
-                <span class="collections-form__file-trigger">{{
-                  processingPhoto ? t('collectionsMgmt.processingPhoto') : t('collectionsMgmt.invoiceChoose')
-                }}</span>
-              </label>
-              <div v-if="form.invoicePhotoUrl" class="collections-form__preview-row">
-                <img
-                  :src="form.invoicePhotoUrl"
-                  :alt="
-                    form.name.trim() ? form.name.trim() : t('collectionsMgmt.invoiceLabel')
-                  "
-                  class="collections-form__preview"
-                  width="80"
-                  height="80"
-                />
-                <Button
-                  type="button"
-                  :label="t('collectionsMgmt.removePhoto')"
-                  variant="text"
-                  text
-                  @click="form.invoicePhotoUrl = ''"
-                />
-              </div>
-            </div>
-            <p v-if="submitError" class="collections-form__error" role="alert">{{ submitError }}</p>
+            <p class="cme-cash__hint">{{ t('collectionsMgmt.cashHint') }}</p>
           </div>
-          <template #footer>
-            <ConfirmActions
-              :cancel-label="t('app.cancelAction')"
-              :confirm-label="t('collectionsMgmt.accept')"
-              :loading="saving"
-              @cancel="closeModal"
-              @confirm="submitCost"
-            />
-          </template>
-        </Dialog>
-
-        <p v-if="costsLoading && !costsLoadError" class="collections-panel__loading">
-          {{ t('collectionsMgmt.loading') }}
+        </div>
+        <ul class="cme-cash__parts" :title="t('collectionsMgmt.amountHint')">
+          <li>{{ t('collectionsMgmt.cashCollected', { amount: nfCurrency(grossCollected) }) }}</li>
+          <li>{{ t('collectionsMgmt.cashExpenses', { amount: nfCurrency(totalCosts) }) }}</li>
+          <li>{{ t('collectionsMgmt.cashFixed', { amount: nfCurrency(totalFixedPaid) }) }}</li>
+        </ul>
+        <p class="cme-cash__value" :class="{ 'is-negative': balanceAfterAll < 0 }">
+          {{ nfCurrency(balanceAfterAll) }}
         </p>
+      </section>
 
-        <DataTable :value="expenses" class="collections-data collections-table">
-          <template #empty>
-            <p class="collections-table__empty">{{ t('collectionsMgmt.emptyCosts') }}</p>
-          </template>
-          <Column :header="t('collectionsMgmt.tableInvoice')" class="collections-col-photo">
-            <template #body="{ data }">
-              <img
-                v-if="data.invoicePhotoUrl"
-                :src="data.invoicePhotoUrl"
-                :alt="data.name"
-                class="collections-thumb"
-                width="44"
-                height="44"
-              />
-              <span v-else class="collections-thumb-placeholder">—</span>
-            </template>
-          </Column>
-          <Column field="name" :header="t('collectionsMgmt.tableName')" />
-          <Column :header="t('collectionsMgmt.tableAmount')">
-            <template #body="{ data }">
-              {{ nfCurrency(Number(data.amount) || 0) }}
-            </template>
-          </Column>
-          <Column :header="t('collectionsMgmt.tableDate')">
-            <template #body="{ data }">
-              {{ nfDate(data.purchaseDate) }}
-            </template>
-          </Column>
-          <Column
-            :header="t('app.deleteAction')"
-            class="collections-col-actions"
-            header-class="collections-col-actions"
-            body-class="collections-col-actions"
-            :style="{ width: '4.25rem' }"
-            :header-style="{ width: '4.25rem', textAlign: 'right' }"
-            :body-style="{ width: '4.25rem', textAlign: 'right' }"
+      <!-- 3. Records: expenses · shared utilities · fixed payouts -->
+      <section class="cme-card">
+        <div class="cme-tabs" role="tablist" :aria-label="t('collectionsMgmt.tabsLabel')">
+          <button
+            v-for="tab in tabs"
+            :id="`cme-tab-${tab.key}`"
+            :key="tab.key"
+            type="button"
+            role="tab"
+            class="cme-tab"
+            :class="{ 'is-active': activeTab === tab.key }"
+            :aria-selected="activeTab === tab.key ? 'true' : 'false'"
+            :aria-controls="`cme-panel-${tab.key}`"
+            :tabindex="activeTab === tab.key ? 0 : -1"
+            @click="selectTab(tab.key)"
+            @keydown="onTabKeydown"
           >
-            <template #body="{ data }">
+            {{ tab.label }}
+            <span class="cme-tab__count">{{ tab.count }}</span>
+          </button>
+        </div>
+
+        <!-- Expenses -->
+        <div
+          v-show="activeTab === 'expenses'"
+          id="cme-panel-expenses"
+          class="cme-panel"
+          role="tabpanel"
+          aria-labelledby="cme-tab-expenses"
+          tabindex="0"
+        >
+          <div class="cme-panel__bar">
+            <p class="cme-panel__intro">{{ t('collectionsMgmt.expensesIntro') }}</p>
+            <div class="cme-panel__tools">
               <button
                 type="button"
-                class="collections-row-delete"
-                :aria-label="t('app.deleteAction')"
-                @click="askDelete('expense', data)"
+                class="cme-toggle"
+                :aria-pressed="expensesOnlyMonth ? 'true' : 'false'"
+                @click="expensesOnlyMonth = !expensesOnlyMonth"
               >
-                <i class="pi pi-trash" aria-hidden="true" />
+                <span class="cme-toggle__track" aria-hidden="true"><span class="cme-toggle__knob" /></span>
+                {{ t('collectionsMgmt.onlyMonth', { month: balanceMonthText }) }}
               </button>
-            </template>
-          </Column>
-        </DataTable>
-
-        <LoadErrorRetry
-          v-if="costsLoadError"
-          compact
-          :message="costsLoadError"
-          :loading="costsLoading"
-          @retry="loadCosts"
-        />
-        </section>
-
-        <section class="collections-panel" aria-labelledby="collections-services-heading">
-          <header class="collections-panel__head">
-            <h2 id="collections-services-heading" class="collections-panel__title">
-              {{ t('sharedServices.sectionTitle') }}
-            </h2>
-            <button
-              type="button"
-              class="collections-panel__btn"
-              @click="openServiceModal"
-            >
-              {{ t('sharedServices.addService') }}
-            </button>
-          </header>
-
-          <Dialog
-            v-model:visible="serviceModalOpen"
-            modal
-            :header="t('sharedServices.modalTitle')"
-            class="collections-service-dialog"
-            :style="{ width: 'min(26rem, 92vw)' }"
-            :draggable="false"
-          >
-            <div class="collections-form">
-              <div class="collections-form__field">
-                <label for="shared-service-type">{{ t('sharedServices.typeLabel') }}</label>
-                <Select
-                  id="shared-service-type"
-                  v-model="serviceForm.type"
-                  :options="serviceTypeOptions"
-                  option-label="label"
-                  option-value="value"
-                  class="collections-form__input w-full"
-                  fluid
-                />
-              </div>
-              <div class="collections-form__field">
-                <label for="shared-service-amount">{{ t('sharedServices.totalLabel') }}</label>
-                <InputNumber
-                  id="shared-service-amount"
-                  v-model="serviceForm.amount"
-                  class="collections-form__input-num w-full"
-                  :min="0"
-                  mode="decimal"
-                  :maxFractionDigits="2"
-                  fluid
-                />
-              </div>
-              <p v-if="serviceSubmitError" class="collections-form__error" role="alert">
-                {{ serviceSubmitError }}
-              </p>
+              <span v-if="visibleExpenses.length" class="cme-total">
+                {{
+                  expensesOnlyMonth
+                    ? t('collectionsMgmt.totalMonth', { month: balanceMonthText, amount: nfCurrency(visibleExpensesTotal) })
+                    : t('collectionsMgmt.totalAll', { amount: nfCurrency(visibleExpensesTotal) })
+                }}
+              </span>
             </div>
-            <template #footer>
-              <ConfirmActions
-                :cancel-label="t('app.cancelAction')"
-                :confirm-label="t('sharedServices.save')"
-                :loading="serviceSaving"
-                @cancel="closeServiceModal"
-                @confirm="submitSharedService"
-              />
-            </template>
-          </Dialog>
+          </div>
 
-          <p v-if="servicesLoading && !servicesLoadError" class="collections-panel__loading">
-            {{ t('collectionsMgmt.loading') }}
-          </p>
+          <p v-if="costsLoading && !costsLoadError" class="cme-status">{{ t('collectionsMgmt.loading') }}</p>
 
-          <DataTable :value="sharedServices" class="collections-data collections-table">
-            <template #empty>
-              <p class="collections-table__empty">{{ t('sharedServices.emptyServices') }}</p>
-            </template>
-            <Column :header="t('sharedServices.tableType')">
-              <template #body="{ data }">
-                {{ serviceTypeLabel(data.type) }}
-              </template>
-            </Column>
-            <Column :header="t('sharedServices.tableAmount')">
-              <template #body="{ data }">
-                {{ nfCurrency(Number(data.amount) || 0) }}
-              </template>
-            </Column>
-            <Column :header="t('sharedServices.tableShare')">
-              <template #body="{ data }">
-                <template v-if="Number(data.residentCount) > 0">
-                  {{ nfCurrency(Number(data.perResidentShare) || 0) }}
-                  <span class="collections-share-hint">
-                    {{ t('sharedServices.shareUnits', { count: data.residentCount }) }}
-                  </span>
-                </template>
-                <span v-else>—</span>
-              </template>
-            </Column>
-            <Column
-              :header="t('app.deleteAction')"
-              class="collections-col-actions"
-              header-class="collections-col-actions"
-              body-class="collections-col-actions"
-              :style="{ width: '4.25rem' }"
-              :header-style="{ width: '4.25rem', textAlign: 'right' }"
-              :body-style="{ width: '4.25rem', textAlign: 'right' }"
-            >
-              <template #body="{ data }">
-                <button
-                  type="button"
-                  class="collections-row-delete"
-                  :aria-label="t('app.deleteAction')"
-                  @click="askDelete('service', data)"
-                >
-                  <i class="pi pi-trash" aria-hidden="true" />
-                </button>
-              </template>
-            </Column>
-          </DataTable>
-          <p class="collections-panel__hint">{{ t('sharedServices.splitHint') }}</p>
+          <div v-if="visibleExpenses.length" class="cme-table-wrap">
+            <table class="cme-table">
+              <thead>
+                <tr>
+                  <th scope="col">{{ t('collectionsMgmt.colExpense') }}</th>
+                  <th scope="col">{{ t('collectionsMgmt.tableDate') }}</th>
+                  <th scope="col" class="is-num">{{ t('collectionsMgmt.tableAmount') }}</th>
+                  <th scope="col" class="is-actions">
+                    <span class="visually-hidden">{{ t('collectionsMgmt.colActions') }}</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in visibleExpenses" :key="row.id">
+                  <td class="c-main">
+                    <div class="cme-item">
+                      <img
+                        v-if="row.invoicePhotoUrl"
+                        :src="row.invoicePhotoUrl"
+                        :alt="row.name"
+                        class="cme-thumb"
+                        width="40"
+                        height="40"
+                      />
+                      <span v-else class="cme-thumb cme-thumb--empty" aria-hidden="true">
+                        <i class="pi pi-receipt" />
+                      </span>
+                      <div class="cme-item__text">
+                        <strong>{{ row.name }}</strong>
+                        <small v-if="!row.invoicePhotoUrl">{{ t('collectionsMgmt.noInvoice') }}</small>
+                      </div>
+                    </div>
+                  </td>
+                  <td :data-label="t('collectionsMgmt.tableDate')">{{ nfDate(row.purchaseDate) }}</td>
+                  <td class="is-num" :data-label="t('collectionsMgmt.tableAmount')">
+                    <strong class="cme-amount">{{ nfCurrency(Number(row.amount) || 0) }}</strong>
+                  </td>
+                  <td class="c-actions">
+                    <button
+                      type="button"
+                      class="cme-action cme-action--danger"
+                      :aria-label="t('collectionsMgmt.deleteExpenseAria', { name: row.name })"
+                      :data-tip="t('app.deleteAction')"
+                      @click="askDelete('expense', row)"
+                    >
+                      <i class="pi pi-trash" aria-hidden="true" />
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else-if="!costsLoading" class="cme-empty">
+            <span class="cme-empty__icon"><i class="pi pi-receipt" aria-hidden="true" /></span>
+            <p class="cme-empty__text">
+              {{
+                expensesOnlyMonth && expenses.length
+                  ? t('collectionsMgmt.emptyExpensesMonth', { month: balanceMonthText })
+                  : t('collectionsMgmt.emptyExpensesAll')
+              }}
+            </p>
+            <div class="cme-empty__actions">
+              <button
+                v-if="expensesOnlyMonth && expenses.length"
+                type="button"
+                class="cme-btn"
+                @click="expensesOnlyMonth = false"
+              >
+                {{ t('collectionsMgmt.showAllExpenses') }}
+              </button>
+              <button type="button" class="cme-btn cme-btn--primary" @click="openModal">
+                <i class="pi pi-plus" aria-hidden="true" />
+                {{ t('collectionsMgmt.registerExpense') }}
+              </button>
+            </div>
+          </div>
+
+          <LoadErrorRetry
+            v-if="costsLoadError"
+            compact
+            :message="costsLoadError"
+            :loading="costsLoading"
+            @retry="loadCosts"
+          />
+        </div>
+
+        <!-- Shared utilities -->
+        <div
+          v-show="activeTab === 'services'"
+          id="cme-panel-services"
+          class="cme-panel"
+          role="tabpanel"
+          aria-labelledby="cme-tab-services"
+          tabindex="0"
+        >
+          <div class="cme-panel__bar">
+            <p class="cme-panel__intro">{{ t('sharedServices.splitHint') }}</p>
+          </div>
+
+          <p v-if="servicesLoading && !servicesLoadError" class="cme-status">{{ t('collectionsMgmt.loading') }}</p>
+
+          <div v-if="sharedServices.length" class="cme-table-wrap">
+            <table class="cme-table">
+              <thead>
+                <tr>
+                  <th scope="col">{{ t('sharedServices.tableType') }}</th>
+                  <th scope="col">{{ t('collectionsMgmt.colSplit') }}</th>
+                  <th scope="col" class="is-actions">
+                    <span class="visually-hidden">{{ t('collectionsMgmt.colActions') }}</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in sharedServices" :key="row.id">
+                  <td class="c-main">
+                    <div class="cme-item">
+                      <span
+                        class="cme-thumb cme-thumb--icon"
+                        :class="row.type === 'electricity' ? 'is-amber' : 'is-blue'"
+                        aria-hidden="true"
+                      >
+                        <i class="pi" :class="row.type === 'electricity' ? 'pi-bolt' : 'pi-cloud'" />
+                      </span>
+                      <div class="cme-item__text">
+                        <strong>{{ serviceTypeLabel(row.type) }}</strong>
+                        <small>{{ t('collectionsMgmt.serviceAddedToBills') }}</small>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="c-wide" :data-label="t('collectionsMgmt.colSplit')">{{ serviceSplitText(row) }}</td>
+                  <td class="c-actions">
+                    <button
+                      type="button"
+                      class="cme-action cme-action--danger"
+                      :aria-label="t('collectionsMgmt.deleteServiceAria', { name: serviceTypeLabel(row.type) })"
+                      :data-tip="t('app.deleteAction')"
+                      @click="askDelete('service', row)"
+                    >
+                      <i class="pi pi-trash" aria-hidden="true" />
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else-if="!servicesLoading" class="cme-empty">
+            <span class="cme-empty__icon"><i class="pi pi-bolt" aria-hidden="true" /></span>
+            <p class="cme-empty__text">{{ t('sharedServices.emptyServices') }}</p>
+            <div class="cme-empty__actions">
+              <button type="button" class="cme-btn cme-btn--primary" @click="openServiceModal">
+                <i class="pi pi-plus" aria-hidden="true" />
+                {{ t('sharedServices.addService') }}
+              </button>
+            </div>
+          </div>
 
           <LoadErrorRetry
             v-if="servicesLoadError"
@@ -1008,786 +1088,1733 @@ onMounted(async () => {
             :loading="servicesLoading"
             @retry="loadSharedServices"
           />
-        </section>
+        </div>
 
-        <section class="collections-panel" aria-labelledby="collections-fixed-heading">
-          <header class="collections-panel__head">
-            <h2 id="collections-fixed-heading" class="collections-panel__title">
-              {{ t('fixedPay.sectionTitle') }}
-            </h2>
+        <!-- Fixed payouts -->
+        <div
+          v-show="activeTab === 'fixed'"
+          id="cme-panel-fixed"
+          class="cme-panel"
+          role="tabpanel"
+          aria-labelledby="cme-tab-fixed"
+          tabindex="0"
+        >
+          <div class="cme-panel__bar">
+            <p class="cme-panel__intro">{{ t('collectionsMgmt.fixedIntro') }}</p>
+          </div>
+
+          <p v-if="fixedLoading && !fixedLoadError" class="cme-status">{{ t('collectionsMgmt.loading') }}</p>
+
+          <div v-if="fixedRecipients.length" class="cme-table-wrap">
+            <table class="cme-table">
+              <thead>
+                <tr>
+                  <th scope="col">{{ t('collectionsMgmt.colPerson') }}</th>
+                  <th scope="col" class="is-num">{{ t('collectionsMgmt.tableAmount') }}</th>
+                  <th scope="col">{{ t('collectionsMgmt.colFrequency') }}</th>
+                  <th scope="col">{{ t('collectionsMgmt.colNextPayout') }}</th>
+                  <th scope="col" class="is-actions">
+                    <span class="visually-hidden">{{ t('collectionsMgmt.colActions') }}</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in fixedRecipients" :key="row.id">
+                  <td class="c-main">
+                    <div class="cme-item">
+                      <img
+                        v-if="row.photoUrl"
+                        :src="row.photoUrl"
+                        :alt="row.name"
+                        class="cme-avatar cme-avatar--photo"
+                        width="40"
+                        height="40"
+                      />
+                      <span v-else class="cme-avatar" aria-hidden="true">{{ initialsOf(row.name) }}</span>
+                      <div class="cme-item__text">
+                        <strong>{{ row.name }}</strong>
+                        <small>{{ t('collectionsMgmt.dniPhone', { dni: row.dni || '—', phone: row.phone || '—' }) }}</small>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="is-num" :data-label="t('collectionsMgmt.tableAmount')">
+                    <strong class="cme-amount">{{ nfCurrency(Number(row.salary) || 0) }}</strong>
+                  </td>
+                  <td :data-label="t('collectionsMgmt.colFrequency')">
+                    <span class="cme-pill cme-pill--soft">
+                      {{ t('collectionsMgmt.everyDays', { n: intervalDaysOf(row) }, intervalDaysOf(row)) }}
+                    </span>
+                  </td>
+                  <td :data-label="t('collectionsMgmt.colNextPayout')">{{ nfDate(row.nextPaymentDate) }}</td>
+                  <td class="c-actions">
+                    <button
+                      type="button"
+                      class="cme-action cme-action--danger"
+                      :aria-label="t('collectionsMgmt.deleteFixedAria', { name: row.name })"
+                      :data-tip="t('app.deleteAction')"
+                      @click="askDelete('fixed', row)"
+                    >
+                      <i class="pi pi-trash" aria-hidden="true" />
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else-if="!fixedLoading" class="cme-empty">
+            <span class="cme-empty__icon"><i class="pi pi-users" aria-hidden="true" /></span>
+            <p class="cme-empty__text">{{ t('fixedPay.emptyRecipients') }}</p>
+            <div class="cme-empty__actions">
+              <button type="button" class="cme-btn cme-btn--primary" @click="openFixedModal">
+                <i class="pi pi-plus" aria-hidden="true" />
+                {{ t('collectionsMgmt.addFixedPayout') }}
+              </button>
+            </div>
+          </div>
+
+          <div class="cme-history">
             <button
               type="button"
-              class="collections-panel__btn"
-              @click="openFixedModal"
+              class="cme-history__toggle"
+              :aria-expanded="historyOpen ? 'true' : 'false'"
+              aria-controls="cme-history-body"
+              :title="historyOpen ? t('collectionsMgmt.historyHide') : t('collectionsMgmt.historyShow')"
+              @click="historyOpen = !historyOpen"
             >
-              {{ t('fixedPay.openButton') }}
+              <i class="pi pi-chevron-down cme-history__chevron" :class="{ 'is-open': historyOpen }" aria-hidden="true" />
+              <span class="cme-history__title">{{ t('fixedPay.historyHeading') }}</span>
+              <span class="cme-history__meta">
+                {{
+                  t(
+                    'collectionsMgmt.historySummary',
+                    { n: fixedHistoryRows.length, amount: nfCurrency(fixedHistoryTotal) },
+                    fixedHistoryRows.length,
+                  )
+                }}
+              </span>
             </button>
-          </header>
-
-        <Dialog
-          v-model:visible="fixedModalOpen"
-          modal
-          :header="t('fixedPay.modalTitle')"
-          class="collections-fixed-dialog"
-          :style="{ width: 'min(26rem, 92vw)' }"
-          :draggable="false"
-        >
-          <div class="collections-form">
-            <div class="collections-form__field">
-              <label for="fixed-pay-name">{{ t('fixedPay.nameLabel') }}</label>
-              <InputText
-                id="fixed-pay-name"
-                v-model="fixedForm.name"
-                class="collections-form__input"
-                autocomplete="name"
-                fluid
-              />
-            </div>
-            <div class="collections-form__field">
-              <label for="fixed-pay-dni">{{ t('fixedPay.dniLabel') }}</label>
-              <InputText id="fixed-pay-dni" v-model="fixedForm.dni" class="collections-form__input" fluid />
-            </div>
-            <div class="collections-form__field">
-              <label for="fixed-pay-phone">{{ t('fixedPay.phoneLabel') }}</label>
-              <InputText
-                id="fixed-pay-phone"
-                v-model="fixedForm.phone"
-                class="collections-form__input"
-                inputmode="tel"
-                autocomplete="tel"
-                fluid
-              />
-            </div>
-            <div class="collections-form__field">
-              <label for="fixed-pay-salary">{{ t('fixedPay.salaryLabel') }}</label>
-              <InputNumber
-                id="fixed-pay-salary"
-                v-model="fixedForm.salary"
-                class="collections-form__input-num w-full"
-                :min="0"
-                mode="decimal"
-                :maxFractionDigits="2"
-                fluid
-              />
-            </div>
-            <div class="collections-form__field">
-              <label for="fixed-pay-interval">{{ t('fixedPay.intervalDaysLabel') }}</label>
-              <InputNumber
-                id="fixed-pay-interval"
-                v-model="fixedForm.intervalDays"
-                class="collections-form__input-num w-full"
-                :min="1"
-                :max="365"
-                fluid
-              />
-              <p v-if="previewFirstFixedDue" class="collections-form__hint collections-form__hint--strong">
-                {{ t('fixedPay.firstDueHint', { date: nfDate(previewFirstFixedDue) }) }}
-              </p>
-            </div>
-            <div class="collections-form__field collections-form__field--photo">
-              <span class="collections-form__photo-label">{{ t('fixedPay.photoLabel') }}</span>
-              <p class="collections-form__hint">{{ t('fixedPay.photoHint') }}</p>
-              <label class="collections-form__file">
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-                  class="collections-form__file-input"
-                  :disabled="fixedProcessingPhoto || fixedSaving"
-                  @change="onFixedPhotoChange"
-                />
-                <span class="collections-form__file-trigger">{{
-                  fixedProcessingPhoto
-                    ? t('fixedPay.processingPhoto')
-                    : t('fixedPay.photoChoose')
-                }}</span>
-              </label>
-              <div v-if="fixedForm.photoUrl" class="collections-form__preview-row">
-                <img
-                  :src="fixedForm.photoUrl"
-                  :alt="fixedForm.name.trim() ? fixedForm.name.trim() : t('fixedPay.photoLabel')"
-                  class="collections-form__preview"
-                  width="80"
-                  height="80"
-                />
-                <Button
-                  type="button"
-                  :label="t('fixedPay.removePhoto')"
-                  variant="text"
-                  text
-                  @click="fixedForm.photoUrl = ''"
-                />
+            <div v-show="historyOpen" id="cme-history-body" class="cme-history__body">
+              <div v-if="fixedHistoryRows.length" class="cme-table-wrap">
+                <table class="cme-table cme-table--compact">
+                  <thead>
+                    <tr>
+                      <th scope="col">{{ t('collectionsMgmt.colPaidOn') }}</th>
+                      <th scope="col">{{ t('collectionsMgmt.colPerson') }}</th>
+                      <th scope="col" class="is-num">{{ t('collectionsMgmt.tableAmount') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in fixedHistoryRows" :key="row.rowKey">
+                      <td :data-label="t('collectionsMgmt.colPaidOn')">{{ nfDate(row.paidOn) }}</td>
+                      <td :data-label="t('collectionsMgmt.colPerson')">{{ row.recipientName }}</td>
+                      <td class="is-num" :data-label="t('collectionsMgmt.tableAmount')">
+                        <strong class="cme-amount">{{ nfCurrency(row.amount) }}</strong>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
+              <p v-else class="cme-empty cme-empty--inline">{{ t('fixedPay.emptyHistory') }}</p>
             </div>
-            <p v-if="fixedSubmitError" class="collections-form__error" role="alert">
-              {{ fixedSubmitError }}
-            </p>
           </div>
-          <template #footer>
-            <ConfirmActions
-              :cancel-label="t('app.cancelAction')"
-              :confirm-label="t('fixedPay.save')"
-              :loading="fixedSaving"
-              @cancel="closeFixedModal"
-              @confirm="submitFixedRecipient"
-            />
-          </template>
-        </Dialog>
 
-        <p v-if="fixedLoading && !fixedLoadError" class="collections-panel__loading">
-          {{ t('collectionsMgmt.loading') }}
-        </p>
-
-        <h3 class="collections-panel__sub">{{ t('fixedPay.recipientsHeading') }}</h3>
-        <DataTable :value="fixedRecipients" class="collections-data collections-table">
-          <template #empty>
-            <p class="collections-table__empty">{{ t('fixedPay.emptyRecipients') }}</p>
-          </template>
-          <Column :header="t('fixedPay.tablePhoto')" class="collections-col-photo">
-            <template #body="{ data }">
-              <img
-                v-if="data.photoUrl"
-                :src="data.photoUrl"
-                :alt="data.name"
-                class="collections-thumb"
-                width="44"
-                height="44"
-              />
-              <span v-else class="collections-thumb-placeholder">—</span>
-            </template>
-          </Column>
-          <Column field="name" :header="t('collectionsMgmt.tableName')" />
-          <Column field="dni" :header="t('fixedPay.dniLabel')" />
-          <Column field="phone" :header="t('fixedPay.phoneLabel')" />
-          <Column :header="t('collectionsMgmt.tableAmount')">
-            <template #body="{ data }">
-              {{ nfCurrency(Number(data.salary) || 0) }}
-            </template>
-          </Column>
-          <Column :header="t('fixedPay.tableInterval')">
-            <template #body="{ data }">{{ Math.max(1, Math.floor(Number(data.intervalDays) || 0)) }}</template>
-          </Column>
-          <Column :header="t('fixedPay.tableNext')">
-            <template #body="{ data }">{{ nfDate(data.nextPaymentDate) }}</template>
-          </Column>
-          <Column
-            :header="t('app.deleteAction')"
-            class="collections-col-actions"
-            header-class="collections-col-actions"
-            body-class="collections-col-actions"
-            :style="{ width: '4.25rem' }"
-            :header-style="{ width: '4.25rem', textAlign: 'right' }"
-            :body-style="{ width: '4.25rem', textAlign: 'right' }"
-          >
-            <template #body="{ data }">
-              <button
-                type="button"
-                class="collections-row-delete"
-                :aria-label="t('app.deleteAction')"
-                @click="askDelete('fixed', data)"
-              >
-                <i class="pi pi-trash" aria-hidden="true" />
-              </button>
-            </template>
-          </Column>
-        </DataTable>
-
-        <h3 class="collections-panel__sub collections-panel__sub--divider">
-          {{ t('fixedPay.historyHeading') }}
-        </h3>
-        <DataTable
-          :value="fixedHistoryRows"
-          class="collections-data collections-table collections-table--history"
-        >
-          <template #empty>
-            <p class="collections-table__empty">{{ t('fixedPay.emptyHistory') }}</p>
-          </template>
-          <Column field="paidOn" :header="t('collectionsMgmt.tableDate')">
-            <template #body="{ data }">{{ nfDate(data.paidOn) }}</template>
-          </Column>
-          <Column field="recipientName" :header="t('collectionsMgmt.tableName')" />
-          <Column :header="t('collectionsMgmt.tableAmount')">
-            <template #body="{ data }">{{ nfCurrency(data.amount) }}</template>
-          </Column>
-        </DataTable>
-
-        <LoadErrorRetry
-          v-if="fixedLoadError"
-          compact
-          :message="fixedLoadError"
-          :loading="fixedLoading"
-          @retry="loadFixedRecipients"
-        />
-        </section>
-
-        <Dialog
-          :visible="pendingDelete != null"
-          modal
-          :header="t('collectionsMgmt.deleteModalTitle')"
-          class="collections-delete-dialog"
-          :style="{ width: 'min(24rem, 92vw)' }"
-          :draggable="false"
-          :closable="!deleting"
-          @update:visible="(open) => { if (!open) closeDelete() }"
-        >
-          <p class="collections-delete-dialog__text">
-            {{
-              pendingDelete?.kind === 'service'
-                ? t('sharedServices.deleteConfirm', { name: deleteCandidateLabel(pendingDelete) })
-                : pendingDelete?.kind === 'fixed'
-                  ? t('fixedPay.deleteConfirm', { name: deleteCandidateLabel(pendingDelete) })
-                  : t('collectionsMgmt.deleteConfirm', { name: deleteCandidateLabel(pendingDelete) })
-            }}
-          </p>
-          <p
-            v-if="pendingDelete?.kind === 'service'"
-            class="collections-delete-dialog__hint"
-          >
-            {{ t('sharedServices.deleteHint') }}
-          </p>
-          <template #footer>
-            <ConfirmActions
-              :cancel-label="t('app.cancelAction')"
-              :confirm-label="t('app.deleteAction')"
-              confirm-variant="danger"
-              :loading="deleting"
-              @cancel="closeDelete"
-              @confirm="confirmDelete"
-            />
-          </template>
-        </Dialog>
-      </div>
+          <LoadErrorRetry
+            v-if="fixedLoadError"
+            compact
+            :message="fixedLoadError"
+            :loading="fixedLoading"
+            @retry="loadFixedRecipients"
+          />
+        </div>
+      </section>
     </template>
+
+    <!-- Registrar gasto -->
+    <Dialog
+      v-model:visible="modalOpen"
+      modal
+      :header="t('collectionsMgmt.modalTitle')"
+      class="cme-dialog"
+      :style="{ width: 'min(28rem, 94vw)' }"
+      :draggable="false"
+    >
+      <div class="cme-form">
+        <div class="cme-field">
+          <label for="collections-cost-name">{{ t('collectionsMgmt.nameLabel') }}</label>
+          <InputText
+            id="collections-cost-name"
+            v-model="form.name"
+            autocomplete="off"
+            :invalid="Boolean(fieldErrors.name)"
+            :aria-invalid="Boolean(fieldErrors.name)"
+            aria-describedby="collections-cost-name-error"
+            fluid
+          />
+          <small v-if="fieldErrors.name" id="collections-cost-name-error" class="cme-field__error">
+            {{ fieldErrors.name }}
+          </small>
+        </div>
+        <div class="cme-form__row">
+          <div class="cme-field">
+            <label for="collections-cost-amount">{{ t('collectionsMgmt.priceLabel') }}</label>
+            <InputNumber
+              v-model="form.amount"
+              input-id="collections-cost-amount"
+              :min="0"
+              mode="decimal"
+              :min-fraction-digits="2"
+              :max-fraction-digits="2"
+              :invalid="Boolean(fieldErrors.amount)"
+              :aria-invalid="Boolean(fieldErrors.amount)"
+              aria-describedby="collections-cost-amount-error"
+              fluid
+            />
+            <small v-if="fieldErrors.amount" id="collections-cost-amount-error" class="cme-field__error">
+              {{ fieldErrors.amount }}
+            </small>
+          </div>
+          <div class="cme-field">
+            <label for="collections-cost-date">{{ t('collectionsMgmt.purchaseDateLabel') }}</label>
+            <InputText
+              id="collections-cost-date"
+              v-model="form.purchaseDate"
+              type="date"
+              :invalid="Boolean(fieldErrors.purchaseDate)"
+              :aria-invalid="Boolean(fieldErrors.purchaseDate)"
+              aria-describedby="collections-cost-date-error"
+              fluid
+            />
+            <small v-if="fieldErrors.purchaseDate" id="collections-cost-date-error" class="cme-field__error">
+              {{ fieldErrors.purchaseDate }}
+            </small>
+          </div>
+        </div>
+        <div class="cme-field">
+          <span class="cme-field__label">{{ t('collectionsMgmt.invoiceLabel') }}</span>
+          <div class="cme-upload">
+            <img
+              v-if="form.invoicePhotoUrl"
+              :src="form.invoicePhotoUrl"
+              :alt="form.name.trim() ? form.name.trim() : t('collectionsMgmt.invoiceLabel')"
+              class="cme-upload__preview"
+              width="56"
+              height="56"
+            />
+            <span v-else class="cme-upload__preview cme-upload__preview--empty" aria-hidden="true">
+              <i class="pi pi-image" />
+            </span>
+            <div class="cme-upload__body">
+              <div class="cme-upload__buttons">
+                <label class="cme-file">
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                    class="cme-file__input"
+                    :disabled="processingPhoto || saving"
+                    @change="onInvoiceChange"
+                  />
+                  <span class="cme-file__trigger">
+                    <i class="pi pi-upload" aria-hidden="true" />
+                    {{ processingPhoto ? t('collectionsMgmt.processingPhoto') : t('collectionsMgmt.invoiceChoose') }}
+                  </span>
+                </label>
+                <button
+                  v-if="form.invoicePhotoUrl"
+                  type="button"
+                  class="cme-link-btn"
+                  @click="form.invoicePhotoUrl = ''"
+                >
+                  {{ t('collectionsMgmt.removePhoto') }}
+                </button>
+              </div>
+              <p class="cme-field__hint">{{ t('collectionsMgmt.invoiceHint') }}</p>
+            </div>
+          </div>
+        </div>
+        <p v-if="submitError" class="cme-form__error" role="alert">{{ submitError }}</p>
+      </div>
+      <template #footer>
+        <ConfirmActions
+          :cancel-label="t('app.cancelAction')"
+          :confirm-label="t('collectionsMgmt.accept')"
+          :loading="saving"
+          @cancel="closeModal"
+          @confirm="submitCost"
+        />
+      </template>
+    </Dialog>
+
+    <!-- Agregar servicio compartido -->
+    <Dialog
+      v-model:visible="serviceModalOpen"
+      modal
+      :header="t('sharedServices.modalTitle')"
+      class="cme-dialog"
+      :style="{ width: 'min(28rem, 94vw)' }"
+      :draggable="false"
+    >
+      <div class="cme-form">
+        <div class="cme-field">
+          <label for="shared-service-type">{{ t('sharedServices.typeLabel') }}</label>
+          <Select
+            v-model="serviceForm.type"
+            input-id="shared-service-type"
+            :options="serviceTypeOptions"
+            option-label="label"
+            option-value="value"
+            fluid
+          />
+        </div>
+        <div class="cme-field">
+          <label for="shared-service-amount">{{ t('sharedServices.totalLabel') }}</label>
+          <InputNumber
+            v-model="serviceForm.amount"
+            input-id="shared-service-amount"
+            :min="0"
+            mode="decimal"
+            :min-fraction-digits="2"
+            :max-fraction-digits="2"
+            fluid
+          />
+        </div>
+        <p class="cme-form__note">
+          <i class="pi pi-info-circle" aria-hidden="true" />
+          {{ t('sharedServices.splitHint') }}
+        </p>
+        <p v-if="serviceSubmitError" class="cme-form__error" role="alert">{{ serviceSubmitError }}</p>
+      </div>
+      <template #footer>
+        <ConfirmActions
+          :cancel-label="t('app.cancelAction')"
+          :confirm-label="t('sharedServices.save')"
+          :loading="serviceSaving"
+          @cancel="closeServiceModal"
+          @confirm="submitSharedService"
+        />
+      </template>
+    </Dialog>
+
+    <!-- Agregar pago fijo -->
+    <Dialog
+      v-model:visible="fixedModalOpen"
+      modal
+      :header="t('collectionsMgmt.addFixedPayout')"
+      class="cme-dialog"
+      :style="{ width: 'min(30rem, 94vw)' }"
+      :draggable="false"
+    >
+      <div class="cme-form">
+        <div class="cme-field">
+          <label for="fixed-pay-name">{{ t('fixedPay.nameLabel') }}</label>
+          <InputText id="fixed-pay-name" v-model="fixedForm.name" autocomplete="name" fluid />
+        </div>
+        <div class="cme-form__row">
+          <div class="cme-field">
+            <label for="fixed-pay-dni">{{ t('fixedPay.dniLabel') }}</label>
+            <InputText id="fixed-pay-dni" v-model="fixedForm.dni" inputmode="numeric" fluid />
+          </div>
+          <div class="cme-field">
+            <label for="fixed-pay-phone">{{ t('fixedPay.phoneLabel') }}</label>
+            <InputText
+              id="fixed-pay-phone"
+              v-model="fixedForm.phone"
+              inputmode="tel"
+              autocomplete="tel"
+              fluid
+            />
+          </div>
+        </div>
+        <div class="cme-form__row">
+          <div class="cme-field">
+            <label for="fixed-pay-salary">{{ t('fixedPay.salaryLabel') }}</label>
+            <InputNumber
+              v-model="fixedForm.salary"
+              input-id="fixed-pay-salary"
+              :min="0"
+              mode="decimal"
+              :min-fraction-digits="2"
+              :max-fraction-digits="2"
+              fluid
+            />
+          </div>
+          <div class="cme-field">
+            <label for="fixed-pay-interval">{{ t('fixedPay.intervalDaysLabel') }}</label>
+            <InputNumber
+              v-model="fixedForm.intervalDays"
+              input-id="fixed-pay-interval"
+              :min="1"
+              :max="365"
+              fluid
+            />
+          </div>
+        </div>
+        <p v-if="previewFirstFixedDue" class="cme-form__note">
+          <i class="pi pi-calendar" aria-hidden="true" />
+          {{ t('fixedPay.firstDueHint', { date: nfDate(previewFirstFixedDue) }) }}
+        </p>
+        <div class="cme-field">
+          <span class="cme-field__label">{{ t('fixedPay.photoLabel') }}</span>
+          <div class="cme-upload">
+            <img
+              v-if="fixedForm.photoUrl"
+              :src="fixedForm.photoUrl"
+              :alt="fixedForm.name.trim() ? fixedForm.name.trim() : t('fixedPay.photoLabel')"
+              class="cme-upload__preview cme-upload__preview--round"
+              width="56"
+              height="56"
+            />
+            <span v-else class="cme-upload__preview cme-upload__preview--round cme-upload__preview--empty" aria-hidden="true">
+              {{ fixedForm.name.trim() ? initialsOf(fixedForm.name) : '' }}
+              <i v-if="!fixedForm.name.trim()" class="pi pi-user" />
+            </span>
+            <div class="cme-upload__body">
+              <div class="cme-upload__buttons">
+                <label class="cme-file">
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                    class="cme-file__input"
+                    :disabled="fixedProcessingPhoto || fixedSaving"
+                    @change="onFixedPhotoChange"
+                  />
+                  <span class="cme-file__trigger">
+                    <i class="pi pi-upload" aria-hidden="true" />
+                    {{ fixedProcessingPhoto ? t('fixedPay.processingPhoto') : t('fixedPay.photoChoose') }}
+                  </span>
+                </label>
+                <button
+                  v-if="fixedForm.photoUrl"
+                  type="button"
+                  class="cme-link-btn"
+                  @click="fixedForm.photoUrl = ''"
+                >
+                  {{ t('fixedPay.removePhoto') }}
+                </button>
+              </div>
+              <p class="cme-field__hint">{{ t('fixedPay.photoHint') }}</p>
+            </div>
+          </div>
+        </div>
+        <p v-if="fixedSubmitError" class="cme-form__error" role="alert">{{ fixedSubmitError }}</p>
+      </div>
+      <template #footer>
+        <ConfirmActions
+          :cancel-label="t('app.cancelAction')"
+          :confirm-label="t('fixedPay.save')"
+          :loading="fixedSaving"
+          @cancel="closeFixedModal"
+          @confirm="submitFixedRecipient"
+        />
+      </template>
+    </Dialog>
+
+    <!-- Confirmar eliminación -->
+    <Dialog
+      :visible="pendingDelete != null"
+      modal
+      :header="t('collectionsMgmt.deleteModalTitle')"
+      class="cme-dialog"
+      :style="{ width: 'min(24rem, 94vw)' }"
+      :draggable="false"
+      :closable="!deleting"
+      @update:visible="(open) => { if (!open) closeDelete() }"
+    >
+      <p class="cme-delete__text">
+        {{
+          pendingDelete?.kind === 'service'
+            ? t('sharedServices.deleteConfirm', { name: deleteCandidateLabel(pendingDelete) })
+            : pendingDelete?.kind === 'fixed'
+              ? t('fixedPay.deleteConfirm', { name: deleteCandidateLabel(pendingDelete) })
+              : t('collectionsMgmt.deleteConfirm', { name: deleteCandidateLabel(pendingDelete) })
+        }}
+      </p>
+      <p v-if="pendingDelete?.kind === 'service'" class="cme-delete__hint">
+        {{ t('sharedServices.deleteHint') }}
+      </p>
+      <template #footer>
+        <ConfirmActions
+          :cancel-label="t('app.cancelAction')"
+          :confirm-label="t('app.deleteAction')"
+          confirm-variant="danger"
+          :loading="deleting"
+          @cancel="closeDelete"
+          @confirm="confirmDelete"
+        />
+      </template>
+    </Dialog>
   </div>
 </template>
 
 <style scoped>
 .app-view {
-  padding: 1.75rem 1.5rem 2.5rem;
-  max-width: 72rem;
+  padding: 1.25rem 1.5rem 2.5rem;
+  width: 100%;
+  max-width: 88rem;
+  box-sizing: border-box;
 }
 
-.header-with-actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 0.5rem;
-}
-
-.app-view__title {
-  margin: 0;
-  font-size: 1.75rem;
-  font-weight: 600;
-  letter-spacing: -0.035em;
-  line-height: 1.15;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.app-view__status {
-  margin: 1rem 0 0;
-  font-size: 0.9375rem;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.app-view__error {
-  margin: 1rem 0 0;
-  font-size: 0.9375rem;
-  color: #b42318;
-}
-
-.collections-page {
-  margin-top: 1.5rem;
+.cme {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
-}
-
-.collections-hero {
-  max-width: 26rem;
-  padding: 1.35rem 1.4rem 1.3rem;
-  border-radius: 16px;
-  background: #f5f5f7;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.04),
-    0 4px 16px rgba(0, 0, 0, 0.03);
-}
-
-.collections-hero__title {
-  margin: 0;
-  max-width: 22rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-  line-height: 1.4;
-  letter-spacing: -0.015em;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.collections-hero__amount {
-  margin: 0.65rem 0 0;
-  font-size: 2rem;
-  font-weight: 600;
-  letter-spacing: -0.045em;
-  font-variant-numeric: tabular-nums;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.collections-hero__rows {
-  list-style: none;
-  margin: 1.1rem 0 0;
-  padding: 0;
-  border-top: 1px solid rgba(0, 0, 0, 0.07);
-}
-
-.collections-hero__row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
   gap: 1rem;
-  padding: 0.62rem 0;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  font-size: 0.8125rem;
-  line-height: 1.35;
-}
-
-.collections-hero__row:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
-}
-
-.collections-hero__row-label {
-  flex: 1;
   min-width: 0;
-  color: #86868b;
 }
 
-.collections-hero__row-value {
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-  color: var(--apple-text, #1d1d1f);
+.cme *,
+.cme *::before,
+.cme *::after {
+  box-sizing: border-box;
 }
 
-.collections-hero__hint {
-  margin: 1rem 0 0;
-  font-size: 0.75rem;
-  line-height: 1.45;
-  color: #aeaeb2;
-}
-
-.collections-panel {
-  padding: 1.2rem 1.25rem 1.35rem;
-  border-radius: 16px;
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-}
-
-.collections-panel__head {
+/* ---------- Header ---------- */
+.cme-head {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 0.85rem 1rem;
-  margin-bottom: 0.85rem;
+  gap: 1rem 1.5rem;
+  flex-wrap: wrap;
 }
 
-.collections-panel__title {
+.cme-head__text {
+  min-width: 0;
+}
+
+.cme-head__title {
   margin: 0;
-  font-size: 1.0625rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.25;
-  color: var(--apple-text, #1d1d1f);
-  max-width: min(100%, 18rem);
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: #0f172a;
 }
 
-.collections-panel__btn {
-  flex-shrink: 0;
+.cme-head__sub {
+  margin: 0.25rem 0 0;
+  font-size: 0.88rem;
+  color: #6e6e73;
+}
+
+.cme-head__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.cme-head__nav {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.cme-head__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.cme-month {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.2rem;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+}
+
+.cme-month__step,
+.cme-icon-btn {
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #1e3a8a;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 1.7rem;
-  padding: 0.22rem 0.85rem;
-  border: none;
-  border-radius: 8px;
-  background: #0071e3;
-  color: #ffffff;
-  font: inherit;
-  font-weight: 500;
-  font-size: 0.8125rem;
   cursor: pointer;
-  box-shadow: none;
+  font-size: 0.75rem;
+  flex-shrink: 0;
 }
 
-.collections-panel__btn:hover {
-  background: #0066cc;
+.cme-icon-btn {
+  width: 2.45rem;
+  height: 2.45rem;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  font-size: 0.85rem;
 }
 
-.collections-panel__btn:focus-visible {
-  outline: 2px solid #0071e3;
+.cme-month__step:hover,
+.cme-icon-btn:hover:not(:disabled) {
+  background: #e8eefc;
+}
+
+.cme-icon-btn:disabled {
+  cursor: progress;
+  opacity: 0.75;
+}
+
+.cme-month__label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-width: 9.5rem;
+  padding: 0 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 650;
+  color: #0f172a;
+  white-space: nowrap;
+}
+
+.cme-month__label .pi {
+  font-size: 0.8rem;
+  color: #1e3a8a;
+}
+
+.cme-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 2.45rem;
+  padding: 0.5rem 0.95rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  color: #1e3a8a;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.cme-btn .pi {
+  font-size: 0.78rem;
+}
+
+.cme-btn:hover:not(:disabled) {
+  background: #e8eefc;
+  border-color: transparent;
+}
+
+.cme-btn--primary {
+  background: #1e3a8a;
+  border-color: #1e3a8a;
+  color: #fff;
+}
+
+.cme-btn--primary:hover:not(:disabled) {
+  background: #172554;
+  border-color: #172554;
+}
+
+.cme-btn:focus-visible,
+.cme-month__step:focus-visible,
+.cme-icon-btn:focus-visible,
+.cme-tab:focus-visible,
+.cme-toggle:focus-visible,
+.cme-action:focus-visible,
+.cme-history__toggle:focus-visible,
+.cme-panel:focus-visible {
+  outline: 2px solid #1e3a8a;
   outline-offset: 2px;
 }
 
-.collections-panel__loading {
-  margin: 0 0 0.65rem;
-  font-size: 0.8125rem;
-  color: var(--apple-text-secondary, #6e6e73);
+.cme-status {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #6e6e73;
 }
 
-.collections-panel__hint {
-  margin: 0.75rem 0 0;
-  font-size: 0.75rem;
-  line-height: 1.45;
-  color: #aeaeb2;
+/* ---------- Month summary (equation) ---------- */
+.cme-summary {
+  margin-top: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-width: 0;
 }
 
-.collections-share-hint {
-  margin-left: 0.35rem;
-  font-size: 0.75rem;
-  color: var(--apple-text-secondary, #6e6e73);
+.cme-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  flex-wrap: wrap;
 }
 
-.collections-panel__error {
-  margin: 0.75rem 0 0;
-  font-size: 0.8125rem;
+.cme-section-title {
+  margin: 0;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+}
+
+.cme-section-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #6e6e73;
+}
+
+.cme-eq {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0.6rem;
+}
+
+.cme-eq__op {
+  align-self: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  color: #475569;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.cme-stat {
+  background: var(--stat-bg, #f1f5f9);
+  border-radius: 16px;
+  padding: 1rem 1.1rem 1.05rem;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cme-stat--green { --stat-bg: #e3f4e8; }
+.cme-stat--orange { --stat-bg: #fdeee2; }
+.cme-stat--red { --stat-bg: #fde4e4; }
+
+.cme-stat__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+
+.cme-stat__label {
+  margin: 0;
+  color: #475569;
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.cme-stat__icon {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  background: #fff;
+}
+
+.cme-stat__icon--green { color: #15803d; }
+.cme-stat__icon--orange { color: #c2410c; }
+.cme-stat__icon--red { color: #b42318; }
+
+.cme-stat__value {
+  margin: 0 0 0.4rem;
+  color: #0f172a;
+  font-family: var(--bf-font-heading, inherit);
+  font-weight: 700;
+  font-size: 1.65rem;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cme-stat__value.is-negative {
   color: #b42318;
 }
 
-.collections-panel__sub {
-  margin: 1.35rem 0 0.55rem;
+.cme-stat__hint {
+  margin: auto 0 0;
+  color: #6e6e73;
   font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #86868b;
+  font-weight: 500;
+  line-height: 1.35;
 }
 
-.collections-panel__sub:first-of-type {
-  margin-top: 0.35rem;
+.cme-inline-error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #b42318;
 }
 
-.collections-panel__sub--divider {
-  margin-top: 1.5rem;
-  padding-top: 1.15rem;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
+/* ---------- All-time cash strip ---------- */
+.cme-cash {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem 1.5rem;
+  flex-wrap: wrap;
+  padding: 0.85rem 1.1rem;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-.collections-table {
-  margin-top: 0.15rem;
+.cme-cash__main {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  flex: 1 1 18rem;
 }
 
-.collections-table--history {
-  margin-bottom: 0.15rem;
-}
-
-.collections-data :deep(.p-datatable) {
-  font-size: 0.875rem;
-  border: none;
+.cme-cash__icon {
+  width: 2.3rem;
+  height: 2.3rem;
   border-radius: 12px;
-  overflow: hidden;
+  background: #e8eefc;
+  color: #1e3a8a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 0.95rem;
 }
 
-.collections-data :deep(.p-datatable-wrapper) {
+.cme-cash__text {
+  min-width: 0;
+}
+
+.cme-cash__title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.cme-cash__title {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: #0f172a;
+}
+
+.cme-cash__hint {
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  color: #6e6e73;
+}
+
+.cme-cash__parts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0;
+  font-size: 0.78rem;
+  color: #475569;
+  font-variant-numeric: tabular-nums;
+}
+
+.cme-cash__parts li {
+  white-space: nowrap;
+}
+
+.cme-cash__parts li + li::before {
+  content: '·';
+  margin: 0 0.5rem;
+  color: #94a3b8;
+}
+
+.cme-cash__value {
+  margin: 0 0 0 auto;
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cme-cash__value.is-negative {
+  color: #b42318;
+}
+
+.cme-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  background: #e8eefc;
+  color: #1e3a8a;
+  font-size: 0.7rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.cme-pill--soft {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+/* ---------- Records card + tabs ---------- */
+.cme-card {
+  padding: 1.1rem 1.25rem 1.15rem;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  min-width: 0;
+}
+
+.cme-tabs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+}
+
+.cme-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.5rem 0.45rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.cme-tab:hover:not(.is-active) {
+  background: #f1f5f9;
+}
+
+.cme-tab__count {
+  min-width: 1.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.cme-tab.is-active {
+  background: #1e3a8a;
+  border-color: #1e3a8a;
+  color: #fff;
+}
+
+.cme-tab.is-active .cme-tab__count {
+  background: #fff;
+  color: #1e3a8a;
+}
+
+.cme-panel {
+  min-width: 0;
   border-radius: 12px;
 }
 
-.collections-data :deep(.p-datatable-thead > tr > th) {
-  background: rgba(0, 0, 0, 0.02);
-  color: #86868b;
+.cme-panel__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.8rem;
+}
+
+.cme-panel__intro {
+  margin: 0;
+  flex: 1 1 22rem;
+  min-width: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #6e6e73;
+}
+
+.cme-panel__tools {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem 0.85rem;
+  flex-wrap: wrap;
+}
+
+.cme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.8rem 0.35rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  font-size: 0.8rem;
   font-weight: 600;
-  font-size: 0.6875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.055em;
-  border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  padding: 0.6rem 0.75rem;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
-.collections-data :deep(.p-datatable-tbody > tr) {
-  background: transparent;
-  transition: background 0.12s ease;
+.cme-toggle:hover {
+  background: #f8fafc;
 }
 
-.collections-data :deep(.p-datatable-tbody > tr:hover) {
-  background: rgba(0, 0, 0, 0.02);
+.cme-toggle__track {
+  position: relative;
+  width: 1.9rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  background: #cbd5e1;
+  transition: background 0.15s ease;
+  flex-shrink: 0;
 }
 
-.collections-data :deep(.p-datatable-tbody > tr > td) {
-  border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  padding: 0.7rem 0.75rem;
+.cme-toggle__knob {
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+
+.cme-toggle[aria-pressed='true'] .cme-toggle__track {
+  background: #1e3a8a;
+}
+
+.cme-toggle[aria-pressed='true'] .cme-toggle__knob {
+  transform: translateX(0.8rem);
+}
+
+.cme-total {
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Tables */
+.cme-table-wrap {
+  overflow-x: auto;
+}
+
+.cme-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.cme-table th {
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #6e6e73;
+  background: #f8fafc;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.07);
+  white-space: nowrap;
+}
+
+.cme-table th:first-child {
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+}
+
+.cme-table th:last-child {
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+}
+
+.cme-table td {
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
   vertical-align: middle;
-  color: var(--apple-text, #1d1d1f);
+  color: #0f172a;
 }
 
-.collections-data :deep(.p-datatable-tbody > tr:last-child > td) {
+.cme-table tbody tr:last-child td {
   border-bottom: none;
 }
 
-.collections-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
+.cme-table tbody tr:hover td {
+  background: #fafbfd;
 }
 
-.collections-form__field {
+.cme-table .is-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.cme-table .is-actions,
+.cme-table .c-actions {
+  width: 3.5rem;
+  text-align: right;
+}
+
+.cme-table--compact td {
+  padding-block: 0.5rem;
+}
+
+.cme-amount {
+  font-weight: 650;
+}
+
+.cme-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.cme-item__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cme-item__text strong {
+  font-weight: 650;
+  font-size: 0.875rem;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.cme-item__text small {
+  font-size: 0.74rem;
+  color: #6e6e73;
+}
+
+.cme-thumb {
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+.cme-thumb--empty,
+.cme-thumb--icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f1f5f9;
+  color: #94a3b8;
+  font-size: 0.9rem;
+  border-color: transparent;
+}
+
+.cme-thumb--icon.is-blue {
+  background: #e8eefc;
+  color: #1e3a8a;
+}
+
+.cme-thumb--icon.is-amber {
+  background: #fdf3dc;
+  color: #b45309;
+}
+
+.cme-avatar {
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: #e8eefc;
+  color: #1e3a8a;
+}
+
+.cme-avatar--photo {
+  object-fit: cover;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+/* Row icon action with a visible tooltip on hover / keyboard focus. */
+.cme-action {
+  position: relative;
+  width: 2.1rem;
+  height: 2.1rem;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #64748b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.cme-action--danger {
+  color: #b42318;
+}
+
+.cme-action--danger:hover {
+  background: #fde4e4;
+}
+
+.cme-action[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  right: calc(100% + 0.4rem);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0.25rem 0.55rem;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 2;
+}
+
+.cme-action[data-tip]:hover::after,
+.cme-action[data-tip]:focus-visible::after {
+  opacity: 1;
+}
+
+/* Empty state */
+.cme-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 1.75rem 1rem;
+  border-radius: 14px;
+  background: #f8fafc;
+  text-align: center;
+}
+
+.cme-empty__icon {
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 50%;
+  background: #fff;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.05rem;
+}
+
+.cme-empty__text {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.cme-empty__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.cme-empty--inline {
+  margin: 0;
+  padding: 1rem;
+  font-size: 0.82rem;
+  color: #6e6e73;
+}
+
+/* Payment history (collapsible) */
+.cme-history {
+  margin-top: 1rem;
+  border-top: 1px solid rgba(15, 23, 42, 0.07);
+  padding-top: 0.75rem;
+}
+
+.cme-history__toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.7rem;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: #0f172a;
+}
+
+.cme-history__toggle:hover {
+  background: #f8fafc;
+}
+
+.cme-history__chevron {
+  font-size: 0.72rem;
+  color: #1e3a8a;
+  transition: transform 0.15s ease;
+  transform: rotate(-90deg);
+}
+
+.cme-history__chevron.is-open {
+  transform: rotate(0deg);
+}
+
+.cme-history__title {
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.cme-history__meta {
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: #6e6e73;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cme-history__body {
+  margin-top: 0.5rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 1100px) {
+  .cme-head__controls {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 900px) {
+  .cme-eq {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.35rem;
+  }
+  .cme-eq__op {
+    justify-self: center;
+    width: 1.8rem;
+    height: 1.8rem;
+    font-size: 1rem;
+  }
+  .cme-stat {
+    padding: 0.85rem 1rem 0.9rem;
+  }
+  .cme-stat__value {
+    font-size: 1.4rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .app-view {
+    padding: 1rem 1rem 2rem;
+  }
+  .cme-head__title {
+    font-size: 1.35rem;
+  }
+  .cme-head,
+  .cme-head__controls,
+  .cme-head__actions,
+  .cme-head__nav {
+    width: 100%;
+  }
+  .cme-month {
+    flex: 1;
+    justify-content: space-between;
+  }
+  .cme-head__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cme-btn {
+    padding-inline: 0.6rem;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.2;
+  }
+  .cme-head__actions .cme-btn--primary {
+    grid-column: 1 / -1;
+    order: -1;
+  }
+  .cme-cash {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
+  }
+  .cme-cash__main {
+    flex-basis: auto;
+  }
+  .cme-cash__value {
+    order: 1;
+    margin-left: 0;
+  }
+  .cme-cash__parts {
+    order: 2;
+    padding-top: 0.55rem;
+    border-top: 1px solid rgba(15, 23, 42, 0.06);
+  }
+  .cme-cash__parts {
+    flex-direction: column;
+  }
+  .cme-cash__parts li + li::before {
+    content: none;
+  }
+  .cme-card {
+    padding: 1rem 0.85rem;
+  }
+  .cme-tab {
+    font-size: 0.8rem;
+  }
+  .cme-panel__intro {
+    flex-basis: 100%;
+  }
+
+  /* Tables become one card per row. */
+  .cme-table-wrap {
+    overflow: visible;
+  }
+  .cme-table,
+  .cme-table tbody,
+  .cme-table tr,
+  .cme-table td {
+    display: block;
+    width: 100%;
+  }
+  .cme-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+  .cme-table tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+  .cme-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    gap: 0.6rem 0.75rem;
+    padding: 0.8rem 0.85rem;
+    border-radius: 16px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: #fff;
+  }
+  .cme-table tbody tr:hover td {
+    background: transparent;
+  }
+  .cme-table td {
+    padding: 0;
+    border: none;
+    text-align: left !important;
+    min-width: 0;
+  }
+  .cme-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.2rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: #6e6e73;
+  }
+  .cme-table .c-main {
+    grid-column: 1 / 3;
+    grid-row: 1;
+  }
+  .cme-table .c-actions {
+    grid-column: 3;
+    grid-row: 1;
+    width: auto;
+    align-self: start;
+  }
+  .cme-table .c-wide {
+    grid-column: 1 / -1;
+  }
+  .cme-table--compact tbody tr {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .cme-history__toggle {
+    flex-wrap: wrap;
+  }
+  .cme-history__meta {
+    margin-left: 1.3rem;
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cme-btn,
+  .cme-toggle__track,
+  .cme-toggle__knob,
+  .cme-history__chevron,
+  .cme-action[data-tip]::after {
+    transition: none;
+  }
+}
+</style>
+
+<style>
+/* PrimeVue Dialog shell is teleported to <body>: style it by class (unscoped). */
+.cme-dialog.p-dialog {
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  max-height: 90vh;
+}
+
+.cme-dialog .p-dialog-header {
+  padding: 1.1rem 1.25rem 0.6rem;
+}
+
+.cme-dialog .p-dialog-title {
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+}
+
+.cme-dialog .p-dialog-content {
+  padding: 0.25rem 1.25rem 0.5rem;
+}
+
+.cme-dialog .p-dialog-footer {
+  padding: 0.75rem 1.25rem 1.1rem;
+  gap: 0.5rem;
+}
+
+.cme-dialog .cme-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.cme-dialog .cme-form__row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.cme-dialog .cme-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.cme-dialog .cme-field > label,
+.cme-dialog .cme-field__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.cme-dialog .cme-field .p-inputtext,
+.cme-dialog .cme-field .p-select {
+  border-radius: 12px;
+}
+
+.cme-dialog .cme-field .p-inputtext {
+  min-height: 2.6rem;
+}
+
+.cme-dialog .cme-field__hint {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: #6e6e73;
+}
+
+.cme-dialog .cme-field__error {
+  font-size: 0.75rem;
+  color: #b42318;
+}
+
+.cme-dialog .cme-form__error {
+  margin: 0;
+  padding: 0.55rem 0.75rem;
+  border-radius: 12px;
+  background: #fde4e4;
+  color: #7f1d1d;
+  font-size: 0.8rem;
+}
+
+.cme-dialog .cme-form__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: 12px;
+  background: #e8eefc;
+  color: #1e3a8a;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.cme-dialog .cme-form__note .pi {
+  margin-top: 0.12rem;
+  font-size: 0.75rem;
+}
+
+.cme-dialog .cme-upload {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 14px;
+  border: 1px dashed rgba(15, 23, 42, 0.18);
+  background: #f8fafc;
+}
+
+.cme-dialog .cme-upload__preview {
+  flex-shrink: 0;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 12px;
+  object-fit: cover;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+.cme-dialog .cme-upload__preview--round {
+  border-radius: 50%;
+}
+
+.cme-dialog .cme-upload__preview--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  color: #94a3b8;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.cme-dialog .cme-upload__body {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
 }
 
-.collections-form__field label,
-.collections-form__photo-label {
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--apple-text, #1d1d1f);
+.cme-dialog .cme-upload__buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
 }
 
-.collections-form__hint {
-  margin: 0;
-  font-size: 0.75rem;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.collections-form__hint--strong {
-  font-weight: 600;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.collections-form__input,
-.collections-form__input-num {
-  width: 100%;
-}
-
-.collections-form__input--date {
-  min-height: 2.75rem;
-}
-
-.collections-form__file-input {
-  position: absolute;
-  width: 0;
-  height: 0;
-  opacity: 0;
-  overflow: hidden;
-}
-
-.collections-form__file {
+.cme-dialog .cme-file {
   position: relative;
   display: inline-flex;
   cursor: pointer;
 }
 
-.collections-form__file-trigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.5rem 0.85rem;
-  border-radius: 10px;
-  border: 1px solid #e8e8ed;
-  background: #f5f5f7;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--apple-text, #1d1d1f);
-}
-
-.collections-form__file-trigger:hover {
-  background: #ececf0;
-}
-
-.collections-form__preview-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-top: 0.35rem;
-}
-
-.collections-form__preview {
-  border-radius: 10px;
-  object-fit: cover;
-  border: 1px solid #e8e8ed;
-}
-
-.collections-form__error {
-  margin: 0;
-  font-size: 0.8125rem;
-  color: #b42318;
-}
-
-.collections-form__field-error {
-  display: block;
-  margin-top: 0.3rem;
-  font-size: 0.75rem;
-  color: #b42318;
-}
-
-.collections-net {
-  max-width: 26rem;
-  padding: 1.35rem 1.4rem 1.3rem;
-  border-radius: 16px;
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-}
-
-.collections-net__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.collections-net__month {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.72rem;
-  color: #6e6e73;
-}
-
-.collections-net__input {
-  padding: 0.35rem 0.5rem;
-  border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.15);
-  font: inherit;
-  font-size: 0.8125rem;
-  color: #1d1d1f;
-  background: #fff;
-}
-
-.collections-net__amount--negative {
-  color: #b42318;
-}
-
-.collections-table__empty {
-  margin: 0;
-  padding: 1rem 0;
-  color: var(--apple-text-secondary, #6e6e73);
-}
-
-.collections-thumb {
-  border-radius: 8px;
-  object-fit: cover;
-  vertical-align: middle;
-  border: 1px solid #e8e8ed;
-}
-
-.collections-thumb-placeholder {
-  color: var(--apple-text-secondary, #6e6e73);
-  font-size: 0.875rem;
-}
-
-.collections-data :deep(.p-datatable-table) {
-  table-layout: fixed;
+.cme-dialog .cme-file__input {
+  position: absolute;
+  inset: 0;
   width: 100%;
-}
-
-/* Pin DELETE to the same right edge on costs / services / fixed tables */
-.collections-table:not(.collections-table--history) :deep(th.collections-col-actions),
-.collections-table:not(.collections-table--history) :deep(td.collections-col-actions),
-.collections-table:not(.collections-table--history) :deep(.p-datatable-thead > tr > th:last-child),
-.collections-table:not(.collections-table--history) :deep(.p-datatable-tbody > tr > td:last-child) {
-  width: 4.25rem !important;
-  min-width: 4.25rem !important;
-  max-width: 4.25rem !important;
-  text-align: right !important;
-  padding-left: 0.35rem !important;
-  padding-right: 0.75rem !important;
-}
-
-.collections-row-delete {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  margin-left: auto;
-  padding: 0;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: #ff3b30;
-  font-size: 0.95rem;
+  height: 100%;
+  opacity: 0;
   cursor: pointer;
 }
 
-.collections-row-delete:hover {
-  color: #e0352b;
-  background: rgba(255, 59, 48, 0.1);
+.cme-dialog .cme-file__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.42rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  color: #1e3a8a;
+  font-size: 0.78rem;
+  font-weight: 600;
 }
 
-.collections-row-delete:focus-visible {
-  outline: 2px solid #ff3b30;
+.cme-dialog .cme-file:hover .cme-file__trigger {
+  background: #e8eefc;
+}
+
+.cme-dialog .cme-file:focus-within .cme-file__trigger {
+  outline: 2px solid #1e3a8a;
   outline-offset: 2px;
 }
 
-.collections-delete-dialog__text {
+.cme-dialog .cme-link-btn {
+  padding: 0.2rem 0.3rem;
+  border: none;
+  background: none;
+  color: #b42318;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cme-dialog .cme-link-btn:hover {
+  text-decoration: underline;
+}
+
+.cme-dialog .cme-delete__text {
   margin: 0;
-  font-size: 0.9375rem;
+  font-size: 0.9rem;
   line-height: 1.45;
-  color: var(--apple-text, #1d1d1f);
+  color: #0f172a;
 }
 
-.collections-delete-dialog__hint {
-  margin: 0.75rem 0 0;
-  font-size: 0.8125rem;
+.cme-dialog .cme-delete__hint {
+  margin: 0.7rem 0 0;
+  font-size: 0.8rem;
   line-height: 1.4;
-  color: var(--apple-text-secondary, #6e6e73);
+  color: #6e6e73;
 }
 
-.collections-cost-dialog :deep(.p-dialog-footer),
-.collections-service-dialog :deep(.p-dialog-footer),
-.collections-fixed-dialog :deep(.p-dialog-footer),
-.collections-delete-dialog :deep(.p-dialog-footer) {
-  gap: 0.5rem;
-}
-
-.app-view :deep(.bf-btn) {
-  min-height: 1.7rem;
-  padding: 0.22rem 0.85rem;
-  border-radius: 8px;
-  box-shadow: none;
-  transform: none;
-}
-
-.app-view :deep(.bf-btn--confirm) {
-  background: #0071e3;
-  color: #ffffff;
-  border-color: transparent;
-  box-shadow: none;
-}
-
-.app-view :deep(.bf-btn--confirm:not(:disabled):hover) {
-  background: #0066cc;
-  border-color: transparent;
-  box-shadow: none;
-}
-
-.app-view :deep(.bf-btn--confirm:not(:disabled):focus-visible) {
-  animation: none;
-  box-shadow: none;
-}
-
-.app-view :deep(.bf-btn--cancel) {
-  box-shadow: none;
-}
-
-.app-view :deep(.bf-btn--cancel:not(:disabled):hover) {
-  box-shadow: none;
-}
-
-.app-view :deep(.bf-btn--danger) {
-  box-shadow: none;
-}
-
-.app-view :deep(.bf-btn--danger:not(:disabled):hover) {
-  box-shadow: none;
-}
-
-.collections-cost-dialog :deep(.p-inputnumber),
-.collections-service-dialog :deep(.p-inputnumber),
-.collections-service-dialog :deep(.p-dropdown),
-.collections-service-dialog :deep(.p-select),
-.collections-fixed-dialog :deep(.p-inputnumber) {
-  width: 100%;
+@media (max-width: 480px) {
+  .cme-dialog .cme-form__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>
