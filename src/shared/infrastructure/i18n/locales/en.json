@@ -643,7 +643,9 @@
     "settingsResidentPasswordSave": "Save password",
     "settingsResidentPasswordSaved": "Password saved. You can now sign in with your email and password.",
     "settingsResidentPasswordReauth": "For security, sign out and sign in again before changing your password.",
-    "settingsResidentPasswordError": "Could not save the password. Please try again."
+    "settingsResidentPasswordError": "Could not save the password. Please try again.",
+    "roleAdmin": "Administrator",
+    "roleResident": "Resident"
   },
   "incidentStatusOpen": "Open",
   "incidentStatusInProgress": "In Progress",

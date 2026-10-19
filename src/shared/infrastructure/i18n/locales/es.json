@@ -643,7 +643,9 @@
     "settingsResidentPasswordSave": "Guardar contraseña",
     "settingsResidentPasswordSaved": "Contraseña guardada. Ya puedes entrar con tu correo y contraseña.",
     "settingsResidentPasswordReauth": "Por seguridad, cierra sesión y vuelve a entrar antes de cambiar tu contraseña.",
-    "settingsResidentPasswordError": "No se pudo guardar la contraseña. Inténtalo nuevamente."
+    "settingsResidentPasswordError": "No se pudo guardar la contraseña. Inténtalo nuevamente.",
+    "roleAdmin": "Administrador",
+    "roleResident": "Residente"
   },
   "incidentStatusOpen": "Abierta",
   "incidentStatusInProgress": "En progreso",

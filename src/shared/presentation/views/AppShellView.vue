@@ -21,7 +21,15 @@ import { IncidentRealtimeEvent } from '@/incidents/domain/model/incidentConstant
 const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const { isResident, clearSession } = useSession()
+const { isResident, clearSession, state: sessionState } = useSession()
+
+// Tarjeta de usuario al pie del menú: iniciales, nombre y rol de la sesión.
+const sessionName = computed(() => String(sessionState.profile?.name ?? '').trim())
+const sessionInitials = computed(() => {
+  const words = sessionName.value.split(/\s+/).filter(Boolean)
+  return words.length ? words.slice(0, 2).map((w) => w[0]).join('').toUpperCase() : '?'
+})
+const sessionRoleLabel = computed(() => (isResident.value ? t('app.roleResident') : t('app.roleAdmin')))
 const toast = useToast()
 const { state: incidentRealtime } = useIncidentRealtime()
 
@@ -296,19 +304,31 @@ function toggleAppLocale() {
       </nav>
 
       <footer class="app-shell__footer">
-        <RouterLink
-          class="app-shell__chip app-shell__chip--outline app-shell__chip--footer"
-          active-class="app-shell__chip--outline-active"
-          exact-active-class="app-shell__chip--outline-active"
-          :to="{ name: AppRouteNames.APP_SETTINGS }"
-        >
-          <i class="pi pi-cog app-shell__chip-icon" aria-hidden="true" />
-          {{ t('app.settings') }}
-        </RouterLink>
-        <button type="button" class="app-shell__chip app-shell__chip--danger" @click="onLogout">
-          <i class="pi pi-sign-out app-shell__chip-icon" aria-hidden="true" />
-          {{ t('app.logout') }}
-        </button>
+        <div class="app-shell__user">
+          <span class="app-shell__user-avatar" aria-hidden="true">{{ sessionInitials }}</span>
+          <div class="app-shell__user-text">
+            <strong class="app-shell__user-name">{{ sessionName || sessionRoleLabel }}</strong>
+            <span class="app-shell__user-role">{{ sessionRoleLabel }}</span>
+          </div>
+          <div class="app-shell__user-actions">
+            <RouterLink
+              class="app-shell__user-action"
+              active-class="app-shell__user-action--active"
+              :to="{ name: AppRouteNames.APP_SETTINGS }"
+            >
+              <i class="pi pi-cog" aria-hidden="true" />
+              <span>{{ t('app.settings') }}</span>
+            </RouterLink>
+            <button
+              type="button"
+              class="app-shell__user-action app-shell__user-action--danger"
+              @click="onLogout"
+            >
+              <i class="pi pi-sign-out" aria-hidden="true" />
+              <span>{{ t('app.logout') }}</span>
+            </button>
+          </div>
+        </div>
       </footer>
     </aside>
     <main
@@ -690,8 +710,7 @@ function toggleAppLocale() {
   z-index: 0;
   height: var(--nav-item-height);
   border-radius: 12px;
-  background: #ffffff;
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.07);
+  background: #e8eefc;
   pointer-events: none;
   opacity: 1;
   transform: translateY(calc((var(--nav-item-height) + var(--nav-gap)) * var(--nav-pill-index)));
@@ -710,12 +729,12 @@ function toggleAppLocale() {
   z-index: 1;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
+  justify-content: flex-start;
+  gap: 0.6rem;
   margin: 0;
   width: 100%;
-  text-align: center;
-  padding: 0.3rem 0.35rem;
+  text-align: left;
+  padding: 0.3rem 0.35rem 0.3rem 0.7rem;
   border-radius: 12px;
   font-size: 0.75rem;
   font-weight: 500;
@@ -739,8 +758,13 @@ function toggleAppLocale() {
 }
 
 .app-shell__nav-link--active {
-  color: var(--shell-text);
+  color: #1e3a8a;
   font-weight: 700;
+}
+
+/* Lista simple (sin pill deslizante): el activo lleva su propio fondo. */
+.app-shell__nav-track--simple .app-shell__nav-link--active {
+  background: #e8eefc;
 }
 
 .app-shell__nav-link-icon {
@@ -753,7 +777,101 @@ function toggleAppLocale() {
 }
 
 .app-shell__nav-link--active .app-shell__nav-link-icon {
+  color: #1e3a8a;
+}
+
+/* Tarjeta de usuario (pie del menú) */
+.app-shell__user {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.04);
+  box-sizing: border-box;
+}
+
+.app-shell__user-avatar {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: #1e3a8a;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.app-shell__user-text {
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+}
+
+.app-shell__user-name {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 0.74rem;
+  font-weight: 650;
   color: var(--shell-text);
+}
+
+.app-shell__user-role {
+  display: block;
+  font-size: 0.64rem;
+  color: var(--shell-muted);
+}
+
+.app-shell__user-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.app-shell__user-action {
+  gap: 0.3rem;
+  height: 1.75rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 0.64rem;
+  font-weight: 600;
+  white-space: nowrap;
+  border: none;
+  background: #fff;
+  color: var(--shell-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.app-shell__user-action:hover,
+.app-shell__user-action--active {
+  color: #1e3a8a;
+  background: #e8eefc;
+}
+
+.app-shell__user-action--danger {
+  color: var(--shell-danger-text);
+}
+
+.app-shell__user-action--danger:hover {
+  color: var(--shell-danger-text);
+  background: var(--shell-danger-bg);
+}
+
+.app-shell__user-action:focus-visible {
+  outline: var(--apple-focus-ring, 2px solid var(--apple-blue));
+  outline-offset: 2px;
 }
 
 .app-shell__footer {
