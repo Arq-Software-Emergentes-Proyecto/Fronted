@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.js'
 import { spacesApi } from '@/socialSpaces/infrastructure/spacesApi.js'
@@ -27,7 +27,6 @@ const passLoading = ref(false)
 const passError = ref('')
 const passSavingKey = ref('')
 const passInputEl = ref(null)
-const validatorEl = ref(null)
 
 /** Concierge check-in opens on the booking date, 1 h before the start (server rule, mirrored for the pill). */
 const CHECK_IN_OPENS_BEFORE_MS = 60 * 60 * 1000
@@ -254,12 +253,6 @@ function extractToken(raw) {
   }
 }
 
-async function focusValidator() {
-  validatorEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  await nextTick()
-  passInputEl.value?.focus({ preventScroll: true })
-}
-
 async function validatePass() {
   const token = extractToken(passInput.value)
   if (!token || passLoading.value) return
@@ -453,10 +446,6 @@ onMounted(load)
             <i class="pi" :class="loading ? 'pi-spin pi-spinner' : 'pi-refresh'" aria-hidden="true" />
           </button>
         </div>
-        <button type="button" class="gen-btn gen-btn--primary" @click="focusValidator">
-          <i class="pi pi-qrcode" aria-hidden="true" />
-          {{ t('app.generationValidateCta') }}
-        </button>
       </div>
     </header>
 
@@ -513,7 +502,6 @@ onMounted(load)
     <div class="gen-layout">
       <!-- Validate invitation (QR) -->
       <section
-        ref="validatorEl"
         class="gen-card gen-validator"
         aria-labelledby="gen-validator-title"
       >
