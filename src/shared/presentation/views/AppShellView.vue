@@ -873,18 +873,19 @@ function toggleAppLocale() {
 
 .app-shell__user-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.35rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.3rem;
   width: 100%;
 }
 
 .app-shell__user-action {
-  gap: 0.3rem;
-  height: 1.75rem;
-  padding: 0 0.4rem;
+  gap: 0.35rem;
+  min-width: 0;
+  height: 1.85rem;
+  padding: 0 0.6rem;
   border-radius: 999px;
   font-family: inherit;
-  font-size: 0.64rem;
+  font-size: 0.7rem;
   font-weight: 600;
   white-space: nowrap;
   border: none;
@@ -909,13 +910,25 @@ function toggleAppLocale() {
   box-shadow: 0 1px 5px rgba(0, 0, 0, 0.07);
 }
 
+.app-shell__user-action .pi {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+}
+
+.app-shell__user-action span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .app-shell__user-action--danger {
   color: var(--shell-danger-text);
+  background: var(--shell-danger-bg);
 }
 
 .app-shell__user-action--danger:hover {
-  color: var(--shell-danger-text);
-  background: var(--shell-danger-bg);
+  color: #ffffff;
+  background: var(--shell-danger-text);
 }
 
 .app-shell__user-action:focus-visible {
