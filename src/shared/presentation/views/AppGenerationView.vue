@@ -902,7 +902,7 @@ onMounted(load)
   display: inline-flex;
   align-items: center;
   gap: 0.15rem;
-  padding: 0.2rem;
+  padding: 0.15rem;
   border-radius: 999px;
   background: #fff;
   border: 1px solid rgba(15, 23, 42, 0.1);
@@ -910,8 +910,8 @@ onMounted(load)
 
 .gen-day__step,
 .gen-icon-btn {
-  width: 2rem;
-  height: 2rem;
+  width: 1.75rem;
+  height: 1.75rem;
   border: none;
   border-radius: 50%;
   background: transparent;
@@ -925,8 +925,8 @@ onMounted(load)
 }
 
 .gen-icon-btn {
-  width: 2.45rem;
-  height: 2.45rem;
+  width: 2.125rem;
+  height: 2.125rem;
   background: #fff;
   border: 1px solid rgba(15, 23, 42, 0.1);
   font-size: 0.85rem;
@@ -970,8 +970,8 @@ onMounted(load)
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  min-height: 2.45rem;
-  padding: 0.5rem 0.95rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 0.95rem;
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: #fff;

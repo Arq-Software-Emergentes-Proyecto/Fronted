@@ -962,8 +962,8 @@ const detailTitle = computed(() => {
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  min-height: 2.45rem;
-  padding: 0.5rem 0.95rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 0.95rem;
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: #fff;
@@ -1003,8 +1003,8 @@ const detailTitle = computed(() => {
 }
 
 .rf-btn--lg {
-  min-height: 2.9rem;
-  padding: 0.65rem 1.35rem;
+  min-height: 2.5rem;
+  padding: 0.45rem 1.35rem;
   font-size: 0.9rem;
 }
 
@@ -1599,8 +1599,8 @@ const detailTitle = computed(() => {
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  min-height: 2.45rem;
-  padding: 0.5rem 0.95rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 0.95rem;
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: #fff;

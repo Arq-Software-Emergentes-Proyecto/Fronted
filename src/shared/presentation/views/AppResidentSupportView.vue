@@ -989,7 +989,8 @@ function onAiSuggestion(kind) {
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  padding: 0.68rem 1.1rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 1.1rem;
   border: 1px solid transparent;
   border-radius: 999px;
   font: inherit;

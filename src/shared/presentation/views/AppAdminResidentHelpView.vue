@@ -857,7 +857,8 @@ async function sendReply() {
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  padding: 0.55rem 1rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 1rem;
   border: 1px solid transparent;
   border-radius: 999px;
   font: inherit;

@@ -1332,7 +1332,8 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.55rem 0.9rem;
+  min-height: 2.125rem;
+  padding: 0.35rem 0.9rem;
   border-radius: 999px;
   font-size: 0.82rem;
   font-weight: 600;
