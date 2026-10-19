@@ -11,6 +11,7 @@ import { reservationInviteExpiresAtMs } from '@/shared/infrastructure/api/utils.
 import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const MAX_GUESTS = 5
 /** The server opens the pass on the booking date, 1 h before the start (NOT_YET_VALID before that). */
@@ -341,18 +342,21 @@ async function copyInviteLink(r) {
   }
 }
 
-async function persistGuests(nextGuests) {
+/** `successEvent` (agregar invitado): el botón confirma en verde antes de mostrar la lista. */
+async function persistGuests(nextGuests, successEvent) {
   const res = selected.value
-  if (!res?.id) return
+  if (!res?.id) return null
   savingGuests.value = true
   guestsError.value = ''
   try {
     const updated = await reservationsApi.updateGuests(res.id, nextGuests)
+    if (successEvent) await confirmSuccess(successEvent, t('feedback.guestAdded'))
     const idx = reservations.value.findIndex((x) => x.id === updated.id)
     if (idx !== -1) {
       reservations.value[idx] = updated
     }
     void syncInviteQrs()
+    return updated
   } catch (error) {
     const messages = {
       RESERVATION_CAPACITY_EXCEEDED: 'socialSpaces.errCapacity',
@@ -360,17 +364,21 @@ async function persistGuests(nextGuests) {
       RESERVATION_CANCELLED: 'socialSpaces.errCancelled',
     }
     guestsError.value = t(messages[error?.code] ?? 'resident.generationGuestsSaveError')
+    return null
   } finally {
     savingGuests.value = false
   }
 }
 
-async function addGuest() {
+async function addGuest(event) {
   const name = draftGuest.value.trim()
   const current = Array.isArray(selected.value?.guests) ? selected.value.guests : []
   if (!name || savingGuests.value || current.length >= MAX_GUESTS) return
   draftGuest.value = ''
-  await persistGuests([...current, { name }])
+  const knownIds = new Set(current.map((g) => String(g.id)))
+  const updated = await persistGuests([...current, { name }], event)
+  const added = updated?.guests?.find((g) => !knownIds.has(String(g.id)))
+  if (added) markFresh('guest', added.id)
 }
 
 async function removeGuest(guestId) {
@@ -443,10 +451,7 @@ onUnmounted(() => {
 <template>
   <div class="app-view gen">
     <header class="gen-head">
-      <div class="gen-head__text">
-        <h1 class="gen-head__title">{{ t('resident.guestsPageTitle') }}</h1>
-        <p class="gen-head__sub">{{ t('resident.guestsPageSubtitle', { max: MAX_GUESTS }) }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('resident.guestsPageTitle') }}</h1>
       <div class="gen-head__actions">
         <div
           v-if="myReservations.length"
@@ -614,7 +619,12 @@ onUnmounted(() => {
             <p>{{ t('resident.generationGuestsEmpty') }}</p>
           </div>
           <ul v-else class="gen-guest-list" role="list">
-            <li v-for="g in detail.guests" :key="g.id" class="gen-guest">
+            <li
+              v-for="g in detail.guests"
+              :key="g.id"
+              class="gen-guest"
+              :class="{ 'bf-fresh': isFresh('guest', g.id) }"
+            >
               <span
                 class="gen-avatar"
                 :class="{ 'gen-avatar--in': g.checkedIn }"
@@ -864,28 +874,9 @@ onUnmounted(() => {
 .gen-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.gen-head__text {
-  min-width: 0;
-}
-
-.gen-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.gen-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .gen-head__actions {
@@ -931,8 +922,8 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  min-height: 2.45rem;
-  padding: 0.5rem 1rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 1rem;
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: #fff;
@@ -1743,10 +1734,6 @@ onUnmounted(() => {
 
   .gen-head {
     align-items: stretch;
-  }
-
-  .gen-head__title {
-    font-size: 1.4rem;
   }
 
   .gen-head__actions {

@@ -52,7 +52,7 @@ const emit = defineEmits(['cancel', 'confirm'])
         class="bf-btn"
         :class="confirmVariant === 'danger' ? 'bf-btn--danger' : 'bf-btn--confirm'"
         :disabled="disabled || loading"
-        @click="emit('confirm')"
+        @click="emit('confirm', $event)"
       >
         <span v-if="loading" class="bf-btn__spinner" aria-hidden="true" />
         <i v-else-if="confirmIcon" :class="confirmIcon" aria-hidden="true" />

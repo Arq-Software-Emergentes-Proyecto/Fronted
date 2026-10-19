@@ -10,6 +10,8 @@ import { residentExtraChargesApi } from '../../../finances/infrastructure/reside
 import { useFinancesStore } from '../../../finances/application/financesStore.js'
 import { financesApi } from '../../../finances/infrastructure/financesApi.js'
 import DebtTrafficLightGrid from '../../../finances/presentation/components/DebtTrafficLightGrid.vue'
+import KpiPills from '@/shared/presentation/components/KpiPills.vue'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 import {
   addMonths,
   applyLateFeeToReceipt,
@@ -68,7 +70,7 @@ function shiftSelectedMonth(delta) {
 
 const selectedMonthLabel = computed(() => chargeMonthLabel(selectedMonth.value))
 
-/** Page-level feedback (receipts generated, fee saved, extra charge added). */
+/** Page-level feedback (receipts generated, with counts). */
 const notice = ref({ text: '', tone: 'ok' })
 
 function showNotice(text, tone = 'ok') {
@@ -97,7 +99,9 @@ const isChargeDialogOpen = ref(false)
 const selectedCharge = computed(() =>
   findCharge(editSettings.value.monthlyCharges, chargeForm.value.month),
 )
-const isChargeRegistered = computed(() => Boolean(selectedCharge.value))
+/** True from saving a fee until the dialog is reopened: keeps its button for the green confirmation. */
+const chargeJustSaved = ref(false)
+const isChargeRegistered = computed(() => Boolean(selectedCharge.value) && !chargeJustSaved.value)
 const isReceiptsModalOpen = ref(false)
 const extraCharges = ref([])
 const residentsSearch = ref('')
@@ -148,11 +152,13 @@ function resetChargeForm(monthKey) {
 }
 
 function shiftChargeMonth(delta) {
+  chargeJustSaved.value = false
   chargeInvalid.value = { month: false, paymentOpen: false, amount: false }
   resetChargeForm(shiftMonthKey(chargeForm.value.month, delta))
 }
 
 function openChargeDialog(monthKey) {
+  chargeJustSaved.value = false
   chargeInvalid.value = { month: false, paymentOpen: false, amount: false }
   resetChargeForm(monthKey || selectedMonth.value)
   isChargeDialogOpen.value = true
@@ -195,15 +201,23 @@ function billingAlertMonthLabel(alert) {
   return chargeMonthLabel(alert?.month) || String(alert?.month ?? '')
 }
 
-async function onGenerateReceipts() {
+async function onGenerateReceipts(event) {
   if (isGeneratingReceipts.value) return
   isGeneratingReceipts.value = true
   dismissNotice()
   // Bill exactly the month shown in the month selector (not whatever the server deems current).
   const month = selectedMonth.value
+  const knownReceiptIds = new Set((store.state.receipts || []).map((receipt) => String(receipt.id)))
   try {
     const result = await store.generateMonthlyReceipts(month)
     const label = chargeMonthLabel(result?.month || month)
+    if (Number(result?.created) > 0) {
+      await confirmSuccess(event, t('feedback.receiptsGenerated'))
+      // Highlight the residents that just got a receipt.
+      ;(store.state.receipts || [])
+        .filter((receipt) => !knownReceiptIds.has(String(receipt.id)))
+        .forEach((receipt) => markFresh('financeResident', receipt.residentId))
+    }
     showNotice(
       Number(result?.created) > 0
         ? t('financeOps.generateDone', {
@@ -441,8 +455,53 @@ const summary = computed(() => {
     overdueResidents: overdueRows.length,
     upToDate,
     total: rows.length,
-    upToDatePct: rows.length ? Math.round((upToDate / rows.length) * 100) : 0,
   }
+})
+
+const kpiPills = computed(() => {
+  const s = summary.value
+  const month = selectedMonthLabel.value
+  const overdue = s.overdue > 0
+  return [
+    {
+      key: 'toCollect',
+      tone: 'blue',
+      icon: 'pi-clock',
+      label: t('financeAdmin.kpiToCollect'),
+      value: nfPen.value(s.toCollect),
+      hint: s.issued
+        ? t('financeAdmin.kpiToCollectHint', { n: s.toCollectCount, month }, s.toCollectCount)
+        : t('financeAdmin.kpiNoReceipts', { month }),
+    },
+    {
+      key: 'collected',
+      tone: 'green',
+      icon: 'pi-wallet',
+      label: t('financeAdmin.kpiCollected'),
+      value: nfPen.value(s.collected),
+      hint: t('financeAdmin.kpiCollectedHint', { n: s.collectedCount, month }, s.collectedCount),
+    },
+    {
+      key: 'overdue',
+      tone: overdue ? 'red' : 'amber',
+      icon: 'pi-exclamation-triangle',
+      label: t('financeAdmin.kpiOverdue'),
+      value: nfPen.value(s.overdue),
+      alert: overdue,
+      hint: s.overdueResidents
+        ? t('financeOps.trafficOverdueCount', { n: s.overdueResidents })
+        : t('financeAdmin.kpiOverdueNone'),
+    },
+    {
+      key: 'upToDate',
+      tone: 'orange',
+      icon: 'pi-users',
+      label: t('financeAdmin.kpiUpToDate'),
+      value: s.upToDate,
+      total: s.total,
+      hint: t('financeAdmin.kpiUpToDateHint', { month }),
+    },
+  ]
 })
 
 // --- Extra charge (row dialog "Agregar monto") ---
@@ -470,7 +529,7 @@ function closeExtraDialog() {
   isExtraDialogOpen.value = false
 }
 
-async function onAddExtraCharge() {
+async function onAddExtraCharge(event) {
   const title = String(extraForm.value.title ?? '').trim()
   const description = String(extraForm.value.description ?? '').trim()
   const amount = Number(extraForm.value.amount)
@@ -487,21 +546,22 @@ async function onAddExtraCharge() {
 
   isSavingExtra.value = true
   extraError.value = ''
-  const residentName = selectedExtraResident.value?.name || ''
+  const residentId = selectedResidentId.value
   try {
     const created = await residentExtraChargesApi.add({
-      residentId: selectedResidentId.value,
+      residentId,
       title,
       amount,
       description,
     })
-    extraCharges.value = [created, ...extraCharges.value]
-    resetExtraForm()
     await store.loadData()
     applySettingsToForm(store.state.settings)
+    await confirmSuccess(event, t('feedback.extraChargeAdded'))
     isSavingExtra.value = false
     isExtraDialogOpen.value = false
-    showNotice(t('financeAdmin.extraAdded', { name: residentName }))
+    extraCharges.value = [created, ...extraCharges.value]
+    resetExtraForm()
+    markFresh('financeResident', residentId)
     await loadCalendar()
   } catch (e) {
     extraError.value = e?.payload?.message || t('auth.genericError')
@@ -518,7 +578,7 @@ async function persistCharges(nextCharges) {
   applySettingsToForm(updated)
 }
 
-async function onSaveCharge() {
+async function onSaveCharge(event) {
   const month = normalizeMonthKey(chargeForm.value.month)
   const amount = Number(chargeForm.value.amount)
   const billingStart = String(chargeForm.value.billingStart ?? '').trim()
@@ -549,12 +609,15 @@ async function onSaveCharge() {
       billingEnd,
       paymentOpen,
     })
+    // Set before saving: the fee becomes "registered" as soon as the settings come back.
+    chargeJustSaved.value = true
     await persistCharges([nextCharge, ...editSettings.value.monthlyCharges])
+    await confirmSuccess(event, t('feedback.monthlyChargeSaved'))
+    isChargeDialogOpen.value = false
     resetChargeForm(month)
     await loadBillingAlerts()
-    isChargeDialogOpen.value = false
-    showNotice(`${t('financeAdmin.chargeSaved')} · ${chargeMonthLabel(month)}`)
   } catch (e) {
+    chargeJustSaved.value = false
     chargeError.value = e?.payload?.message || t('auth.genericError')
   } finally {
     isSavingCharge.value = false
@@ -682,10 +745,7 @@ const getStatusBadgeClass = (status) => {
 <template>
   <div v-if="uiState.isLoaded" class="app-view fin">
     <header class="fin-head">
-      <div class="fin-head__text">
-        <h1 class="fin-head__title">{{ t('financeAdmin.pageTitle') }}</h1>
-        <p class="fin-head__sub">{{ t('financeAdmin.subtitle') }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('financeAdmin.pageTitle') }}</h1>
       <div class="fin-head__controls">
         <div class="fin-month" role="group" :aria-label="t('financeAdmin.monthSelectorLabel')">
           <button
@@ -783,75 +843,7 @@ const getStatusBadgeClass = (status) => {
       </button>
     </div>
 
-    <section class="kpi-grid" :aria-label="t('financeAdmin.summaryAria', { month: selectedMonthLabel })">
-      <article class="kpi-card kpi-card--blue">
-        <div class="kpi-header">
-          <span class="kpi-label">{{ t('financeAdmin.kpiToCollect') }}</span>
-          <span class="kpi-icon icon-blue"><i class="pi pi-clock" aria-hidden="true" /></span>
-        </div>
-        <div class="kpi-value">{{ nfPen(summary.toCollect) }}</div>
-        <span class="kpi-subtext">
-          {{
-            summary.issued
-              ? t('financeAdmin.kpiToCollectHint', { n: summary.toCollectCount, month: selectedMonthLabel }, summary.toCollectCount)
-              : t('financeAdmin.kpiNoReceipts', { month: selectedMonthLabel })
-          }}
-        </span>
-        <i class="pi pi-clock kpi-watermark" aria-hidden="true" />
-      </article>
-
-      <article class="kpi-card kpi-card--green">
-        <div class="kpi-header">
-          <span class="kpi-label">{{ t('financeAdmin.kpiCollected') }}</span>
-          <span class="kpi-icon icon-green"><i class="pi pi-wallet" aria-hidden="true" /></span>
-        </div>
-        <div class="kpi-value">{{ nfPen(summary.collected) }}</div>
-        <span class="kpi-subtext">
-          {{ t('financeAdmin.kpiCollectedHint', { n: summary.collectedCount, month: selectedMonthLabel }, summary.collectedCount) }}
-        </span>
-        <i class="pi pi-wallet kpi-watermark" aria-hidden="true" />
-      </article>
-
-      <article class="kpi-card" :class="summary.overdue > 0 ? 'kpi-card--red' : 'kpi-card--amber'">
-        <div class="kpi-header">
-          <span class="kpi-label">{{ t('financeAdmin.kpiOverdue') }}</span>
-          <span class="kpi-icon" :class="summary.overdue > 0 ? 'icon-red' : 'icon-amber'">
-            <i class="pi pi-exclamation-triangle" aria-hidden="true" />
-          </span>
-        </div>
-        <div class="kpi-value" :class="{ 'text-red': summary.overdue > 0 }">{{ nfPen(summary.overdue) }}</div>
-        <span class="kpi-subtext" :class="{ 'subtext-red': summary.overdue > 0 }">
-          {{
-            summary.overdueResidents
-              ? t('financeOps.trafficOverdueCount', { n: summary.overdueResidents })
-              : t('financeAdmin.kpiOverdueNone')
-          }}
-        </span>
-        <i class="pi pi-exclamation-triangle kpi-watermark" aria-hidden="true" />
-      </article>
-
-      <article class="kpi-card kpi-card--orange">
-        <div class="kpi-header">
-          <span class="kpi-label">{{ t('financeAdmin.kpiUpToDate') }}</span>
-          <span class="kpi-icon icon-orange"><i class="pi pi-users" aria-hidden="true" /></span>
-        </div>
-        <div class="kpi-value">
-          {{ summary.upToDate }}<span class="kpi-value__of"> / {{ summary.total }}</span>
-        </div>
-        <div
-          class="kpi-meter"
-          role="progressbar"
-          :aria-valuenow="summary.upToDatePct"
-          aria-valuemin="0"
-          aria-valuemax="100"
-          :aria-label="t('financeAdmin.kpiUpToDate')"
-        >
-          <span class="kpi-meter__fill" :style="{ width: `${summary.upToDatePct}%` }" />
-        </div>
-        <span class="kpi-subtext">{{ t('financeAdmin.kpiUpToDateHint', { month: selectedMonthLabel }) }}</span>
-        <i class="pi pi-users kpi-watermark" aria-hidden="true" />
-      </article>
-    </section>
+    <KpiPills :items="kpiPills" :aria-label="t('financeAdmin.summaryAria', { month: selectedMonthLabel })" />
 
     <section class="fin-card" aria-labelledby="finance-residents-heading">
       <div class="fin-card__head">
@@ -919,7 +911,11 @@ const getStatusBadgeClass = (status) => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in pagedRows" :key="row.id" :class="`is-${row.group}`">
+            <tr
+              v-for="row in pagedRows"
+              :key="row.id"
+              :class="[`is-${row.group}`, { 'bf-fresh': isFresh('financeResident', row.id) }]"
+            >
               <td class="c-resident">
                 <div class="fin-res">
                   <span class="fin-avatar" :class="`fin-avatar--${row.group}`" aria-hidden="true">
@@ -1359,28 +1355,9 @@ const getStatusBadgeClass = (status) => {
 .fin-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.fin-head__text {
-  min-width: 0;
-}
-
-.fin-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.fin-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .fin-head__controls {
@@ -1403,15 +1380,15 @@ const getStatusBadgeClass = (status) => {
   display: inline-flex;
   align-items: center;
   gap: 0.15rem;
-  padding: 0.2rem;
+  padding: 0.15rem;
   border-radius: 999px;
   background: #fff;
   border: 1px solid rgba(15, 23, 42, 0.1);
 }
 
 .fin-month__step {
-  width: 2rem;
-  height: 2rem;
+  width: 1.75rem;
+  height: 1.75rem;
   border: none;
   border-radius: 50%;
   background: transparent;
@@ -1456,8 +1433,8 @@ const getStatusBadgeClass = (status) => {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  min-height: 2.45rem;
-  padding: 0.5rem 0.95rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 0.95rem;
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: #fff;
@@ -1576,133 +1553,6 @@ const getStatusBadgeClass = (status) => {
   color: inherit;
   cursor: pointer;
   font-size: 0.7rem;
-}
-
-/* ---------- KPI cards (same language as the dashboard) ---------- */
-.kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.9rem;
-}
-
-.kpi-card {
-  position: relative;
-  overflow: hidden;
-  background: var(--kpi-bg, #f1f5f9);
-  border-radius: 16px;
-  padding: 1.05rem 1.1rem 1.1rem;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.kpi-card > *:not(.kpi-watermark) {
-  position: relative;
-  z-index: 1;
-}
-
-.kpi-watermark {
-  position: absolute;
-  right: -0.6rem;
-  bottom: -1.3rem;
-  font-size: 6.5rem;
-  opacity: 0.07;
-  pointer-events: none;
-  z-index: 0;
-}
-
-.kpi-card--blue { --kpi-bg: #e8eefc; }
-.kpi-card--green { --kpi-bg: #e3f4e8; }
-.kpi-card--orange { --kpi-bg: #fdeee2; }
-.kpi-card--amber { --kpi-bg: #fdf3dc; }
-.kpi-card--red { --kpi-bg: #fde4e4; }
-
-.kpi-card--blue .kpi-watermark { color: #1e3a8a; }
-.kpi-card--green .kpi-watermark { color: #15803d; }
-.kpi-card--orange .kpi-watermark { color: #c2410c; }
-.kpi-card--amber .kpi-watermark { color: #b45309; }
-.kpi-card--red .kpi-watermark { color: #b42318; }
-
-.kpi-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.65rem;
-}
-
-.kpi-icon {
-  width: 2.1rem;
-  height: 2.1rem;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  font-size: 0.95rem;
-  background: #fff;
-}
-
-.icon-blue { color: #1e3a8a; }
-.icon-green { color: #15803d; }
-.icon-orange { color: #c2410c; }
-.icon-amber { color: #b45309; }
-.icon-red { color: #b42318; }
-
-.kpi-label {
-  color: #6e6e73;
-  font-weight: 600;
-  font-size: 0.78rem;
-  letter-spacing: 0.01em;
-}
-
-.kpi-value {
-  color: #0f172a;
-  font-family: var(--bf-font-heading, inherit);
-  font-weight: 700;
-  font-size: 1.65rem;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-  margin-bottom: 0.45rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.kpi-value__of {
-  font-size: 1rem;
-  font-weight: 600;
-  color: #94a3b8;
-  letter-spacing: 0;
-}
-
-.kpi-subtext {
-  margin-top: auto;
-  color: #6e6e73;
-  font-size: 0.75rem;
-  font-weight: 500;
-  line-height: 1.35;
-}
-
-.subtext-red,
-.text-red {
-  color: #b42318;
-}
-
-.kpi-meter {
-  height: 6px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.85);
-  overflow: hidden;
-  margin-bottom: 0.5rem;
-}
-
-.kpi-meter__fill {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: #c2410c;
-  transition: width 0.4s ease;
 }
 
 /* ---------- Residents card ---------- */
@@ -2357,9 +2207,6 @@ const getStatusBadgeClass = (status) => {
 
 /* ---------- Responsive ---------- */
 @media (max-width: 1100px) {
-  .kpi-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   .fin-head__controls {
     justify-content: flex-start;
   }
@@ -2368,9 +2215,6 @@ const getStatusBadgeClass = (status) => {
 @media (max-width: 720px) {
   .app-view {
     padding: 1rem 1rem 2rem;
-  }
-  .fin-head__title {
-    font-size: 1.35rem;
   }
   .fin-head,
   .fin-head__controls,
@@ -2401,23 +2245,6 @@ const getStatusBadgeClass = (status) => {
   }
   .fin-alert__btn {
     margin-left: auto;
-  }
-  .kpi-grid {
-    gap: 0.6rem;
-  }
-  .kpi-card {
-    padding: 0.85rem 0.85rem 0.9rem;
-  }
-  .kpi-icon {
-    width: 1.8rem;
-    height: 1.8rem;
-    font-size: 0.8rem;
-  }
-  .kpi-value {
-    font-size: 1.2rem;
-  }
-  .kpi-value__of {
-    font-size: 0.85rem;
   }
   .fin-card {
     padding: 1rem 0.85rem;
@@ -2509,8 +2336,7 @@ const getStatusBadgeClass = (status) => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fin-btn,
-  .kpi-meter__fill {
+  .fin-btn {
     transition: none;
   }
 }

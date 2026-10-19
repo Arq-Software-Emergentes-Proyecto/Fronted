@@ -1,10 +1,12 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.js'
 import { spacesApi } from '@/socialSpaces/infrastructure/spacesApi.js'
 import { reservationInviteExpiresAtMs } from '@/shared/infrastructure/api/utils.js'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
+import KpiPills from '@/shared/presentation/components/KpiPills.vue'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const { t, locale } = useI18n()
 
@@ -27,7 +29,6 @@ const passLoading = ref(false)
 const passError = ref('')
 const passSavingKey = ref('')
 const passInputEl = ref(null)
-const validatorEl = ref(null)
 
 /** Concierge check-in opens on the booking date, 1 h before the start (server rule, mirrored for the pill). */
 const CHECK_IN_OPENS_BEFORE_MS = 60 * 60 * 1000
@@ -254,12 +255,6 @@ function extractToken(raw) {
   }
 }
 
-async function focusValidator() {
-  validatorEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  await nextTick()
-  passInputEl.value?.focus({ preventScroll: true })
-}
-
 async function validatePass() {
   const token = extractToken(passInput.value)
   if (!token || passLoading.value) return
@@ -284,12 +279,22 @@ function clearPass() {
   passInputEl.value?.focus()
 }
 
-async function onPassCheckIn(guestId, checkedIn = true) {
+async function onPassCheckIn(guestId, checkedIn = true, event = null) {
   if (!passToken.value || passSavingKey.value) return
   passSavingKey.value = guestId || '*'
   passError.value = ''
   try {
-    pass.value = await reservationsApi.checkInGuestPass(passToken.value, guestId, checkedIn)
+    const pendingIds = passGuests.value
+      .filter((g) => !g.checkedIn && (!guestId || g.id === guestId))
+      .map((g) => g.id)
+    const updated = await reservationsApi.checkInGuestPass(passToken.value, guestId, checkedIn)
+    if (checkedIn && pendingIds.length) {
+      await confirmSuccess(event, guestId ? t('feedback.entryRegistered') : t('feedback.entriesRegistered'))
+    }
+    pass.value = updated
+    // Same key as the agenda row, so the guest also lights up there after the reload.
+    const resId = pass.value?.reservation?.id
+    if (checkedIn) pendingIds.forEach((id) => markFresh('guest', `${resId}:${id}`))
     void load()
   } catch (error) {
     passError.value = checkInRefusalMessage(error)
@@ -302,6 +307,45 @@ async function onPassCheckIn(guestId, checkedIn = true) {
     passSavingKey.value = ''
   }
 }
+
+const statPills = computed(() => {
+  const shown = (n) => (loading.value && !reservations.value.length ? '…' : n)
+  return [
+    {
+      key: 'reservations',
+      tone: 'blue',
+      icon: 'pi-calendar',
+      label: t('app.generationStatReservations'),
+      value: shown(summary.value.reservations),
+      hint: t('app.generationStatReservationsHint', { n: summary.value.withGuests }, summary.value.withGuests),
+    },
+    {
+      key: 'expected',
+      tone: 'amber',
+      icon: 'pi-users',
+      label: t('app.generationStatExpected'),
+      value: shown(summary.value.expected),
+      hint: t('app.generationStatExpectedHint'),
+    },
+    {
+      key: 'entered',
+      tone: 'green',
+      icon: 'pi-sign-in',
+      label: t('app.generationStatEntered'),
+      value: shown(summary.value.entered),
+      total: summary.value.expected || null,
+      hint: t('app.generationStatEnteredHint', { n: summary.value.pending }, summary.value.pending),
+    },
+    {
+      key: 'expired',
+      tone: 'red',
+      icon: 'pi-ban',
+      label: t('app.generationStatExpired'),
+      value: shown(summary.value.expired),
+      hint: t('app.generationStatExpiredHint'),
+    },
+  ]
+})
 
 const passStatusKey = computed(() => {
   const status = String(pass.value?.status || 'EXPIRED').toUpperCase()
@@ -371,17 +415,19 @@ async function load() {
   }
 }
 
-async function onGuestCheckedIn(r, guest, checkedIn) {
+async function onGuestCheckedIn(r, guest, checkedIn, event = null) {
   const key = `${r.id}:${guest.id}`
   if (savingKey.value) return
   savingKey.value = key
   actionError.value = ''
   try {
     const updated = await reservationsApi.setGuestCheckedIn(r.id, guest.id, checkedIn)
+    if (checkedIn) await confirmSuccess(event, t('feedback.entryRegistered'))
     const idx = reservations.value.findIndex((x) => x.id === updated.id)
     if (idx !== -1) {
       reservations.value[idx] = updated
     }
+    if (checkedIn) markFresh('guest', key)
   } catch (error) {
     if (
       error?.status === 410 ||
@@ -402,10 +448,7 @@ onMounted(load)
 <template>
   <div class="app-view gen">
     <header class="gen-head">
-      <div class="gen-head__text">
-        <h1 class="gen-head__title">{{ t('app.generationAdminPageTitle') }}</h1>
-        <p class="gen-head__sub">{{ t('app.generationAdminSubtitle') }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('app.generationAdminPageTitle') }}</h1>
       <div class="gen-head__controls">
         <div class="gen-head__nav">
           <div class="gen-day" role="group" :aria-label="t('app.generationDayGroup')">
@@ -456,10 +499,6 @@ onMounted(load)
             <i class="pi" :class="loading ? 'pi-spin pi-spinner' : 'pi-refresh'" aria-hidden="true" />
           </button>
         </div>
-        <button type="button" class="gen-btn gen-btn--primary" @click="focusValidator">
-          <i class="pi pi-qrcode" aria-hidden="true" />
-          {{ t('app.generationValidateCta') }}
-        </button>
       </div>
     </header>
 
@@ -471,52 +510,11 @@ onMounted(load)
     />
 
     <!-- Summary of the selected day -->
-    <section class="gen-stats" :aria-label="selectedDayLong" :aria-busy="loading ? 'true' : 'false'">
-      <article class="gen-stat gen-stat--blue">
-        <div class="gen-stat__head">
-          <h2 class="gen-stat__label">{{ t('app.generationStatReservations') }}</h2>
-          <span class="gen-stat__icon gen-stat__icon--blue"><i class="pi pi-calendar" aria-hidden="true" /></span>
-        </div>
-        <p class="gen-stat__value">{{ loading && !reservations.length ? '…' : summary.reservations }}</p>
-        <p class="gen-stat__hint">
-          {{ t('app.generationStatReservationsHint', { n: summary.withGuests }, summary.withGuests) }}
-        </p>
-      </article>
-      <article class="gen-stat gen-stat--amber">
-        <div class="gen-stat__head">
-          <h2 class="gen-stat__label">{{ t('app.generationStatExpected') }}</h2>
-          <span class="gen-stat__icon gen-stat__icon--amber"><i class="pi pi-users" aria-hidden="true" /></span>
-        </div>
-        <p class="gen-stat__value">{{ loading && !reservations.length ? '…' : summary.expected }}</p>
-        <p class="gen-stat__hint">{{ t('app.generationStatExpectedHint') }}</p>
-      </article>
-      <article class="gen-stat gen-stat--green">
-        <div class="gen-stat__head">
-          <h2 class="gen-stat__label">{{ t('app.generationStatEntered') }}</h2>
-          <span class="gen-stat__icon gen-stat__icon--green"><i class="pi pi-sign-in" aria-hidden="true" /></span>
-        </div>
-        <p class="gen-stat__value">
-          {{ loading && !reservations.length ? '…' : summary.entered }}
-          <small v-if="summary.expected">/ {{ summary.expected }}</small>
-        </p>
-        <p class="gen-stat__hint">
-          {{ t('app.generationStatEnteredHint', { n: summary.pending }, summary.pending) }}
-        </p>
-      </article>
-      <article class="gen-stat gen-stat--red">
-        <div class="gen-stat__head">
-          <h2 class="gen-stat__label">{{ t('app.generationStatExpired') }}</h2>
-          <span class="gen-stat__icon gen-stat__icon--red"><i class="pi pi-ban" aria-hidden="true" /></span>
-        </div>
-        <p class="gen-stat__value">{{ loading && !reservations.length ? '…' : summary.expired }}</p>
-        <p class="gen-stat__hint">{{ t('app.generationStatExpiredHint') }}</p>
-      </article>
-    </section>
+    <KpiPills :items="statPills" :aria-label="selectedDayLong" :busy="loading" />
 
     <div class="gen-layout">
       <!-- Validate invitation (QR) -->
       <section
-        ref="validatorEl"
         class="gen-card gen-validator"
         aria-labelledby="gen-validator-title"
       >
@@ -586,7 +584,12 @@ onMounted(load)
             </dl>
 
             <ul v-if="passGuests.length" class="gen-guests" role="list">
-              <li v-for="g in passGuests" :key="g.id" class="gen-guest">
+              <li
+                v-for="g in passGuests"
+                :key="g.id"
+                class="gen-guest"
+                :class="{ 'bf-fresh': isFresh('guest', `${pass.reservation?.id}:${g.id}`) }"
+              >
                 <span class="gen-avatar gen-avatar--sm" aria-hidden="true">{{ initials(g.name) }}</span>
                 <span class="gen-guest__text">
                   <span class="gen-guest__name">{{ g.name }}</span>
@@ -601,14 +604,14 @@ onMounted(load)
                   :disabled="pass.status !== 'VALID' || passSavingKey === g.id"
                   :aria-pressed="Boolean(g.checkedIn)"
                   :aria-label="t('app.generationGuestEntryAria', { name: g.name })"
-                  @click="onPassCheckIn(g.id, !g.checkedIn)"
+                  @click="onPassCheckIn(g.id, !g.checkedIn, $event)"
                 >
                   <i
                     class="pi"
                     :class="passSavingKey === g.id ? 'pi-spin pi-spinner' : g.checkedIn ? 'pi-check-circle' : 'pi-sign-in'"
                     aria-hidden="true"
                   />
-                  {{ g.checkedIn ? t('app.generationAdminEntered') : t('app.generationMarkEntry') }}
+                  <span>{{ g.checkedIn ? t('app.generationAdminEntered') : t('app.generationMarkEntry') }}</span>
                 </button>
               </li>
             </ul>
@@ -640,10 +643,10 @@ onMounted(load)
                 type="button"
                 class="gen-btn gen-btn--primary"
                 :disabled="Boolean(passSavingKey)"
-                @click="onPassCheckIn(null, true)"
+                @click="onPassCheckIn(null, true, $event)"
               >
                 <i class="pi" :class="passSavingKey === '*' ? 'pi-spin pi-spinner' : 'pi-check'" aria-hidden="true" />
-                {{ t('socialSpaces.validatorCheckInAll') }}
+                <span>{{ t('socialSpaces.validatorCheckInAll') }}</span>
               </button>
             </div>
           </div>
@@ -773,7 +776,12 @@ onMounted(load)
                 {{ t('app.generationAdminNoGuests') }}
               </p>
               <ul v-else class="gen-guests" role="list">
-                <li v-for="g in guestList(r)" :key="g.id" class="gen-guest">
+                <li
+                  v-for="g in guestList(r)"
+                  :key="g.id"
+                  class="gen-guest"
+                  :class="{ 'bf-fresh': isFresh('guest', `${r.id}:${g.id}`) }"
+                >
                   <span class="gen-avatar gen-avatar--sm gen-avatar--soft" aria-hidden="true">{{ initials(g.name) }}</span>
                   <span class="gen-guest__text">
                     <span class="gen-guest__name">{{ g.name }}</span>
@@ -788,7 +796,7 @@ onMounted(load)
                     :disabled="savingKey === `${r.id}:${g.id}` || (!g.checkedIn && passExpired(r))"
                     :aria-pressed="Boolean(g.checkedIn)"
                     :aria-label="t('app.generationGuestEntryAria', { name: g.name })"
-                    @click="onGuestCheckedIn(r, g, !g.checkedIn)"
+                    @click="onGuestCheckedIn(r, g, !g.checkedIn, $event)"
                   >
                     <i
                       class="pi"
@@ -801,7 +809,7 @@ onMounted(load)
                       "
                       aria-hidden="true"
                     />
-                    {{ g.checkedIn ? t('app.generationAdminEntered') : t('app.generationMarkEntry') }}
+                    <span>{{ g.checkedIn ? t('app.generationAdminEntered') : t('app.generationMarkEntry') }}</span>
                   </button>
                 </li>
               </ul>
@@ -871,28 +879,9 @@ onMounted(load)
 .gen-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.gen-head__text {
-  min-width: 0;
-}
-
-.gen-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.gen-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .gen-head__controls {
@@ -913,7 +902,7 @@ onMounted(load)
   display: inline-flex;
   align-items: center;
   gap: 0.15rem;
-  padding: 0.2rem;
+  padding: 0.15rem;
   border-radius: 999px;
   background: #fff;
   border: 1px solid rgba(15, 23, 42, 0.1);
@@ -921,8 +910,8 @@ onMounted(load)
 
 .gen-day__step,
 .gen-icon-btn {
-  width: 2rem;
-  height: 2rem;
+  width: 1.75rem;
+  height: 1.75rem;
   border: none;
   border-radius: 50%;
   background: transparent;
@@ -936,8 +925,8 @@ onMounted(load)
 }
 
 .gen-icon-btn {
-  width: 2.45rem;
-  height: 2.45rem;
+  width: 2.125rem;
+  height: 2.125rem;
   background: #fff;
   border: 1px solid rgba(15, 23, 42, 0.1);
   font-size: 0.85rem;
@@ -981,8 +970,8 @@ onMounted(load)
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  min-height: 2.45rem;
-  padding: 0.5rem 0.95rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 0.95rem;
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: #fff;
@@ -1080,85 +1069,6 @@ onMounted(load)
 
 .gen-alert__close:hover {
   background: #fff;
-}
-
-/* ---------- Summary cards ---------- */
-.gen-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-
-.gen-stat {
-  background: var(--stat-bg, #f1f5f9);
-  border-radius: 16px;
-  padding: 1rem 1.1rem 1.05rem;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.gen-stat--blue { --stat-bg: #e8eefc; }
-.gen-stat--amber { --stat-bg: #fdf3dc; }
-.gen-stat--green { --stat-bg: #e3f4e8; }
-.gen-stat--red { --stat-bg: #fde4e4; }
-
-.gen-stat__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.55rem;
-}
-
-.gen-stat__label {
-  margin: 0;
-  color: #475569;
-  font-weight: 600;
-  font-size: 0.8rem;
-}
-
-.gen-stat__icon {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  font-size: 0.85rem;
-  background: #fff;
-}
-
-.gen-stat__icon--blue { color: #1e3a8a; }
-.gen-stat__icon--amber { color: #b45309; }
-.gen-stat__icon--green { color: #15803d; }
-.gen-stat__icon--red { color: #b42318; }
-
-.gen-stat__value {
-  margin: 0 0 0.4rem;
-  color: #0f172a;
-  font-family: var(--bf-font-heading, inherit);
-  font-weight: 700;
-  font-size: 1.65rem;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-  font-variant-numeric: tabular-nums;
-}
-
-.gen-stat__value small {
-  font-size: 1rem;
-  font-weight: 600;
-  color: #64748b;
-  letter-spacing: 0;
-}
-
-.gen-stat__hint {
-  margin: auto 0 0;
-  color: #6e6e73;
-  font-size: 0.75rem;
-  font-weight: 500;
-  line-height: 1.35;
 }
 
 /* ---------- Layout ---------- */
@@ -1827,11 +1737,6 @@ onMounted(load)
 }
 
 /* ---------- Responsive ---------- */
-@media (max-width: 1180px) {
-  .gen-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
 
 @media (max-width: 1000px) {
   .gen-layout {
@@ -1851,9 +1756,6 @@ onMounted(load)
   .app-view {
     padding: 1rem 1rem 2rem;
   }
-  .gen-head__title {
-    font-size: 1.35rem;
-  }
   .gen-head,
   .gen-head__controls,
   .gen-head__nav {
@@ -1872,15 +1774,6 @@ onMounted(load)
   .gen-head__controls > .gen-btn--primary {
     width: 100%;
     order: -1;
-  }
-  .gen-stats {
-    gap: 0.6rem;
-  }
-  .gen-stat {
-    padding: 0.85rem 0.9rem 0.9rem;
-  }
-  .gen-stat__value {
-    font-size: 1.4rem;
   }
   .gen-card {
     padding: 1rem;

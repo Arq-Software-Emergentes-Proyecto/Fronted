@@ -18,6 +18,7 @@ import { useFinancesStore } from '@/finances/application/financesStore.js'
 import { financesApi } from '@/finances/infrastructure/financesApi.js'
 import { OPEN_WIREFRAME_ACCESS } from '@/iam/application/localPreviewAuth.js'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const { t, locale } = useI18n()
 const { state, loadData } = useFinancesStore()
@@ -535,7 +536,7 @@ async function onFixedPhotoChange(event) {
   }
 }
 
-async function submitCost() {
+async function submitCost(event) {
   if (saving.value) return
   submitError.value = ''
 
@@ -555,14 +556,18 @@ async function submitCost() {
 
   saving.value = true
   try {
-    await adminManagementExpensesApi.add({
+    const created = await adminManagementExpensesApi.add({
       name: form.name,
       amount: amt,
       purchaseDate: form.purchaseDate,
       invoicePhotoUrl: form.invoicePhotoUrl,
     })
+    await confirmSuccess(event, t('feedback.expenseAdded'))
     closeModal()
+    // The header buttons open these dialogs from any tab: show the list the new item is in.
+    selectTab('expenses')
     await loadCosts()
+    markFresh('expense', created?.id)
     await loadMonthBalance()
   } catch (err) {
     const field = err?.field || err?.payload?.field
@@ -585,7 +590,7 @@ async function submitCost() {
   }
 }
 
-async function submitSharedService() {
+async function submitSharedService(event) {
   if (serviceSaving.value) return
   serviceSubmitError.value = ''
 
@@ -601,12 +606,15 @@ async function submitSharedService() {
 
   serviceSaving.value = true
   try {
-    await sharedUtilityServicesApi.add({
+    const created = await sharedUtilityServicesApi.add({
       type: serviceForm.type,
       amount: amt,
     })
+    await confirmSuccess(event, t('feedback.sharedServiceAdded'))
     closeServiceModal()
+    selectTab('services')
     await Promise.all([loadSharedServices(), loadData()])
+    markFresh('sharedService', created?.id)
   } catch (err) {
     if (err?.code === 'SHARED_SERVICE_FIELDS_REQUIRED') {
       serviceSubmitError.value = t('sharedServices.requiredFields')
@@ -618,7 +626,7 @@ async function submitSharedService() {
   }
 }
 
-async function submitFixedRecipient() {
+async function submitFixedRecipient(event) {
   if (fixedSaving.value) return
   fixedSubmitError.value = ''
 
@@ -645,7 +653,7 @@ async function submitFixedRecipient() {
 
   fixedSaving.value = true
   try {
-    await fixedPayoutRecipientsApi.add({
+    const created = await fixedPayoutRecipientsApi.add({
       name: fixedForm.name,
       dni: fixedForm.dni,
       phone: fixedForm.phone,
@@ -653,8 +661,11 @@ async function submitFixedRecipient() {
       intervalDays: interval,
       photoUrl: fixedForm.photoUrl,
     })
+    await confirmSuccess(event, t('feedback.fixedPayoutAdded'))
     closeFixedModal()
+    selectTab('fixed')
     await loadFixedRecipients()
+    markFresh('fixedPayout', created?.id)
   } catch (err) {
     if (err?.code === 'FIXED_PAYOUT_FIELDS_REQUIRED') {
       fixedSubmitError.value = t('fixedPay.requiredFields')
@@ -725,10 +736,7 @@ onMounted(async () => {
 <template>
   <div class="app-view cme">
     <header class="cme-head">
-      <div class="cme-head__text">
-        <h1 class="cme-head__title">{{ t('collectionsMgmt.pageTitle') }}</h1>
-        <p class="cme-head__sub">{{ t('collectionsMgmt.pageSubtitle') }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('collectionsMgmt.pageTitle') }}</h1>
       <div class="cme-head__controls">
         <div class="cme-head__nav">
           <div class="cme-month" role="group" :aria-label="t('collectionsMgmt.monthSelectorLabel')">
@@ -938,7 +946,7 @@ onMounted(async () => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="row in visibleExpenses" :key="row.id">
+                <tr v-for="row in visibleExpenses" :key="row.id" :class="{ 'bf-fresh': isFresh('expense', row.id) }">
                   <td class="c-main">
                     <div class="cme-item">
                       <img
@@ -1038,7 +1046,7 @@ onMounted(async () => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="row in sharedServices" :key="row.id">
+                <tr v-for="row in sharedServices" :key="row.id" :class="{ 'bf-fresh': isFresh('sharedService', row.id) }">
                   <td class="c-main">
                     <div class="cme-item">
                       <span
@@ -1119,7 +1127,7 @@ onMounted(async () => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="row in fixedRecipients" :key="row.id">
+                <tr v-for="row in fixedRecipients" :key="row.id" :class="{ 'bf-fresh': isFresh('fixedPayout', row.id) }">
                   <td class="c-main">
                     <div class="cme-item">
                       <img
@@ -1570,28 +1578,9 @@ onMounted(async () => {
 .cme-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.cme-head__text {
-  min-width: 0;
-}
-
-.cme-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.cme-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .cme-head__controls {
@@ -1619,7 +1608,7 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   gap: 0.15rem;
-  padding: 0.2rem;
+  padding: 0.15rem;
   border-radius: 999px;
   background: #fff;
   border: 1px solid rgba(15, 23, 42, 0.1);
@@ -1627,8 +1616,8 @@ onMounted(async () => {
 
 .cme-month__step,
 .cme-icon-btn {
-  width: 2rem;
-  height: 2rem;
+  width: 1.75rem;
+  height: 1.75rem;
   border: none;
   border-radius: 50%;
   background: transparent;
@@ -1642,8 +1631,8 @@ onMounted(async () => {
 }
 
 .cme-icon-btn {
-  width: 2.45rem;
-  height: 2.45rem;
+  width: 2.125rem;
+  height: 2.125rem;
   background: #fff;
   border: 1px solid rgba(15, 23, 42, 0.1);
   font-size: 0.85rem;
@@ -1682,8 +1671,8 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  min-height: 2.45rem;
-  padding: 0.5rem 0.95rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 0.95rem;
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: #fff;
@@ -2457,9 +2446,6 @@ onMounted(async () => {
 @media (max-width: 720px) {
   .app-view {
     padding: 1rem 1rem 2rem;
-  }
-  .cme-head__title {
-    font-size: 1.35rem;
   }
   .cme-head,
   .cme-head__controls,

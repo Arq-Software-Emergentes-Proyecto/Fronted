@@ -1,0 +1,186 @@
+/*
+ * Confirmación verde (successFeedback.js): el botón se funde a verde, se traza un check y aparece
+ * el texto; la fila nueva entra con un verde suave que se apaga solo.
+ * Las clases se repiten para ganarle a los estilos de cada vista (hover, disabled).
+ */
+:root {
+  --bf-success: #16a34a;
+  --bf-success-ink: #15803d;
+  --bf-success-soft: #ecf8f0;
+  --bf-success-line: rgba(22, 163, 74, 0.35);
+  --bf-success-glow: rgba(22, 163, 74, 0.28);
+  --bf-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --bf-ease-soft: cubic-bezier(0.45, 0, 0.2, 1);
+}
+
+.bf-success-host.bf-success-host {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  transition:
+    box-shadow 0.9s var(--bf-ease-soft),
+    border-color 0.85s var(--bf-ease-soft),
+    transform 0.35s var(--bf-ease),
+    width 0.6s var(--bf-ease),
+    min-width 0.6s var(--bf-ease);
+}
+
+.bf-success-host.bf-success-host.is-bf-success {
+  opacity: 1 !important;
+  cursor: default;
+  pointer-events: none;
+  border-color: var(--bf-success) !important;
+  box-shadow: 0 8px 22px -6px var(--bf-success-glow);
+}
+
+/* Contenido original: sube y se desenfoca mientras entra el verde. */
+.bf-success-host > :not(.bf-success__layer):not(.bf-sr-only) {
+  transition:
+    opacity 0.6s var(--bf-ease-soft),
+    transform 0.75s var(--bf-ease),
+    filter 0.6s var(--bf-ease-soft);
+}
+
+.bf-success-host.is-bf-success > :not(.bf-success__layer):not(.bf-sr-only) {
+  opacity: 0;
+  transform: translateY(-7px);
+  filter: blur(2px);
+}
+
+.bf-success__layer {
+  position: absolute;
+  /* -1px: también cubre el borde del botón, para que no quede una línea del color original. */
+  inset: -1px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0 0.75rem;
+  border-radius: inherit;
+  background: var(--bf-success);
+  color: #ffffff;
+  font: inherit;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.85s var(--bf-ease-soft);
+}
+
+.is-bf-success > .bf-success__layer {
+  opacity: 1;
+}
+
+.bf-success__check,
+.bf-success__label {
+  opacity: 0;
+  transform: translateY(7px);
+  filter: blur(2px);
+  transition:
+    opacity 0.6s var(--bf-ease-soft),
+    transform 0.75s var(--bf-ease),
+    filter 0.6s var(--bf-ease-soft);
+}
+
+.is-bf-success .bf-success__check,
+.is-bf-success .bf-success__label {
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+
+.bf-success__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bf-success__check {
+  flex-shrink: 0;
+  width: 1.15em;
+  height: 1.15em;
+}
+
+.bf-success__check circle {
+  opacity: 0.45;
+  stroke-dasharray: 60;
+  stroke-dashoffset: 60;
+  transform: rotate(-90deg);
+  transform-origin: center;
+}
+
+.bf-success__check path {
+  stroke-dasharray: 20;
+  stroke-dashoffset: 20;
+}
+
+.is-bf-success .bf-success__check circle {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 0.7s 0.1s var(--bf-ease-soft);
+}
+
+.is-bf-success .bf-success__check path {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 0.5s 0.55s var(--bf-ease-soft);
+}
+
+/* ---------- Fila / tarjeta recién agregada ---------- */
+.bf-fresh {
+  animation:
+    bf-fresh-in 0.8s var(--bf-ease),
+    bf-fresh-tint 3.4s var(--bf-ease-soft);
+}
+
+/* Tablas: el color va en las celdas (sin borde, para no marcar líneas entre columnas). */
+tr.bf-fresh {
+  animation: none;
+}
+
+tr.bf-fresh > td {
+  animation:
+    bf-fresh-in 0.8s var(--bf-ease),
+    bf-fresh-cell 3.4s var(--bf-ease-soft);
+}
+
+@keyframes bf-fresh-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* Sin "to": vuelve sola al fondo y borde propios del elemento. */
+@keyframes bf-fresh-tint {
+  0%,
+  45% {
+    background-color: var(--bf-success-soft);
+    border-color: var(--bf-success-line);
+    box-shadow: inset 0 0 0 1px var(--bf-success-line);
+  }
+}
+
+@keyframes bf-fresh-cell {
+  0%,
+  45% {
+    background-color: var(--bf-success-soft);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bf-success-host,
+  .bf-success-host > *,
+  .bf-success__layer,
+  .bf-success__check,
+  .bf-success__label,
+  .bf-success__check circle,
+  .bf-success__check path {
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+  .bf-fresh {
+    animation: bf-fresh-tint 2s linear;
+  }
+  tr.bf-fresh > td {
+    animation: bf-fresh-cell 2s linear;
+  }
+}

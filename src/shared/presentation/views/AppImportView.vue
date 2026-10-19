@@ -8,6 +8,7 @@ import { importUploadsApi, DOCUMENT_TYPES } from '@/communications/infrastructur
 import { importFoldersApi, isContextFolder, isHomeFolder, isSystemFolder } from '@/communications/infrastructure/importFoldersApi.js'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const { t, locale } = useI18n()
 
@@ -32,6 +33,7 @@ const uploading = ref(false)
 const uploadError = ref('')
 const isDragging = ref(false)
 const fileInputRef = ref(null)
+const uploadButtonRef = ref(null)
 const deletingId = ref(null)
 const deletingFolderId = ref(null)
 const downloadingId = ref(null)
@@ -384,6 +386,7 @@ async function ingestFiles(fileList) {
   if (!files.length) return
   uploadError.value = ''
   uploading.value = true
+  const uploadedIds = []
   try {
     for (const file of files) {
       if (file.size > MAX_BYTES) {
@@ -394,12 +397,21 @@ async function ingestFiles(fileList) {
         uploadError.value = t('importView.mimeNotAllowed')
         continue
       }
-      await importUploadsApi.add({
+      const uploaded = await importUploadsApi.add({
         file,
         folderId: selectedFolderId.value || homeFolder.value?.id,
       })
+      if (uploaded?.id) uploadedIds.push(uploaded.id)
     }
     await loadList()
+    uploadedIds.forEach((id) => markFresh('document', id))
+    // No dialog to close: the button turns green while the upload area goes back to idle.
+    if (uploadedIds.length) {
+      void confirmSuccess(
+        uploadButtonRef,
+        uploadedIds.length > 1 ? t('feedback.documentsUploaded') : t('feedback.documentUploaded'),
+      )
+    }
   } catch (err) {
     const code = err?.response?.data?.code || err?.code
     if (code === 'QUOTA_EXCEEDED') uploadError.value = t('importView.quotaExceeded')
@@ -524,7 +536,7 @@ function closeEditModal() {
   editError.value = ''
 }
 
-async function onSaveFileName() {
+async function onSaveFileName(event) {
   if (isSavingName.value || !editCandidate.value) return
   const nextName = normalizeFileName(editFileName.value, editCandidate.value.fileName)
   if (!nextName) {
@@ -537,10 +549,13 @@ async function onSaveFileName() {
   try {
     const updated = await importUploadsApi.updateFileName(editCandidate.value.id, nextName)
     const savedName = updated?.fileName || nextName
-    items.value = items.value.map((row) =>
-      row.id === editCandidate.value.id ? { ...row, fileName: savedName } : row,
-    )
+    const savedId = editCandidate.value.id
+    await confirmSuccess(event, t('feedback.changesSaved'))
     isEditModalOpen.value = false
+    items.value = items.value.map((row) =>
+      row.id === savedId ? { ...row, fileName: savedName } : row,
+    )
+    markFresh('document', savedId)
     editCandidate.value = null
     editFileName.value = ''
   } catch {
@@ -566,7 +581,7 @@ function closeFolderModal() {
   folderModalError.value = ''
 }
 
-async function onSaveFolder() {
+async function onSaveFolder(event) {
   if (isSavingFolder.value) return
   const name = String(folderName.value ?? '').trim()
   if (!name) {
@@ -578,17 +593,23 @@ async function onSaveFolder() {
   folderModalError.value = ''
   try {
     if (folderCandidate.value) {
-      const updated = await importFoldersApi.updateName(folderCandidate.value.id, name)
+      const folderId = folderCandidate.value.id
+      const updated = await importFoldersApi.updateName(folderId, name)
       const savedName = updated?.name || name
+      await confirmSuccess(event, t('feedback.changesSaved'))
+      isFolderModalOpen.value = false
       folders.value = folders.value.map((folder) =>
-        folder.id === folderCandidate.value.id ? { ...folder, name: savedName } : folder,
+        folder.id === folderId ? { ...folder, name: savedName } : folder,
       )
+      markFresh('folder', folderId)
     } else {
       const created = await importFoldersApi.add({ name })
+      await confirmSuccess(event, t('feedback.folderCreated'))
+      isFolderModalOpen.value = false
       folders.value = sortFolders([created, ...folders.value])
       selectedFolderId.value = created.id
+      markFresh('folder', created.id)
     }
-    isFolderModalOpen.value = false
     folderCandidate.value = null
     folderName.value = ''
   } catch {
@@ -732,20 +753,27 @@ function mergeDocRows(...rows) {
   items.value = items.value.map((row) => (byId.has(row.id) ? { ...row, ...byId.get(row.id) } : row))
 }
 
-async function runDocAction(action) {
+async function runDocAction(action, event) {
   const file = docCandidate.value
   if (!file || docSaving.value) return
   docSaving.value = true
   docError.value = ''
   try {
     if (action === 'type') {
-      mergeDocRows(await importUploadsApi.setDocumentType(file.id, docType.value))
+      const updated = await importUploadsApi.setDocumentType(file.id, docType.value)
+      await confirmSuccess(event, t('feedback.changesSaved'))
+      docCandidate.value = null
+      mergeDocRows(updated)
+      markFresh('document', file.id)
     } else if (action === 'publish') {
       const result = await importUploadsApi.publish(file.id, {
         supersedesId: docSupersedesId.value || null,
         documentType: docType.value,
       })
+      await confirmSuccess(event, t('feedback.documentPublished'))
+      docCandidate.value = null
       mergeDocRows(result?.document, result?.superseded)
+      markFresh('document', result?.document?.id ?? file.id)
     } else if (action === 'archive') {
       mergeDocRows(await importUploadsApi.archive(file.id))
     }
@@ -763,23 +791,21 @@ onMounted(loadList)
 <template>
   <div class="app-view imp">
     <header class="imp-head">
-      <div class="imp-head__text">
-        <h1 class="imp-head__title">{{ t('importView.pageTitle') }}</h1>
-        <p class="imp-head__sub">{{ t('importView.pageSubtitle') }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('importView.pageTitle') }}</h1>
       <div class="imp-head__actions" role="group" :aria-label="t('importView.headerActions')">
         <button type="button" class="imp-btn" :disabled="isSavingFolder" @click="openFolderModal()">
           <i class="pi pi-folder-plus" aria-hidden="true" />
           {{ t('importView.newFolder') }}
         </button>
         <button
+          ref="uploadButtonRef"
           type="button"
           class="imp-btn imp-btn--primary"
           :disabled="uploading || loading"
           @click="openFilePicker"
         >
           <i class="pi" :class="uploading ? 'pi-spin pi-spinner' : 'pi-upload'" aria-hidden="true" />
-          {{ uploading ? t('importView.uploadingFiles') : t('importView.uploadDocument') }}
+          <span>{{ uploading ? t('importView.uploadingFiles') : t('importView.uploadDocument') }}</span>
         </button>
       </div>
     </header>
@@ -857,6 +883,7 @@ onMounted(loadList)
             :class="{
               'is-selected': selectedFolderId === folder.id,
               'is-drop': dropFolderId === folder.id,
+              'bf-fresh': isFresh('folder', folder.id),
             }"
             @dragover="onFolderDragOver($event, folder)"
             @dragleave="onFolderDragLeave(folder)"
@@ -1101,6 +1128,7 @@ onMounted(loadList)
                   :class="{
                     'is-dragging': draggingFileId === file.id,
                     'is-inactive': documentStatusOf(file) !== 'PUBLISHED',
+                    'bf-fresh': isFresh('document', file.id),
                   }"
                   draggable="true"
                   @dragstart="onFileDragStart($event, file)"
@@ -1322,19 +1350,19 @@ onMounted(loadList)
           <button type="button" class="bf-btn bf-btn--cancel" :disabled="docSaving" @click="closeDocModal">
             {{ t('app.cancelAction') }}
           </button>
-          <button type="button" class="bf-btn bf-btn--cancel" :disabled="docSaving" @click="runDocAction('type')">
-            {{ t('importView.saveTypeAction') }}
+          <button type="button" class="bf-btn bf-btn--cancel" :disabled="docSaving" @click="runDocAction('type', $event)">
+            <span>{{ t('importView.saveTypeAction') }}</span>
           </button>
           <button
             v-if="documentStatusOf(docCandidate) !== 'PUBLISHED' || docSupersedesId"
             type="button"
             class="bf-btn bf-btn--confirm"
             :disabled="docSaving"
-            @click="runDocAction('publish')"
+            @click="runDocAction('publish', $event)"
           >
             <span v-if="docSaving" class="bf-btn__spinner" aria-hidden="true" />
             <i v-else class="pi pi-check" aria-hidden="true" />
-            {{ docSupersedesId ? t('importView.publishVersionAction') : t('importView.publishAction') }}
+            <span>{{ docSupersedesId ? t('importView.publishVersionAction') : t('importView.publishAction') }}</span>
           </button>
         </div>
       </template>
@@ -1450,30 +1478,9 @@ onMounted(loadList)
 .imp-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.imp-head__text {
-  min-width: 0;
-  flex: 1 1 24rem;
-}
-
-.imp-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.imp-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  line-height: 1.45;
-  color: #6e6e73;
 }
 
 .imp-head__actions {
@@ -1488,8 +1495,8 @@ onMounted(loadList)
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  min-height: 2.45rem;
-  padding: 0.5rem 0.95rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 0.95rem;
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: #fff;
@@ -2529,14 +2536,6 @@ onMounted(loadList)
 @media (max-width: 720px) {
   .app-view {
     padding: 1rem 1rem 2rem;
-  }
-
-  .imp-head__title {
-    font-size: 1.35rem;
-  }
-
-  .imp-head__text {
-    flex-basis: 100%;
   }
 
   .imp-head__actions {

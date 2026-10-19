@@ -35,6 +35,8 @@ import {
 } from '@/incidents/application/incidentRealtimeStore.js'
 import { teamWorkersApi } from '@/team/infrastructure/teamWorkersApi.js'
 import { teamTasksApi } from '@/team/infrastructure/teamTasksApi.js'
+import KpiPills from '@/shared/presentation/components/KpiPills.vue'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const { t, locale } = useI18n()
 
@@ -53,14 +55,14 @@ async function loadActiveWorkers() {
   }
 }
 
-async function createTaskFromIncident(row, staffId) {
+async function createTaskFromIncident(row, staffId, event) {
   if (!staffId || taskBusyId.value) return
   taskBusyId.value = row.id
   taskNotice.value = { id: '', text: '', error: false }
   try {
     const description = [row.title, row.description].filter(Boolean).join(' — ').slice(0, 2000)
     await teamTasksApi.create({ staffId, incidentId: row.id, description: description || row.id })
-    taskNotice.value = { id: row.id, text: t('teamMgmt.tasks.createdFromIncident'), error: false }
+    await confirmSuccess(event, t('feedback.taskCreated'))
     taskWorkerId.value = ''
   } catch (err) {
     const text =
@@ -227,6 +229,45 @@ const summary = computed(() => {
   return { open, inProgress, resolvedMonth, unassigned }
 })
 
+const kpiPills = computed(() => {
+  const pending = loading.value && !incidents.value.length
+  const shown = (n) => (pending ? '…' : n)
+  return [
+    {
+      key: 'open',
+      tone: 'orange',
+      icon: 'pi-exclamation-circle',
+      label: t('incidentFlow.summaryOpen'),
+      value: shown(summary.value.open),
+      hint: t('incidentFlow.summaryOpenHint'),
+    },
+    {
+      key: 'inProgress',
+      tone: 'blue',
+      icon: 'pi-sync',
+      label: t('incidentFlow.summaryInProgress'),
+      value: shown(summary.value.inProgress),
+      hint: t('incidentFlow.summaryInProgressHint'),
+    },
+    {
+      key: 'resolvedMonth',
+      tone: 'green',
+      icon: 'pi-check-circle',
+      label: t('incidentFlow.summaryResolvedMonth'),
+      value: shown(summary.value.resolvedMonth),
+      hint: t('incidentFlow.summaryResolvedMonthHint', { month: monthLabel.value }),
+    },
+    {
+      key: 'unassigned',
+      tone: 'amber',
+      icon: 'pi-wrench',
+      label: t('incidentFlow.summaryUnassigned'),
+      value: shown(summary.value.unassigned),
+      hint: t('incidentFlow.summaryUnassignedHint'),
+    },
+  ]
+})
+
 // US024: campos obligatorios marcados en rojo; envío bloqueado mientras falten.
 const titleInvalid = computed(() => titleTouched.value && !draftTitle.value.trim())
 const descriptionInvalid = computed(() => descriptionTouched.value && !draftDescription.value.trim())
@@ -337,7 +378,10 @@ async function loadIncidents({ silent = false } = {}) {
   }
 }
 
-async function createIncident() {
+/** Botón "Registrar incidencia" del pie del diálogo (también al enviar el formulario con Enter). */
+const createActionsRef = ref(null)
+
+async function createIncident(event) {
   titleTouched.value = true
   descriptionTouched.value = true
   const title = draftTitle.value.trim()
@@ -347,8 +391,9 @@ async function createIncident() {
   try {
     composeError.value = ''
     error.value = null
-    await incidentsApi.add({
-      id: `incident-${Date.now()}`,
+    const id = `incident-${Date.now()}`
+    const created = await incidentsApi.add({
+      id,
       title,
       description,
       status: IncidentStatus.OPEN,
@@ -359,9 +404,12 @@ async function createIncident() {
       residentName: '',
       createdAt: new Date().toISOString(),
     })
+    const button = event?.type === 'click' ? event : createActionsRef.value?.$el?.querySelector('.bf-btn--confirm')
+    await confirmSuccess(button, t('feedback.incidentLogged'))
     sending.value = false
     cancelCompose()
     await loadIncidents()
+    markFresh('incident', created?.id ?? id)
   } catch (err) {
     composeError.value = resolveErrorMessage(err)
   } finally {
@@ -369,14 +417,30 @@ async function createIncident() {
   }
 }
 
+/** Ids del historial abierto, para resaltar los eventos que agrega un cambio. */
+function detailEventIds() {
+  return new Set(detailEvents.value.map((ev) => String(ev?.id)))
+}
+
+function markNewEvents(before) {
+  for (const ev of detailEvents.value) {
+    if (ev?.id != null && !before.has(String(ev.id))) markFresh('incidentEvent', ev.id)
+  }
+}
+
 async function runSave(row, action) {
   if (!row?.id || savingId.value) return
   savingId.value = row.id
+  const before = detailEventIds()
   try {
     error.value = null
     await action()
     await loadIncidents({ silent: true })
-    if (detailId.value === String(row.id)) await loadDetail()
+    if (detailId.value === String(row.id)) {
+      await loadDetail()
+      markNewEvents(before)
+    }
+    markFresh('incident', row.id)
   } catch (err) {
     error.value = resolveErrorMessage(err)
   } finally {
@@ -403,16 +467,22 @@ function assignProvider(row, value) {
   runSave(row, () => incidentsApi.assign(row.id, providerId))
 }
 
-async function confirmResolve(comment) {
+async function confirmResolve(comment, event) {
   const row = resolving.value
   if (!row) return
   savingId.value = row.id
   resolveError.value = ''
+  const before = detailEventIds()
   try {
     await incidentsApi.resolve(row.id, comment)
+    await confirmSuccess(event, t('feedback.incidentResolved'))
     resolving.value = null
     await loadIncidents({ silent: true })
-    if (detailId.value === String(row.id)) await loadDetail()
+    if (detailId.value === String(row.id)) {
+      await loadDetail()
+      markNewEvents(before)
+    }
+    markFresh('incident', row.id)
   } catch (err) {
     resolveError.value = resolveErrorMessage(err)
   } finally {
@@ -565,10 +635,7 @@ onBeforeUnmount(() => stopRealtime())
 <template>
   <div class="app-view inc">
     <header class="inc-head">
-      <div class="inc-head__text">
-        <h1 class="inc-head__title">{{ t('app.pageIncidents') }}</h1>
-        <p class="inc-head__sub">{{ t('app.incidentsAdminSubtitle') }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('app.pageIncidents') }}</h1>
       <div class="inc-head__actions">
         <button
           type="button"
@@ -595,40 +662,7 @@ onBeforeUnmount(() => stopRealtime())
         {{ error }}
       </p>
 
-      <section class="inc-summary" :aria-label="t('incidentFlow.summaryAria')">
-        <article class="inc-stat inc-stat--orange">
-          <div class="inc-stat__head">
-            <h2 class="inc-stat__label">{{ t('incidentFlow.summaryOpen') }}</h2>
-            <span class="inc-stat__icon inc-stat__icon--orange"><i class="pi pi-exclamation-circle" aria-hidden="true" /></span>
-          </div>
-          <p class="inc-stat__value">{{ loading && !incidents.length ? '…' : summary.open }}</p>
-          <p class="inc-stat__hint">{{ t('incidentFlow.summaryOpenHint') }}</p>
-        </article>
-        <article class="inc-stat inc-stat--blue">
-          <div class="inc-stat__head">
-            <h2 class="inc-stat__label">{{ t('incidentFlow.summaryInProgress') }}</h2>
-            <span class="inc-stat__icon inc-stat__icon--blue"><i class="pi pi-sync" aria-hidden="true" /></span>
-          </div>
-          <p class="inc-stat__value">{{ loading && !incidents.length ? '…' : summary.inProgress }}</p>
-          <p class="inc-stat__hint">{{ t('incidentFlow.summaryInProgressHint') }}</p>
-        </article>
-        <article class="inc-stat inc-stat--green">
-          <div class="inc-stat__head">
-            <h2 class="inc-stat__label">{{ t('incidentFlow.summaryResolvedMonth') }}</h2>
-            <span class="inc-stat__icon inc-stat__icon--green"><i class="pi pi-check-circle" aria-hidden="true" /></span>
-          </div>
-          <p class="inc-stat__value">{{ loading && !incidents.length ? '…' : summary.resolvedMonth }}</p>
-          <p class="inc-stat__hint">{{ t('incidentFlow.summaryResolvedMonthHint', { month: monthLabel }) }}</p>
-        </article>
-        <article class="inc-stat inc-stat--amber">
-          <div class="inc-stat__head">
-            <h2 class="inc-stat__label">{{ t('incidentFlow.summaryUnassigned') }}</h2>
-            <span class="inc-stat__icon inc-stat__icon--amber"><i class="pi pi-wrench" aria-hidden="true" /></span>
-          </div>
-          <p class="inc-stat__value">{{ loading && !incidents.length ? '…' : summary.unassigned }}</p>
-          <p class="inc-stat__hint">{{ t('incidentFlow.summaryUnassignedHint') }}</p>
-        </article>
-      </section>
+      <KpiPills :items="kpiPills" :aria-label="t('incidentFlow.summaryAria')" :busy="loading" />
 
       <section class="inc-card" aria-labelledby="inc-list-title">
         <div class="inc-card__head">
@@ -721,7 +755,11 @@ onBeforeUnmount(() => stopRealtime())
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in visibleIncidents" :key="row.id" :class="{ 'is-saving': savingId === row.id }">
+              <tr
+                v-for="row in visibleIncidents"
+                :key="row.id"
+                :class="{ 'is-saving': savingId === row.id, 'bf-fresh': isFresh('incident', row.id) }"
+              >
                 <td class="c-main">
                   <div class="inc-item">
                     <strong class="inc-item__title">{{ row.title || row.description }}</strong>
@@ -903,6 +941,7 @@ onBeforeUnmount(() => stopRealtime())
       </form>
       <template #footer>
         <ConfirmActions
+          ref="createActionsRef"
           :cancel-label="t('app.cancelAction')"
           :confirm-label="t('incidentFlow.createSubmit')"
           confirm-icon="pi pi-check"
@@ -1028,7 +1067,7 @@ onBeforeUnmount(() => stopRealtime())
                 type="button"
                 class="incd-btn"
                 :disabled="!taskWorkerId || taskBusyId === detailRow.id"
-                @click="createTaskFromIncident(detailRow, taskWorkerId)"
+                @click="createTaskFromIncident(detailRow, taskWorkerId, $event)"
               >
                 <i class="pi" :class="taskBusyId === detailRow.id ? 'pi-spin pi-spinner' : 'pi-briefcase'" aria-hidden="true" />
                 {{ t('incidentFlow.taskCreate') }}
@@ -1113,28 +1152,9 @@ onBeforeUnmount(() => stopRealtime())
 .inc-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.inc-head__text {
-  min-width: 0;
-}
-
-.inc-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.inc-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .inc-head__actions {
@@ -1148,8 +1168,8 @@ onBeforeUnmount(() => stopRealtime())
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  min-height: 2.45rem;
-  padding: 0.5rem 0.95rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 0.95rem;
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: #fff;
@@ -1183,8 +1203,8 @@ onBeforeUnmount(() => stopRealtime())
 }
 
 .inc-icon-btn {
-  width: 2.45rem;
-  height: 2.45rem;
+  width: 2.125rem;
+  height: 2.125rem;
   border-radius: 50%;
   border: 1px solid rgba(15, 23, 42, 0.1);
   background: #fff;
@@ -1236,78 +1256,6 @@ onBeforeUnmount(() => stopRealtime())
   padding: 1.25rem 0.25rem;
   font-size: 0.85rem;
   color: #6e6e73;
-}
-
-/* ---------- Summary ---------- */
-.inc-summary {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-
-.inc-stat {
-  background: var(--stat-bg, #f1f5f9);
-  border-radius: 16px;
-  padding: 1rem 1.1rem 1.05rem;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.inc-stat--blue { --stat-bg: #e8eefc; }
-.inc-stat--green { --stat-bg: #e3f4e8; }
-.inc-stat--orange { --stat-bg: #fdeee2; }
-.inc-stat--amber { --stat-bg: #fdf3dc; }
-
-.inc-stat__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.55rem;
-}
-
-.inc-stat__label {
-  margin: 0;
-  color: #475569;
-  font-weight: 600;
-  font-size: 0.8rem;
-}
-
-.inc-stat__icon {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  font-size: 0.85rem;
-  background: #fff;
-}
-
-.inc-stat__icon--blue { color: #1e3a8a; }
-.inc-stat__icon--green { color: #15803d; }
-.inc-stat__icon--orange { color: #c2410c; }
-.inc-stat__icon--amber { color: #b45309; }
-
-.inc-stat__value {
-  margin: 0 0 0.35rem;
-  color: #0f172a;
-  font-family: var(--bf-font-heading, inherit);
-  font-weight: 700;
-  font-size: 1.65rem;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-  font-variant-numeric: tabular-nums;
-}
-
-.inc-stat__hint {
-  margin: auto 0 0;
-  color: #6e6e73;
-  font-size: 0.75rem;
-  font-weight: 500;
-  line-height: 1.35;
 }
 
 /* ---------- List card ---------- */
@@ -1809,9 +1757,6 @@ onBeforeUnmount(() => stopRealtime())
 
 /* ---------- Responsive ---------- */
 @media (max-width: 1100px) {
-  .inc-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   .inc-toolbar__right {
     width: 100%;
     flex-wrap: wrap;
@@ -1916,24 +1861,12 @@ onBeforeUnmount(() => stopRealtime())
   .app-view {
     padding: 1rem 1rem 2rem;
   }
-  .inc-head__title {
-    font-size: 1.35rem;
-  }
   .inc-head,
   .inc-head__actions {
     width: 100%;
   }
   .inc-head__actions .inc-btn--primary {
     flex: 1;
-  }
-  .inc-summary {
-    gap: 0.55rem;
-  }
-  .inc-stat {
-    padding: 0.8rem 0.85rem 0.85rem;
-  }
-  .inc-stat__value {
-    font-size: 1.35rem;
   }
   .inc-card {
     padding: 1rem 0.85rem;

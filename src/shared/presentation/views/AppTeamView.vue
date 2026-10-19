@@ -12,6 +12,7 @@ import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import TeamTasksPanel from '@/team/presentation/components/TeamTasksPanel.vue'
 import TeamShiftsPanel from '@/team/presentation/components/TeamShiftsPanel.vue'
 import { initialsOf, localeTag, positionTone } from '@/team/presentation/teamUi.js'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const { t, locale } = useI18n()
 
@@ -149,7 +150,7 @@ async function onPhotoChange(event) {
   }
 }
 
-async function submitWorker() {
+async function submitWorker(event) {
   if (saving.value) return
   submitError.value = ''
 
@@ -169,7 +170,7 @@ async function submitWorker() {
 
   saving.value = true
   try {
-    await teamWorkersApi.add({
+    const created = await teamWorkersApi.add({
       name: form.name,
       phone: form.phone,
       dni: form.dni,
@@ -177,8 +178,13 @@ async function submitWorker() {
       photoUrl: form.photoUrl,
       position: form.position,
     })
+    await confirmSuccess(event, t('feedback.workerAdded'))
     closeModal()
     await loadWorkers()
+    // Mostrar al nuevo trabajador aunque se esté en otra pestaña o con el filtro "Inactivos".
+    activeTab.value = 'workers'
+    if (workerFilter.value === 'inactive') workerFilter.value = 'all'
+    markFresh('worker', created?.id)
   } catch (err) {
     if (err?.code === 'TEAM_WORKER_FIELDS_REQUIRED') {
       submitError.value = t('teamMgmt.requiredFields')
@@ -363,10 +369,7 @@ onMounted(loadWorkers)
 <template>
   <div class="app-view tm">
     <header class="tm-head">
-      <div class="tm-head__text">
-        <h1 class="tm-head__title">{{ t('app.team') }}</h1>
-        <p class="tm-head__sub">{{ t('teamMgmt.pageSubtitle') }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('app.team') }}</h1>
       <div class="tm-head__actions" role="group" :aria-label="t('teamMgmt.headerActions')">
         <button
           type="button"
@@ -514,7 +517,7 @@ onMounted(loadWorkers)
               v-for="w in visibleWorkers"
               :key="w.id"
               class="tm-worker"
-              :class="{ 'is-inactive': w.status === 'INACTIVE' }"
+              :class="{ 'is-inactive': w.status === 'INACTIVE', 'bf-fresh': isFresh('worker', w.id) }"
             >
               <div class="tm-worker__top">
                 <img
@@ -888,28 +891,9 @@ onMounted(loadWorkers)
 .tm-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.tm-head__text {
-  min-width: 0;
-}
-
-.tm-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.tm-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .tm-head__actions {
@@ -1207,9 +1191,6 @@ onMounted(loadWorkers)
   .app-view {
     padding: 1rem 1rem 2rem;
   }
-  .tm-head__title {
-    font-size: 1.35rem;
-  }
   .tm-head,
   .tm-head__actions {
     width: 100%;
@@ -1273,8 +1254,8 @@ onMounted(loadWorkers)
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  min-height: 2.45rem;
-  padding: 0.5rem 0.95rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 0.95rem;
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: #fff;

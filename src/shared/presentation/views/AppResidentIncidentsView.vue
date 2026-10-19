@@ -5,6 +5,7 @@ import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
 import { authApi } from '@/iam/infrastructure/authApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
@@ -48,6 +49,8 @@ const descriptionTouched = ref(false)
 const statusFilter = ref('all')
 const detailId = ref('')
 const detailRefreshKey = ref(0)
+/** Botones del diálogo de reporte: el Enter del formulario también confirma en el botón "Enviar". */
+const composeActionsRef = ref(null)
 
 // US024: campos vacíos en rojo con mensaje; el botón de envío queda bloqueado.
 const titleInvalid = computed(
@@ -157,7 +160,7 @@ async function loadIncidents() {
   }
 }
 
-async function reportIncident() {
+async function reportIncident(event) {
   submitAttempted.value = true
   const title = draftTitle.value.trim()
   const text = draftDescription.value.trim()
@@ -175,8 +178,9 @@ async function reportIncident() {
       ownerAdminId = row?.ownerAdminId ?? null
     }
 
-    await incidentsApi.add({
-      id: `incident-${Date.now()}`,
+    const draftId = `incident-${Date.now()}`
+    const created = await incidentsApi.add({
+      id: draftId,
       residentId,
       residentName,
       title,
@@ -186,10 +190,14 @@ async function reportIncident() {
       provider: '',
       ...(ownerAdminId ? { ownerAdminId } : {}),
     })
+    const sendButton =
+      event?.type === 'click' ? event : composeActionsRef.value?.$el?.querySelector('.bf-btn--confirm')
+    await confirmSuccess(sendButton, t('feedback.incidentReported'))
     sending.value = false
     cancelCompose()
     statusFilter.value = 'all'
     await loadIncidents()
+    markFresh('incident', created?.id ?? draftId)
   } catch (err) {
     composeError.value = err?.payload?.message || t('app.incidentsSaveError')
   } finally {
@@ -218,12 +226,7 @@ onBeforeUnmount(() => stopRealtime())
 <template>
   <div class="app-view rinc">
     <header class="rinc-head">
-      <div class="rinc-head__text">
-        <h1 class="rinc-head__title">{{ t('incidentFlow.myIncidentsTitle') }}</h1>
-        <p class="rinc-head__sub">
-          {{ profile.name ? t('resident.incidentsSubtitle', { name: profile.name }) : t('app.incidentsSubtitle') }}
-        </p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('incidentFlow.myIncidentsTitle') }}</h1>
       <button type="button" class="rinc-btn rinc-btn--primary" @click="startCompose">
         <i class="pi pi-plus" aria-hidden="true" />
         {{ t('incidentFlow.reportIncident') }}
@@ -293,7 +296,11 @@ onBeforeUnmount(() => stopRealtime())
 
         <ul v-else class="rinc-list" role="list">
           <li v-for="row in visibleIncidents" :key="row.id">
-            <article class="rinc-item" :aria-labelledby="`rinc-item-${row.id}`">
+            <article
+              class="rinc-item"
+              :class="{ 'bf-fresh': isFresh('incident', row.id) }"
+              :aria-labelledby="`rinc-item-${row.id}`"
+            >
               <div class="rinc-item__top">
                 <span class="inc-pill" :class="`inc-pill--${row.status || 'open'}`">
                   <span class="inc-pill__dot" aria-hidden="true" />
@@ -423,6 +430,7 @@ onBeforeUnmount(() => stopRealtime())
       </form>
       <template #footer>
         <ConfirmActions
+          ref="composeActionsRef"
           :cancel-label="t('app.cancelAction')"
           :confirm-label="t('incidentFlow.submitReport')"
           confirm-icon="pi pi-send"
@@ -469,28 +477,9 @@ onBeforeUnmount(() => stopRealtime())
 .rinc-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.rinc-head__text {
-  min-width: 0;
-}
-
-.rinc-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.rinc-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .rinc-btn {
@@ -498,8 +487,8 @@ onBeforeUnmount(() => stopRealtime())
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  min-height: 2.45rem;
-  padding: 0.5rem 0.95rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 0.95rem;
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: #fff;
@@ -921,9 +910,6 @@ onBeforeUnmount(() => stopRealtime())
 @media (max-width: 720px) {
   .app-view {
     padding: 1rem 1rem 2rem;
-  }
-  .rinc-head__title {
-    font-size: 1.35rem;
   }
   .rinc-head > .rinc-btn--primary {
     width: 100%;

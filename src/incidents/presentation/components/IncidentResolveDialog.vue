@@ -34,11 +34,12 @@ function onVisible(open) {
   if (!open && !props.busy) emit('cancel')
 }
 
-function confirm() {
+/** El evento del clic viaja con el comentario para la confirmación verde del botón. */
+function confirm(event) {
   touched.value = true
   const text = comment.value.trim()
   if (!text || props.busy) return
-  emit('confirm', text)
+  emit('confirm', text, event)
 }
 </script>
 

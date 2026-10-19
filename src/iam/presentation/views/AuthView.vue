@@ -1624,7 +1624,7 @@ watch(loginEmail, () => {
 /* Primary pill (PrimeVue Button keeps its loading state) */
 .auth-submit.p-button {
   width: 100%;
-  min-height: 2.85rem;
+  min-height: 2.5rem;
   margin-top: 0.25rem;
   justify-content: center;
   border: 1px solid var(--auth-navy);

@@ -29,6 +29,7 @@ import {
 import SubscriptionPlansSection from '@/billing/presentation/components/SubscriptionPlansSection.vue'
 import BuildingForm from '@/profiles/presentation/components/BuildingForm.vue'
 import { buildingsApi } from '@/profiles/infrastructure/buildingsApi.js'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -54,7 +55,7 @@ const residentPasswordSaving = ref(false)
 const residentPasswordNotice = ref('')
 const residentPasswordError = ref('')
 
-async function onSaveResidentPassword() {
+async function onSaveResidentPassword(event) {
   if (residentPasswordSaving.value) return
   residentPasswordNotice.value = ''
   residentPasswordError.value = ''
@@ -71,6 +72,7 @@ async function onSaveResidentPassword() {
     if (!OPEN_WIREFRAME_ACCESS) {
       await setPasswordForCurrentUser(residentPassword.value)
     }
+    await confirmSuccess(event, t('feedback.passwordSaved'))
     residentPassword.value = ''
     residentPasswordConfirm.value = ''
     residentPasswordNotice.value = t('app.settingsResidentPasswordSaved')
@@ -143,7 +145,6 @@ const buildings = ref([])
 const buildingLoading = ref(false)
 const buildingLoadError = ref(false)
 const isEditingBuilding = ref(false)
-const buildingNotice = ref('')
 const primaryBuilding = computed(() => buildings.value[0] ?? null)
 
 async function loadBuildings() {
@@ -161,8 +162,8 @@ async function loadBuildings() {
 
 async function onBuildingSaved(building) {
   isEditingBuilding.value = false
-  buildingNotice.value = t('buildings.saved')
   await loadBuildings()
+  markFresh('building', building?.id ?? primaryBuilding.value?.id)
   await loadSubscription()
   if (building?.suggestedPlanId && !subscription.value?.isPaid) {
     router.replace({ name: AppRouteNames.APP_SETTINGS, query: { tab: 'plans', suggestedPlan: building.suggestedPlanId } })
@@ -357,7 +358,6 @@ const serviceProviders = ref([])
 const providersLoading = ref(false)
 const providersSaving = ref(false)
 const providersError = ref('')
-const providersNotice = ref('')
 const deletingProviderId = ref('')
 const providerDraft = ref({
   name: '',
@@ -385,21 +385,21 @@ async function loadServiceProviders() {
   }
 }
 
-async function addServiceProvider() {
+async function addServiceProvider(event) {
   const name = String(providerDraft.value.name ?? '').trim()
   if (!name || providersSaving.value) return
   providersSaving.value = true
   providersError.value = ''
-  providersNotice.value = ''
   try {
-    await serviceProvidersApi.add({
+    const created = await serviceProvidersApi.add({
       name,
       phone: providerDraft.value.phone,
       specialty: providerDraft.value.specialty,
     })
+    await confirmSuccess(event, t('feedback.providerAdded'))
     resetProviderDraft()
-    providersNotice.value = t('app.settingsProvidersSaved')
     await loadServiceProviders()
+    markFresh('provider', created?.id)
   } catch {
     providersError.value = t('app.settingsProvidersSaveError')
   } finally {
@@ -427,7 +427,6 @@ async function removeServiceProvider(id) {
 
 const lateFeePerDay = ref(0)
 const lateFeeError = ref('')
-const lateFeeNotice = ref('')
 const isSavingLateFee = ref(false)
 const lateFeeLoading = ref(false)
 const admissionPayFromDay = ref(1)
@@ -439,7 +438,6 @@ const admissionRangePreview = computed(() =>
   }),
 )
 const admissionRuleError = ref('')
-const admissionRuleNotice = ref('')
 const isSavingAdmissionRules = ref(false)
 const admissionResidentSearch = ref('')
 const billingResidentId = ref('')
@@ -555,24 +553,22 @@ async function loadLateFee() {
   }
 }
 
-async function onSaveLateFee() {
+async function onSaveLateFee(event) {
   const amount = Number(lateFeePerDay.value)
   if (!Number.isFinite(amount) || amount < 0) {
     lateFeeError.value = t('financeAdmin.lateFeeRequired')
-    lateFeeNotice.value = ''
     return
   }
 
   isSavingLateFee.value = true
   lateFeeError.value = ''
-  lateFeeNotice.value = ''
   try {
     const current = normalizeSettings(financesStore.state.settings || {})
     await financesStore.updateSettings({
       ...current,
       lateFeePerDay: amount,
     })
-    lateFeeNotice.value = t('financeAdmin.lateFeeSaved')
+    await confirmSuccess(event, t('feedback.lateFeeSaved'))
   } catch (error) {
     lateFeeError.value = error?.message || t('app.settingsLateFeeSaveError')
   } finally {
@@ -580,7 +576,7 @@ async function onSaveLateFee() {
   }
 }
 
-async function onSaveAdmissionRules() {
+async function onSaveAdmissionRules(event) {
   const range = normalizeAdmissionPayRange({
     admissionPayFromDay: admissionPayFromDay.value,
     admissionPayToDay: admissionPayToDay.value,
@@ -590,13 +586,11 @@ async function onSaveAdmissionRules() {
     !Number.isFinite(Number(admissionPayToDay.value))
   ) {
     admissionRuleError.value = t('financeAdmin.admissionRangeInvalid')
-    admissionRuleNotice.value = ''
     return
   }
 
   isSavingAdmissionRules.value = true
   admissionRuleError.value = ''
-  admissionRuleNotice.value = ''
   try {
     const current = normalizeSettings(financesStore.state.settings || {})
     await financesStore.updateSettings({
@@ -604,9 +598,9 @@ async function onSaveAdmissionRules() {
       admissionPayFromDay: range.admissionPayFromDay,
       admissionPayToDay: range.admissionPayToDay,
     })
+    await confirmSuccess(event, t('feedback.rulesSaved'))
     admissionPayFromDay.value = range.admissionPayFromDay
     admissionPayToDay.value = range.admissionPayToDay
-    admissionRuleNotice.value = t('financeAdmin.admissionRulesSaved')
   } catch (error) {
     admissionRuleError.value = error?.message || t('app.settingsAdmissionSaveError')
   } finally {
@@ -650,7 +644,7 @@ function isPaymentGatewayUnavailable(err) {
   )
 }
 
-async function selectPlan(planId) {
+async function selectPlan(planId, event = null) {
   if (!isAdmin.value || planLoading.value || planCheckoutPlanId.value) return
   if (selectedPlanId.value === planId && !isPaidSubscriptionPlan(planId)) return
 
@@ -661,8 +655,8 @@ async function selectPlan(planId) {
     planCheckoutPlanId.value = planId
     try {
       const sub = await subscriptionApi.changeToFreePlan()
+      await confirmSuccess(event, t('feedback.planUpdated'))
       syncFromSubscription(sub)
-      planSaveNotice.value = t('app.settingsPlanSaved')
     } catch (error) {
       if (error?.code === 'PLAN_DOWNGRADE_RESIDENTS_EXCEEDED') {
         planError.value = error.payload?.message ?? t('app.settingsPlanDowngradeError')
@@ -713,31 +707,10 @@ watch(
   },
 )
 
-watch(buildingNotice, (msg) => {
-  if (!msg) return
-  window.setTimeout(() => {
-    buildingNotice.value = ''
-  }, 4000)
-})
-
 watch(planSaveNotice, (msg) => {
   if (!msg) return
   window.setTimeout(() => {
     planSaveNotice.value = ''
-  }, 4000)
-})
-
-watch(lateFeeNotice, (msg) => {
-  if (!msg) return
-  window.setTimeout(() => {
-    lateFeeNotice.value = ''
-  }, 4000)
-})
-
-watch(admissionRuleNotice, (msg) => {
-  if (!msg) return
-  window.setTimeout(() => {
-    admissionRuleNotice.value = ''
   }, 4000)
 })
 </script>
@@ -745,12 +718,7 @@ watch(admissionRuleNotice, (msg) => {
 <template>
   <div class="app-view st">
     <header class="st-head">
-      <div class="st-head__text">
-        <h1 class="st-head__title">{{ t('app.pageSettings') }}</h1>
-        <p class="st-head__sub">
-          {{ isAdmin ? t('app.settingsPageSubtitleAdmin') : t('app.settingsPageSubtitleResident') }}
-        </p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('app.pageSettings') }}</h1>
     </header>
 
     <!-- Account summary -->
@@ -942,7 +910,7 @@ watch(admissionRuleNotice, (msg) => {
             <button type="button" class="st-notice__action" @click="loadBuildings">{{ t('billing.plans.retry') }}</button>
           </div>
           <template v-else-if="primaryBuilding && !isEditingBuilding">
-            <dl class="st-fields">
+            <dl class="st-fields" :class="{ 'bf-fresh': isFresh('building', primaryBuilding.id) }">
               <div class="st-field">
                 <dt>{{ t('buildings.form.name') }}</dt>
                 <dd>{{ primaryBuilding.name }}</dd>
@@ -960,10 +928,6 @@ watch(admissionRuleNotice, (msg) => {
               {{ t('app.settingsMoreBuildings', { n: buildings.length - 1 }, buildings.length - 1) }}
             </p>
             <div class="st-card__foot">
-              <p v-if="buildingNotice" class="st-notice st-notice--ok" role="status">
-                <i class="pi pi-check-circle" aria-hidden="true" />
-                <span>{{ buildingNotice }}</span>
-              </p>
               <button type="button" class="st-btn st-btn--primary" @click="isEditingBuilding = true">
                 <i class="pi pi-pencil" aria-hidden="true" />
                 {{ t('buildings.edit') }}
@@ -979,6 +943,7 @@ watch(admissionRuleNotice, (msg) => {
               :building="primaryBuilding"
               :submit-label="primaryBuilding ? t('buildings.saveChanges') : t('buildings.form.submit')"
               :show-skip="Boolean(primaryBuilding)"
+              :success-label="primaryBuilding ? t('feedback.changesSaved') : t('feedback.buildingRegistered')"
               columns
               @saved="onBuildingSaved"
               @skip="isEditingBuilding = false"
@@ -1110,17 +1075,13 @@ watch(admissionRuleNotice, (msg) => {
               </div>
             </div>
             <div class="st-card__foot">
-              <p v-if="lateFeeNotice" class="st-notice st-notice--ok" role="status">
-                <i class="pi pi-check-circle" aria-hidden="true" />
-                <span>{{ lateFeeNotice }}</span>
-              </p>
               <p v-if="lateFeeError" class="st-notice st-notice--error" role="alert">
                 <i class="pi pi-times-circle" aria-hidden="true" />
                 <span>{{ lateFeeError }}</span>
               </p>
               <button type="submit" class="st-btn st-btn--primary" :disabled="isSavingLateFee || lateFeeLoading">
                 <i class="pi" :class="isSavingLateFee ? 'pi-spin pi-spinner' : 'pi-check'" aria-hidden="true" />
-                {{ isSavingLateFee ? t('app.settingsSaving') : t('app.settingsSaveChanges') }}
+                <span>{{ isSavingLateFee ? t('app.settingsSaving') : t('app.settingsSaveChanges') }}</span>
               </button>
             </div>
           </form>
@@ -1188,17 +1149,13 @@ watch(admissionRuleNotice, (msg) => {
                 </span>
               </p>
               <div class="st-card__foot">
-                <p v-if="admissionRuleNotice" class="st-notice st-notice--ok" role="status">
-                  <i class="pi pi-check-circle" aria-hidden="true" />
-                  <span>{{ admissionRuleNotice }}</span>
-                </p>
                 <p v-if="admissionRuleError" class="st-notice st-notice--error" role="alert">
                   <i class="pi pi-times-circle" aria-hidden="true" />
                   <span>{{ admissionRuleError }}</span>
                 </p>
                 <button type="submit" class="st-btn st-btn--primary" :disabled="isSavingAdmissionRules || lateFeeLoading">
                   <i class="pi" :class="isSavingAdmissionRules ? 'pi-spin pi-spinner' : 'pi-check'" aria-hidden="true" />
-                  {{ isSavingAdmissionRules ? t('app.settingsSaving') : t('app.settingsSaveChanges') }}
+                  <span>{{ isSavingAdmissionRules ? t('app.settingsSaving') : t('app.settingsSaveChanges') }}</span>
                 </button>
               </div>
             </form>
@@ -1326,10 +1283,6 @@ watch(admissionRuleNotice, (msg) => {
                 </div>
               </div>
               <div class="st-card__foot">
-                <p v-if="providersNotice" class="st-notice st-notice--ok" role="status">
-                  <i class="pi pi-check-circle" aria-hidden="true" />
-                  <span>{{ providersNotice }}</span>
-                </p>
                 <p v-if="providersError" class="st-notice st-notice--error" role="alert">
                   <i class="pi pi-times-circle" aria-hidden="true" />
                   <span>{{ providersError }}</span>
@@ -1340,7 +1293,7 @@ watch(admissionRuleNotice, (msg) => {
                   :disabled="providersSaving || providersLoading || !String(providerDraft.name || '').trim()"
                 >
                   <i class="pi" :class="providersSaving ? 'pi-spin pi-spinner' : 'pi-plus'" aria-hidden="true" />
-                  {{ t('app.settingsProvidersAdd') }}
+                  <span>{{ t('app.settingsProvidersAdd') }}</span>
                 </button>
               </div>
             </form>
@@ -1367,7 +1320,12 @@ watch(admissionRuleNotice, (msg) => {
               </button>
             </div>
             <ul v-else class="st-list" role="list">
-              <li v-for="provider in serviceProviders" :key="provider.id" class="st-row">
+              <li
+                v-for="provider in serviceProviders"
+                :key="provider.id"
+                class="st-row"
+                :class="{ 'bf-fresh': isFresh('provider', provider.id) }"
+              >
                 <span class="st-avatar st-avatar--amber" aria-hidden="true">{{ initialsOf(provider.name) }}</span>
                 <div class="st-row__text">
                   <strong>{{ provider.name }}</strong>
@@ -1463,7 +1421,7 @@ watch(admissionRuleNotice, (msg) => {
               </p>
               <button type="submit" class="st-btn st-btn--primary" :disabled="residentPasswordSaving">
                 <i class="pi" :class="residentPasswordSaving ? 'pi-spin pi-spinner' : 'pi-lock'" aria-hidden="true" />
-                {{ residentPasswordSaving ? t('app.settingsSaving') : t('app.settingsResidentPasswordSave') }}
+                <span>{{ residentPasswordSaving ? t('app.settingsSaving') : t('app.settingsResidentPasswordSave') }}</span>
               </button>
             </div>
           </form>
@@ -1551,28 +1509,9 @@ watch(admissionRuleNotice, (msg) => {
 .st-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.st-head__text {
-  min-width: 0;
-}
-
-.st-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.st-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 /* ---------- Buttons ---------- */
@@ -1581,8 +1520,8 @@ watch(admissionRuleNotice, (msg) => {
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  min-height: 2.45rem;
-  padding: 0.5rem 1rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 1rem;
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: #fff;
@@ -2528,9 +2467,6 @@ watch(admissionRuleNotice, (msg) => {
 @media (max-width: 720px) {
   .app-view {
     padding: 1rem 1rem 2rem;
-  }
-  .st-head__title {
-    font-size: 1.35rem;
   }
   .st-account {
     padding: 0.9rem 1rem;

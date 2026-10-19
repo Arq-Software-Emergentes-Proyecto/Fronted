@@ -7,6 +7,8 @@ import AnnouncementForm from '../components/AnnouncementForm.vue'
 import AnnouncementsList from '../components/AnnouncementsList.vue'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
+import KpiPills from '@/shared/presentation/components/KpiPills.vue'
+import { confirmSuccess, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 import {
   expiresWithinWeek,
   isAnnouncementExpired,
@@ -141,6 +143,8 @@ const editing = ref(null)
 const saving = ref(false)
 const formError = ref('')
 const formRef = ref(null)
+/** Pie del diálogo: su botón "Publicar" / "Guardar cambios" se pone verde al guardar. */
+const formActionsRef = ref(null)
 
 const authorName = computed(() => session.profile?.name ?? 'Admin')
 
@@ -167,11 +171,12 @@ async function handleSubmit(payload) {
   formError.value = ''
   saving.value = true
   const isEdit = Boolean(editing.value?.id)
+  let saved = null
   try {
     if (isEdit) {
-      await announcementsApi.update(editing.value.id, payload)
+      saved = await announcementsApi.update(editing.value.id, payload)
     } else {
-      await announcementsApi.add({
+      saved = await announcementsApi.add({
         ...payload,
         authorId: session.profile?.id ?? '',
         authorName: authorName.value,
@@ -182,12 +187,16 @@ async function handleSubmit(payload) {
     saving.value = false
     return
   }
+  await confirmSuccess(
+    formActionsRef.value?.$el?.querySelector('.bf-btn--confirm'),
+    isEdit ? t('feedback.changesSaved') : t('feedback.announcementPublished'),
+  )
   saving.value = false
   formOpen.value = false
   // Server recomputes expiresAt and the priority ordering: reload.
   await fetchAnnouncements()
   if (!isEdit && statusFilter.value === 'expired') statusFilter.value = 'active'
-  flash(isEdit ? t('information.updated') : t('information.published'))
+  markFresh('announcement', isEdit ? editing.value.id : saved?.id)
 }
 
 /* ---------- Delete ---------- */
@@ -228,10 +237,7 @@ onMounted(fetchAnnouncements)
 <template>
   <div class="app-view inf">
     <header class="inf-head">
-      <div class="inf-head__text">
-        <h1 class="inf-head__title">{{ t('information.announcementsPanelTitle') }}</h1>
-        <p class="inf-head__sub">{{ t('information.adminSubtitle') }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('information.announcementsPanelTitle') }}</h1>
       <div class="inf-head__actions">
         <button
           type="button"
@@ -267,18 +273,7 @@ onMounted(fetchAnnouncements)
     <p v-else-if="loading && !loaded" class="inf-status" role="status">{{ t('information.loading') }}</p>
 
     <template v-else-if="loaded">
-      <section class="inf-stats" :aria-label="t('information.summaryAria')">
-        <article v-for="stat in stats" :key="stat.key" class="inf-stat" :class="`inf-stat--${stat.tone}`">
-          <div class="inf-stat__head">
-            <h2 class="inf-stat__label">{{ stat.label }}</h2>
-            <span class="inf-stat__icon" :class="`inf-stat__icon--${stat.tone}`">
-              <i class="pi" :class="stat.icon" aria-hidden="true" />
-            </span>
-          </div>
-          <p class="inf-stat__value">{{ stat.value }}</p>
-          <p class="inf-stat__hint">{{ stat.hint }}</p>
-        </article>
-      </section>
+      <KpiPills :items="stats" :aria-label="t('information.summaryAria')" />
 
       <section class="inf-card">
         <div class="inf-toolbar">
@@ -361,6 +356,7 @@ onMounted(fetchAnnouncements)
       />
       <template #footer>
         <ConfirmActions
+          ref="formActionsRef"
           :cancel-label="t('information.cancel')"
           :confirm-label="
             saving
@@ -428,28 +424,9 @@ onMounted(fetchAnnouncements)
 .inf-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.inf-head__text {
-  min-width: 0;
-}
-
-.inf-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.inf-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .inf-head__actions {
@@ -463,8 +440,8 @@ onMounted(fetchAnnouncements)
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  min-height: 2.45rem;
-  padding: 0.5rem 1rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 1rem;
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: #fff;
@@ -498,8 +475,8 @@ onMounted(fetchAnnouncements)
 }
 
 .inf-icon-btn {
-  width: 2.45rem;
-  height: 2.45rem;
+  width: 2.125rem;
+  height: 2.125rem;
   border-radius: 50%;
   border: 1px solid rgba(15, 23, 42, 0.1);
   background: #fff;
@@ -551,78 +528,6 @@ onMounted(fetchAnnouncements)
   color: #15803d;
   font-size: 0.82rem;
   font-weight: 600;
-}
-
-/* ---------- Summary ---------- */
-.inf-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-
-.inf-stat {
-  background: var(--stat-bg, #f1f5f9);
-  border-radius: 16px;
-  padding: 1rem 1.1rem 1.05rem;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.inf-stat--blue { --stat-bg: #e8eefc; }
-.inf-stat--red { --stat-bg: #fde4e4; }
-.inf-stat--amber { --stat-bg: #fdf3dc; }
-.inf-stat--orange { --stat-bg: #fdeee2; }
-
-.inf-stat__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.55rem;
-}
-
-.inf-stat__label {
-  margin: 0;
-  color: #475569;
-  font-weight: 600;
-  font-size: 0.8rem;
-}
-
-.inf-stat__icon {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  font-size: 0.85rem;
-  background: #fff;
-}
-
-.inf-stat__icon--blue { color: #1e3a8a; }
-.inf-stat__icon--red { color: #b42318; }
-.inf-stat__icon--amber { color: #b45309; }
-.inf-stat__icon--orange { color: #c2410c; }
-
-.inf-stat__value {
-  margin: 0 0 0.4rem;
-  color: #0f172a;
-  font-family: var(--bf-font-heading, inherit);
-  font-weight: 700;
-  font-size: 1.65rem;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-  font-variant-numeric: tabular-nums;
-}
-
-.inf-stat__hint {
-  margin: auto 0 0;
-  color: #6e6e73;
-  font-size: 0.75rem;
-  font-weight: 500;
-  line-height: 1.35;
 }
 
 /* ---------- Content card ---------- */
@@ -814,18 +719,10 @@ onMounted(fetchAnnouncements)
 }
 
 /* ---------- Responsive ---------- */
-@media (max-width: 1100px) {
-  .inf-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
 
 @media (max-width: 720px) {
   .app-view {
     padding: 1rem 1rem 2rem;
-  }
-  .inf-head__title {
-    font-size: 1.35rem;
   }
   .inf-head,
   .inf-head__actions {
@@ -833,20 +730,6 @@ onMounted(fetchAnnouncements)
   }
   .inf-head__actions .inf-btn--primary {
     flex: 1;
-  }
-  .inf-stats {
-    gap: 0.55rem;
-  }
-  .inf-stat {
-    padding: 0.8rem 0.85rem 0.85rem;
-  }
-  .inf-stat__value {
-    font-size: 1.4rem;
-  }
-  .inf-stat__icon {
-    width: 1.75rem;
-    height: 1.75rem;
-    font-size: 0.75rem;
   }
   .inf-card {
     padding: 0.9rem 0.8rem 1rem;

@@ -13,6 +13,7 @@ import {
   onSupportChatUpdated,
   realtimeAvailable,
 } from '@/residentCare/infrastructure/supportRealtime.js'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const { t, locale } = useI18n()
 const { state: sessionState } = useSession()
@@ -180,7 +181,7 @@ function refreshAll() {
   void bindChats()
 }
 
-async function setSelectedStatus(status) {
+async function setSelectedStatus(status, event = null) {
   const id = selected.value?.id
   if (!id || statusBusy.value) return
   statusBusy.value = true
@@ -188,6 +189,10 @@ async function setSelectedStatus(status) {
     const updated = status === ChatStatus.CLOSED
       ? await supportApi.closeChat(id)
       : await supportApi.updateStatus(id, status)
+    if (status === 'answered') {
+      await confirmSuccess(event, t('feedback.markedAttended'))
+      markFresh('supportChat', id)
+    }
     upsertChat(updated)
     loadError.value = ''
   } catch (e) {
@@ -357,9 +362,13 @@ async function sendReply() {
   const text = replyText.value.trim()
   if (!id || !text || sending.value || !ownerId.value) return
   sending.value = true
+  const knownIds = new Set((selected.value?.messages || []).map((m) => m.id))
   try {
     const updated = await supportApi.postMessage(id, text, locale.value)
     upsertChat(updated)
+    // Icon-only send button: no green button, only the new bubble lights up.
+    const sentMessages = (updated?.messages || []).filter((m) => !knownIds.has(m.id) && msgKind(m) === 'admin')
+    sentMessages.forEach((m) => markFresh('supportMsg', m.id))
     replyText.value = ''
     loadError.value = ''
     await nextTick()
@@ -377,10 +386,7 @@ async function sendReply() {
   <div class="app-view app-view--ai">
     <div class="support-page">
       <header class="page-head">
-        <div class="page-head__text">
-          <h1 class="page-head__title">{{ t('supportAdmin.title') }}</h1>
-          <p class="page-head__sub">{{ t('supportAdmin.subtitle') }}</p>
-        </div>
+        <h1 class="bf-sr-only">{{ t('supportAdmin.title') }}</h1>
         <div
           v-if="aiUsage"
           class="usage-card"
@@ -490,7 +496,7 @@ async function sendReply() {
               <button
                 type="button"
                 class="chat-card"
-                :class="{ 'is-active': c.id === selectedId }"
+                :class="{ 'is-active': c.id === selectedId, 'bf-fresh': isFresh('supportChat', c.id) }"
                 :aria-current="c.id === selectedId ? 'true' : undefined"
                 @click="selectChat(c)"
               >
@@ -567,10 +573,10 @@ async function sendReply() {
                   type="button"
                   class="btn btn--primary btn--sm"
                   :disabled="statusBusy"
-                  @click="setSelectedStatus('answered')"
+                  @click="setSelectedStatus('answered', $event)"
                 >
                   <i class="pi pi-check" aria-hidden="true" />
-                  {{ t('supportAdmin.markAnswered') }}
+                  <span>{{ t('supportAdmin.markAnswered') }}</span>
                 </button>
                 <button
                   v-if="selected.status !== 'open'"
@@ -629,7 +635,7 @@ async function sendReply() {
                     {{ bubbleRole(m.authorRole) }}
                     <span class="msg__time">{{ messageTime(m) }}</span>
                   </span>
-                  <div class="msg__bubble"><p>{{ m.body }}</p></div>
+                  <div class="msg__bubble" :class="{ 'bf-fresh': isFresh('supportMsg', m.id) }"><p>{{ m.body }}</p></div>
                   <span v-if="m.citedSource" class="source-pill">
                     <i class="pi pi-file" aria-hidden="true" />
                     {{ t('supportAdmin.sourceLabel') }}: {{ m.citedSource }}
@@ -738,29 +744,9 @@ async function sendReply() {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.page-head__text {
-  min-width: 0;
-}
-
-.page-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: var(--ink);
-}
-
-.page-head__sub {
-  margin: 0.25rem 0 0;
-  max-width: 40rem;
-  font-size: 0.88rem;
-  color: var(--muted);
 }
 
 .usage-card {
@@ -871,7 +857,8 @@ async function sendReply() {
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  padding: 0.55rem 1rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 1rem;
   border: 1px solid transparent;
   border-radius: 999px;
   font: inherit;
@@ -1478,6 +1465,20 @@ async function sendReply() {
   color: #fff;
 }
 
+/* Respuesta recién enviada: la burbuja azul conserva su fondo (texto blanco) y solo la rodea un halo verde. */
+.msg--admin .msg__bubble.bf-fresh {
+  animation:
+    bf-fresh-in 0.8s var(--bf-ease),
+    msg-fresh-ring 3.4s var(--bf-ease-soft);
+}
+
+@keyframes msg-fresh-ring {
+  0%,
+  45% {
+    box-shadow: 0 0 0 3px var(--bf-success-line);
+  }
+}
+
 .bot-avatar,
 .admin-avatar {
   display: inline-flex;
@@ -1636,10 +1637,6 @@ async function sendReply() {
 
   .support-page {
     flex: none;
-  }
-
-  .page-head__title {
-    font-size: 1.35rem;
   }
 
   .usage-card {

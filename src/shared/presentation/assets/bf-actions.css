@@ -1,47 +1,29 @@
 /* ── Unified confirm / cancel actions (BuildingFex) ── */
 
-@keyframes bf-actions-in {
+/* Ventanas: la tarjeta entra desde abajo y se desliza hasta su lugar; al cerrar baja y sale. */
+@keyframes bf-dialog-in {
   from {
-    opacity: 0;
-    transform: translate3d(0, 10px, 0);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
+    transform: translate3d(0, calc(50vh + 60%), 0);
   }
 }
 
-@keyframes bf-btn-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(var(--apple-blue-rgb), 0.35);
-  }
-
-  50% {
-    box-shadow: 0 0 0 6px rgba(var(--apple-blue-rgb), 0);
+@keyframes bf-dialog-out {
+  to {
+    transform: translate3d(0, calc(50vh + 60%), 0);
   }
 }
 
-@keyframes bf-modal-backdrop-in {
+@keyframes bf-mask-in {
   from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
+    background-color: transparent;
+    backdrop-filter: blur(0);
   }
 }
 
-@keyframes bf-modal-panel-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 18px, 0) scale(0.97);
-  }
-
+@keyframes bf-mask-out {
   to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
+    background-color: transparent;
+    backdrop-filter: blur(0);
   }
 }
 
@@ -58,19 +40,10 @@
   justify-content: flex-end;
   gap: 0.625rem;
   width: 100%;
-  animation: bf-actions-in 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .bf-actions--center {
   justify-content: center;
-}
-
-.bf-actions--stagger .bf-btn:nth-child(1) {
-  animation: bf-actions-in 0.38s cubic-bezier(0.22, 1, 0.36, 1) 0.04s both;
-}
-
-.bf-actions--stagger .bf-btn:nth-child(2) {
-  animation: bf-actions-in 0.38s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
 }
 
 .bf-btn {
@@ -79,8 +52,8 @@
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  min-height: 2.5rem;
-  padding: 0.55rem 1.25rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 1.15rem;
   border: 1px solid transparent;
   border-radius: var(--apple-radius-pill);
   font-family: inherit;
@@ -124,39 +97,33 @@
   background: var(--apple-bg);
   color: var(--apple-text);
   border-color: var(--apple-border-hairline);
-  box-shadow: var(--apple-shadow-sm);
 }
 
 .bf-btn--cancel:not(:disabled):hover {
   background: var(--apple-bg-secondary);
   border-color: rgba(0, 0, 0, 0.14);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
 }
 
 .bf-btn--confirm {
   background: var(--apple-blue);
+  border-color: var(--apple-blue);
   color: #ffffff;
-  box-shadow: 0 4px 14px rgba(var(--apple-blue-rgb), 0.28);
 }
 
 .bf-btn--confirm:not(:disabled):hover {
   background: var(--apple-blue-hover);
-  box-shadow: 0 6px 20px rgba(var(--apple-blue-rgb), 0.34);
-}
-
-.bf-btn--confirm:not(:disabled):focus-visible {
-  animation: bf-btn-pulse 1.6s ease infinite;
+  border-color: var(--apple-blue-hover);
 }
 
 .bf-btn--danger {
-  background: #ff3b30;
+  background: #dc2626;
+  border-color: #dc2626;
   color: #ffffff;
-  box-shadow: 0 4px 14px rgba(255, 59, 48, 0.28);
 }
 
 .bf-btn--danger:not(:disabled):hover {
-  background: #e0352b;
-  box-shadow: 0 6px 20px rgba(255, 59, 48, 0.34);
+  background: #c81e1e;
+  border-color: #c81e1e;
 }
 
 .bf-btn__spinner {
@@ -174,22 +141,29 @@
   border-top-color: var(--apple-text);
 }
 
-/* Modal backdrop / panel motion (custom modals) */
-.bf-modal-backdrop {
-  animation: bf-modal-backdrop-in 0.28s ease both;
+/*
+ * PrimeVue Dialog / ConfirmDialog. Reemplaza las animaciones propias de PrimeVue (no se suman:
+ * dos animaciones seguidas hacían que la ventana apareciera, desapareciera y volviera a entrar).
+ * Clases dobles para ganarle al CSS del tema, que se inserta después.
+ */
+.p-dialog.p-dialog-enter-active {
+  animation: bf-dialog-in 0.62s cubic-bezier(0.2, 0.9, 0.25, 1) both;
 }
 
-.bf-modal-panel {
-  animation: bf-modal-panel-in 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+.p-dialog.p-dialog-leave-active {
+  animation: bf-dialog-out 0.36s cubic-bezier(0.5, 0, 0.75, 0) both;
 }
 
-/* PrimeVue Dialog — unified footer + entrance */
-.p-dialog-mask.p-component-overlay {
-  animation: bf-modal-backdrop-in 0.28s ease both;
+.p-dialog-mask.p-overlay-mask {
+  backdrop-filter: blur(3px);
 }
 
-.p-dialog {
-  animation: bf-modal-panel-in 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+.p-dialog-mask.p-overlay-mask.p-overlay-mask-enter-active {
+  animation: bf-mask-in 0.38s ease both;
+}
+
+.p-dialog-mask.p-overlay-mask.p-overlay-mask-leave-active {
+  animation: bf-mask-out 0.3s ease both;
 }
 
 .p-dialog-footer {
@@ -203,19 +177,13 @@
   margin: 0;
 }
 
-.bf-modal-panel > .bf-actions:last-child,
-.bf-modal-panel .bf-actions:last-child {
-  margin-top: 0.4rem;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .bf-actions,
-  .bf-actions--stagger .bf-btn,
-  .bf-modal-backdrop,
-  .bf-modal-panel,
-  .p-dialog-mask.p-component-overlay,
-  .p-dialog {
-    animation: none !important;
+  .p-dialog.p-dialog-enter-active,
+  .p-dialog.p-dialog-leave-active,
+  .p-dialog-mask.p-overlay-mask.p-overlay-mask-enter-active,
+  .p-dialog-mask.p-overlay-mask.p-overlay-mask-leave-active {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
   }
 
   .bf-btn:not(:disabled):hover,
@@ -223,7 +191,4 @@
     transform: none;
   }
 
-  .bf-btn--confirm:not(:disabled):focus-visible {
-    animation: none;
-  }
 }

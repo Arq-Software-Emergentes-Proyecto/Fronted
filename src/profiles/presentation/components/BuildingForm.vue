@@ -2,6 +2,7 @@
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { buildingFieldErrors, buildingsApi } from '@/profiles/infrastructure/buildingsApi.js'
+import { confirmSuccess } from '@/shared/presentation/feedback/successFeedback.js'
 
 /**
  * Condominium registration form (US015). Name and address are required: empty fields are
@@ -16,6 +17,8 @@ const props = defineProps({
   compact: { type: Boolean, default: false },
   /** Two-column layout (name | address, units below) with a bordered footer — used in Ajustes. */
   columns: { type: Boolean, default: false },
+  /** Optional: the submit button turns green with this label before `saved` is emitted (Ajustes). */
+  successLabel: { type: String, default: '' },
 })
 
 const emit = defineEmits(['saved', 'skip'])
@@ -88,7 +91,7 @@ async function focusFirstInvalid() {
   }
 }
 
-async function onSubmit() {
+async function onSubmit(event) {
   if (isSaving.value) return
   submitError.value = ''
   touched.name = true
@@ -110,6 +113,7 @@ async function onSubmit() {
     const saved = props.building?.id
       ? await buildingsApi.update(props.building.id, payload)
       : await buildingsApi.create(payload)
+    if (props.successLabel) await confirmSuccess(event, props.successLabel)
     emit('saved', saved)
   } catch (error) {
     if (error?.status === 400) {
@@ -232,7 +236,7 @@ async function onSubmit() {
         :disabled="isSaving"
       >
         <i v-if="isSaving" class="pi pi-spin pi-spinner" aria-hidden="true" />
-        {{ isSaving ? t('buildings.form.saving') : submitLabel || t('buildings.form.submit') }}
+        <span>{{ isSaving ? t('buildings.form.saving') : submitLabel || t('buildings.form.submit') }}</span>
       </button>
     </div>
   </form>
