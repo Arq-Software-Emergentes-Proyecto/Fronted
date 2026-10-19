@@ -682,10 +682,7 @@ const getStatusBadgeClass = (status) => {
 <template>
   <div v-if="uiState.isLoaded" class="app-view fin">
     <header class="fin-head">
-      <div class="fin-head__text">
-        <h1 class="fin-head__title">{{ t('financeAdmin.pageTitle') }}</h1>
-        <p class="fin-head__sub">{{ t('financeAdmin.subtitle') }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('financeAdmin.pageTitle') }}</h1>
       <div class="fin-head__controls">
         <div class="fin-month" role="group" :aria-label="t('financeAdmin.monthSelectorLabel')">
           <button
@@ -1359,28 +1356,9 @@ const getStatusBadgeClass = (status) => {
 .fin-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.fin-head__text {
-  min-width: 0;
-}
-
-.fin-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.fin-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .fin-head__controls {
@@ -2368,9 +2346,6 @@ const getStatusBadgeClass = (status) => {
 @media (max-width: 720px) {
   .app-view {
     padding: 1rem 1rem 2rem;
-  }
-  .fin-head__title {
-    font-size: 1.35rem;
   }
   .fin-head,
   .fin-head__controls,

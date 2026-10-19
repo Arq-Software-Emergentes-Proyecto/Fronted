@@ -377,10 +377,7 @@ async function sendReply() {
   <div class="app-view app-view--ai">
     <div class="support-page">
       <header class="page-head">
-        <div class="page-head__text">
-          <h1 class="page-head__title">{{ t('supportAdmin.title') }}</h1>
-          <p class="page-head__sub">{{ t('supportAdmin.subtitle') }}</p>
-        </div>
+        <h1 class="bf-sr-only">{{ t('supportAdmin.title') }}</h1>
         <div
           v-if="aiUsage"
           class="usage-card"
@@ -738,29 +735,9 @@ async function sendReply() {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.page-head__text {
-  min-width: 0;
-}
-
-.page-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: var(--ink);
-}
-
-.page-head__sub {
-  margin: 0.25rem 0 0;
-  max-width: 40rem;
-  font-size: 0.88rem;
-  color: var(--muted);
 }
 
 .usage-card {
@@ -1636,10 +1613,6 @@ async function sendReply() {
 
   .support-page {
     flex: none;
-  }
-
-  .page-head__title {
-    font-size: 1.35rem;
   }
 
   .usage-card {

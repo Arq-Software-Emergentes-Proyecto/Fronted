@@ -443,10 +443,7 @@ onUnmounted(() => {
 <template>
   <div class="app-view gen">
     <header class="gen-head">
-      <div class="gen-head__text">
-        <h1 class="gen-head__title">{{ t('resident.guestsPageTitle') }}</h1>
-        <p class="gen-head__sub">{{ t('resident.guestsPageSubtitle', { max: MAX_GUESTS }) }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('resident.guestsPageTitle') }}</h1>
       <div class="gen-head__actions">
         <div
           v-if="myReservations.length"
@@ -864,28 +861,9 @@ onUnmounted(() => {
 .gen-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.gen-head__text {
-  min-width: 0;
-}
-
-.gen-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.gen-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .gen-head__actions {
@@ -1743,10 +1721,6 @@ onUnmounted(() => {
 
   .gen-head {
     align-items: stretch;
-  }
-
-  .gen-head__title {
-    font-size: 1.4rem;
   }
 
   .gen-head__actions {

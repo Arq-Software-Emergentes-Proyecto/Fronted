@@ -528,10 +528,7 @@ function goToGuests() {
 <template>
   <div class="app-view svc">
     <header class="svc-head">
-      <div class="svc-head__text">
-        <h1 class="svc-head__title">{{ t('socialSpaces.book.pageTitle') }}</h1>
-        <p class="svc-head__sub">{{ t('socialSpaces.book.pageSubtitle') }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('socialSpaces.book.pageTitle') }}</h1>
       <div class="svc-head__actions">
         <button type="button" class="svc-btn" @click="goToMyReservations">
           <i class="pi pi-calendar" aria-hidden="true" />
@@ -1026,28 +1023,9 @@ function goToGuests() {
 .svc-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.svc-head__text {
-  min-width: 0;
-}
-
-.svc-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.svc-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .svc-head__actions {
@@ -1988,9 +1966,6 @@ function goToGuests() {
 @media (max-width: 720px) {
   .app-view {
     padding: 1rem 1rem 2rem;
-  }
-  .svc-head__title {
-    font-size: 1.35rem;
   }
   .svc-head__actions,
   .svc-head__actions .svc-btn {

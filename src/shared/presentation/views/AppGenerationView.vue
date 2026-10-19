@@ -402,10 +402,7 @@ onMounted(load)
 <template>
   <div class="app-view gen">
     <header class="gen-head">
-      <div class="gen-head__text">
-        <h1 class="gen-head__title">{{ t('app.generationAdminPageTitle') }}</h1>
-        <p class="gen-head__sub">{{ t('app.generationAdminSubtitle') }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('app.generationAdminPageTitle') }}</h1>
       <div class="gen-head__controls">
         <div class="gen-head__nav">
           <div class="gen-day" role="group" :aria-label="t('app.generationDayGroup')">
@@ -871,28 +868,9 @@ onMounted(load)
 .gen-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.gen-head__text {
-  min-width: 0;
-}
-
-.gen-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.gen-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .gen-head__controls {
@@ -1850,9 +1828,6 @@ onMounted(load)
 @media (max-width: 720px) {
   .app-view {
     padding: 1rem 1rem 2rem;
-  }
-  .gen-head__title {
-    font-size: 1.35rem;
   }
   .gen-head,
   .gen-head__controls,

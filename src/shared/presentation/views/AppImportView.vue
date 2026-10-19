@@ -763,10 +763,7 @@ onMounted(loadList)
 <template>
   <div class="app-view imp">
     <header class="imp-head">
-      <div class="imp-head__text">
-        <h1 class="imp-head__title">{{ t('importView.pageTitle') }}</h1>
-        <p class="imp-head__sub">{{ t('importView.pageSubtitle') }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('importView.pageTitle') }}</h1>
       <div class="imp-head__actions" role="group" :aria-label="t('importView.headerActions')">
         <button type="button" class="imp-btn" :disabled="isSavingFolder" @click="openFolderModal()">
           <i class="pi pi-folder-plus" aria-hidden="true" />
@@ -1450,30 +1447,9 @@ onMounted(loadList)
 .imp-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.imp-head__text {
-  min-width: 0;
-  flex: 1 1 24rem;
-}
-
-.imp-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.imp-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  line-height: 1.45;
-  color: #6e6e73;
 }
 
 .imp-head__actions {
@@ -2529,14 +2505,6 @@ onMounted(loadList)
 @media (max-width: 720px) {
   .app-view {
     padding: 1rem 1rem 2rem;
-  }
-
-  .imp-head__title {
-    font-size: 1.35rem;
-  }
-
-  .imp-head__text {
-    flex-basis: 100%;
   }
 
   .imp-head__actions {

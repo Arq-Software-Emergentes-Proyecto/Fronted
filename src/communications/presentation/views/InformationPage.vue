@@ -228,10 +228,7 @@ onMounted(fetchAnnouncements)
 <template>
   <div class="app-view inf">
     <header class="inf-head">
-      <div class="inf-head__text">
-        <h1 class="inf-head__title">{{ t('information.announcementsPanelTitle') }}</h1>
-        <p class="inf-head__sub">{{ t('information.adminSubtitle') }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('information.announcementsPanelTitle') }}</h1>
       <div class="inf-head__actions">
         <button
           type="button"
@@ -428,28 +425,9 @@ onMounted(fetchAnnouncements)
 .inf-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.inf-head__text {
-  min-width: 0;
-}
-
-.inf-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.inf-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .inf-head__actions {
@@ -823,9 +801,6 @@ onMounted(fetchAnnouncements)
 @media (max-width: 720px) {
   .app-view {
     padding: 1rem 1rem 2rem;
-  }
-  .inf-head__title {
-    font-size: 1.35rem;
   }
   .inf-head,
   .inf-head__actions {

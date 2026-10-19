@@ -745,12 +745,7 @@ watch(admissionRuleNotice, (msg) => {
 <template>
   <div class="app-view st">
     <header class="st-head">
-      <div class="st-head__text">
-        <h1 class="st-head__title">{{ t('app.pageSettings') }}</h1>
-        <p class="st-head__sub">
-          {{ isAdmin ? t('app.settingsPageSubtitleAdmin') : t('app.settingsPageSubtitleResident') }}
-        </p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('app.pageSettings') }}</h1>
     </header>
 
     <!-- Account summary -->
@@ -1551,28 +1546,9 @@ watch(admissionRuleNotice, (msg) => {
 .st-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.st-head__text {
-  min-width: 0;
-}
-
-.st-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.st-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 /* ---------- Buttons ---------- */
@@ -2528,9 +2504,6 @@ watch(admissionRuleNotice, (msg) => {
 @media (max-width: 720px) {
   .app-view {
     padding: 1rem 1rem 2rem;
-  }
-  .st-head__title {
-    font-size: 1.35rem;
   }
   .st-account {
     padding: 0.9rem 1rem;

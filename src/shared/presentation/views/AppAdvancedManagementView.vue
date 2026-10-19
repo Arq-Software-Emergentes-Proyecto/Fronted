@@ -906,10 +906,7 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
 <template>
   <div class="app-view adv">
     <header class="adv-head">
-      <div class="adv-head__text">
-        <h1 class="adv-head__title">{{ t('app.advancedMgmt.pageTitle') }}</h1>
-        <p class="adv-head__sub">{{ t('app.advancedMgmt.pageSubtitle') }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('app.advancedMgmt.pageTitle') }}</h1>
       <div class="adv-head__actions" role="group" :aria-label="t('app.advancedMgmt.headerActions')">
         <button type="button" class="adv-btn" @click="openBulkResidentsModal">
           <i class="pi pi-file-import" aria-hidden="true" />
@@ -2162,28 +2159,9 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
 .adv-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.adv-head__text {
-  min-width: 0;
-}
-
-.adv-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.adv-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .adv-head__actions {
@@ -3715,9 +3693,6 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
 @media (max-width: 720px) {
   .app-view {
     padding: 1rem 1rem 2rem;
-  }
-  .adv-head__title {
-    font-size: 1.35rem;
   }
   .adv-head,
   .adv-head__actions {

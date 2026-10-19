@@ -565,10 +565,7 @@ onBeforeUnmount(() => stopRealtime())
 <template>
   <div class="app-view inc">
     <header class="inc-head">
-      <div class="inc-head__text">
-        <h1 class="inc-head__title">{{ t('app.pageIncidents') }}</h1>
-        <p class="inc-head__sub">{{ t('app.incidentsAdminSubtitle') }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('app.pageIncidents') }}</h1>
       <div class="inc-head__actions">
         <button
           type="button"
@@ -1113,28 +1110,9 @@ onBeforeUnmount(() => stopRealtime())
 .inc-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.inc-head__text {
-  min-width: 0;
-}
-
-.inc-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.inc-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .inc-head__actions {
@@ -1915,9 +1893,6 @@ onBeforeUnmount(() => stopRealtime())
 @media (max-width: 720px) {
   .app-view {
     padding: 1rem 1rem 2rem;
-  }
-  .inc-head__title {
-    font-size: 1.35rem;
   }
   .inc-head,
   .inc-head__actions {

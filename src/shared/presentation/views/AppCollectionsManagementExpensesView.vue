@@ -725,10 +725,7 @@ onMounted(async () => {
 <template>
   <div class="app-view cme">
     <header class="cme-head">
-      <div class="cme-head__text">
-        <h1 class="cme-head__title">{{ t('collectionsMgmt.pageTitle') }}</h1>
-        <p class="cme-head__sub">{{ t('collectionsMgmt.pageSubtitle') }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('collectionsMgmt.pageTitle') }}</h1>
       <div class="cme-head__controls">
         <div class="cme-head__nav">
           <div class="cme-month" role="group" :aria-label="t('collectionsMgmt.monthSelectorLabel')">
@@ -1570,28 +1567,9 @@ onMounted(async () => {
 .cme-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.cme-head__text {
-  min-width: 0;
-}
-
-.cme-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.cme-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .cme-head__controls {
@@ -2457,9 +2435,6 @@ onMounted(async () => {
 @media (max-width: 720px) {
   .app-view {
     padding: 1rem 1rem 2rem;
-  }
-  .cme-head__title {
-    font-size: 1.35rem;
   }
   .cme-head,
   .cme-head__controls,

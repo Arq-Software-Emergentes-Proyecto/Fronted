@@ -218,12 +218,7 @@ onBeforeUnmount(() => stopRealtime())
 <template>
   <div class="app-view rinc">
     <header class="rinc-head">
-      <div class="rinc-head__text">
-        <h1 class="rinc-head__title">{{ t('incidentFlow.myIncidentsTitle') }}</h1>
-        <p class="rinc-head__sub">
-          {{ profile.name ? t('resident.incidentsSubtitle', { name: profile.name }) : t('app.incidentsSubtitle') }}
-        </p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('incidentFlow.myIncidentsTitle') }}</h1>
       <button type="button" class="rinc-btn rinc-btn--primary" @click="startCompose">
         <i class="pi pi-plus" aria-hidden="true" />
         {{ t('incidentFlow.reportIncident') }}
@@ -469,28 +464,9 @@ onBeforeUnmount(() => stopRealtime())
 .rinc-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.rinc-head__text {
-  min-width: 0;
-}
-
-.rinc-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.rinc-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .rinc-btn {
@@ -921,9 +897,6 @@ onBeforeUnmount(() => stopRealtime())
 @media (max-width: 720px) {
   .app-view {
     padding: 1rem 1rem 2rem;
-  }
-  .rinc-head__title {
-    font-size: 1.35rem;
   }
   .rinc-head > .rinc-btn--primary {
     width: 100%;

@@ -482,10 +482,7 @@ const detailTitle = computed(() => {
     <Toast position="top-right" />
 
     <header class="rf-head">
-      <div class="rf-head__text">
-        <h1 class="rf-head__title">{{ t('residentFinance.pageTitle') }}</h1>
-        <p class="rf-head__sub">{{ t('residentFinance.pageSubtitle') }}</p>
-      </div>
+      <h1 class="bf-sr-only">{{ t('residentFinance.pageTitle') }}</h1>
       <div class="rf-head__actions" role="group" :aria-label="t('residentFinance.headerActions')">
         <button
           type="button"
@@ -947,28 +944,9 @@ const detailTitle = computed(() => {
 .rf-head {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem 1.5rem;
   flex-wrap: wrap;
-}
-
-.rf-head__text {
-  min-width: 0;
-}
-
-.rf-head__title {
-  margin: 0;
-  font-family: var(--bf-font-heading, inherit);
-  font-size: 1.6rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #0f172a;
-}
-
-.rf-head__sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.88rem;
-  color: #6e6e73;
 }
 
 .rf-head__actions {
@@ -1528,9 +1506,6 @@ const detailTitle = computed(() => {
   }
   .rf-head {
     align-items: flex-start;
-  }
-  .rf-head__title {
-    font-size: 1.4rem;
   }
   .rf-hero {
     grid-template-columns: minmax(0, 1fr);
