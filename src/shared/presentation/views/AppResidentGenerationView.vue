@@ -450,6 +450,7 @@ onUnmounted(() => {
       <div class="gen-head__actions">
         <div
           v-if="myReservations.length"
+          v-bf-seg
           class="gen-seg"
           role="group"
           :aria-label="t('resident.guestsFilterAria')"
@@ -899,8 +900,7 @@ onUnmounted(() => {
   gap: 0.15rem;
   padding: 0.2rem;
   border-radius: 999px;
-  background: #fff;
-  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(15, 23, 42, 0.06);
 }
 
 .gen-seg__btn {
@@ -917,12 +917,12 @@ onUnmounted(() => {
 }
 
 .gen-seg__btn:hover:not(.is-active) {
-  color: #1e3a8a;
+  color: #0f172a;
 }
 
 .gen-seg__btn.is-active {
-  background: #e8eefc;
-  color: #1e3a8a;
+  background: transparent;
+  color: #0f172a;
 }
 
 /* ---------- Buttons ---------- */

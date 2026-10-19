@@ -257,7 +257,13 @@
 .inc-dialog .incd-segment {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: 2px;
+  padding: 4px;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
 }
 
 .inc-dialog .incd-segment__btn {
@@ -266,9 +272,10 @@
   gap: 0.4rem;
   padding: 0.42rem 0.85rem;
   border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  background: #fff;
-  color: #334155;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #64748b;
+  transition: color 0.28s ease;
   font: inherit;
   font-size: 0.8rem;
   font-weight: 600;
@@ -277,13 +284,13 @@
 }
 
 .inc-dialog .incd-segment__btn:hover:not(:disabled):not([aria-pressed='true']) {
-  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .inc-dialog .incd-segment__btn[aria-pressed='true'] {
-  background: #1e3a8a;
-  border-color: #1e3a8a;
-  color: #fff;
+  background: transparent;
+  border-color: transparent;
+  color: #0f172a;
 }
 
 .inc-dialog .incd-segment__btn:disabled {
@@ -301,7 +308,6 @@
 .inc-dialog .incd-segment__btn--open .incd-dot { color: #c2410c; }
 .inc-dialog .incd-segment__btn--in-progress .incd-dot { color: #1e3a8a; }
 .inc-dialog .incd-segment__btn--resolved .incd-dot { color: #15803d; }
-.inc-dialog .incd-segment__btn[aria-pressed='true'] .incd-dot { color: #fff; }
 
 .inc-dialog .incd-inline {
   display: flex;

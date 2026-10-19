@@ -456,7 +456,7 @@ onMounted(loadWorkers)
       </section>
 
       <section class="tm-card">
-        <div class="tm-tabs" role="tablist" :aria-label="t('teamMgmt.tabsLabel')">
+        <div class="tm-tabs" v-bf-seg role="tablist" :aria-label="t('teamMgmt.tabsLabel')">
           <button
             v-for="tab in tabs"
             :id="`tm-tab-${tab.key}`"
@@ -492,7 +492,7 @@ onMounted(loadWorkers)
             </div>
           </div>
 
-          <div v-if="workers.length" class="tm-filters" role="group" :aria-label="t('teamMgmt.filterAria')">
+          <div v-if="workers.length" class="tm-filters" v-bf-seg role="group" :aria-label="t('teamMgmt.filterAria')">
             <button
               v-for="option in workerFilterOptions"
               :key="option.key"
@@ -1003,11 +1003,15 @@ onMounted(loadWorkers)
 
 .tm-tabs {
   display: flex;
-  gap: 0.4rem;
   flex-wrap: wrap;
   margin-bottom: 1rem;
-  padding-bottom: 0.9rem;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.07);
+  background: rgba(15, 23, 42, 0.06);
+  padding: 4px;
+  gap: 2px;
+  border-radius: 999px;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .tm-tab {
@@ -1016,18 +1020,19 @@ onMounted(loadWorkers)
   gap: 0.45rem;
   padding: 0.45rem 0.5rem 0.45rem 0.9rem;
   border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  background: #fff;
-  color: #334155;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #64748b;
   font: inherit;
   font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: color 0.28s ease;
 }
 
 .tm-tab:hover:not(.is-active) {
-  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .tm-tab__count {
@@ -1042,14 +1047,14 @@ onMounted(loadWorkers)
 }
 
 .tm-tab.is-active {
-  background: #1e3a8a;
-  border-color: #1e3a8a;
-  color: #fff;
+  background: transparent;
+  border-color: transparent;
+  color: #0f172a;
 }
 
 .tm-tab.is-active .tm-tab__count {
-  background: #fff;
-  color: #1e3a8a;
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .tm-tab:focus-visible,
@@ -1236,9 +1241,7 @@ onMounted(loadWorkers)
     padding: 1rem 0.85rem;
   }
   .tm-tabs {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.3rem;
+    width: 100%;
   }
   .tm-tab {
     justify-content: center;
@@ -1407,8 +1410,14 @@ onMounted(loadWorkers)
 /* Filter pills */
 .tm .tm-filters {
   display: flex;
-  gap: 0.4rem;
   flex-wrap: wrap;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 4px;
+  gap: 2px;
+  border-radius: 999px;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .tm .tm-filter {
@@ -1417,18 +1426,19 @@ onMounted(loadWorkers)
   gap: 0.45rem;
   padding: 0.4rem 0.5rem 0.4rem 0.85rem;
   border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  background: #fff;
-  color: #334155;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #64748b;
   font: inherit;
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: color 0.28s ease;
 }
 
 .tm .tm-filter:hover:not(.is-active) {
-  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .tm .tm-filter__count {
@@ -1443,14 +1453,14 @@ onMounted(loadWorkers)
 }
 
 .tm .tm-filter.is-active {
-  background: #1e3a8a;
-  border-color: #1e3a8a;
-  color: #fff;
+  background: transparent;
+  border-color: transparent;
+  color: #0f172a;
 }
 
 .tm .tm-filter.is-active .tm-filter__count {
-  background: #fff;
-  color: #1e3a8a;
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
 /* Pills, dots, chips */

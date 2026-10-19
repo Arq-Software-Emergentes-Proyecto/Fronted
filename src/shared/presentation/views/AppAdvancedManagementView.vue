@@ -997,7 +997,7 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
 
     <!-- Residents | Common spaces -->
     <section class="adv-card">
-      <div class="adv-tabs" role="tablist" :aria-label="t('app.advancedMgmt.tabsLabel')">
+      <div class="adv-tabs" v-bf-seg role="tablist" :aria-label="t('app.advancedMgmt.tabsLabel')">
         <button
           v-for="tab in tabs"
           :id="`adv-tab-${tab.key}`"
@@ -1069,7 +1069,7 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
                 :placeholder="t('app.advancedMgmt.searchPlaceholder')"
               />
             </label>
-            <div class="adv-filters" role="group" :aria-label="t('app.advancedMgmt.filterLabel')">
+            <div class="adv-filters" v-bf-seg role="group" :aria-label="t('app.advancedMgmt.filterLabel')">
               <button
                 v-for="filter in statusFilters"
                 :key="filter.key"
@@ -1459,7 +1459,7 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
       :close-on-escape="!isSubmittingBulk"
       @update:visible="onDialogVisible($event, closeBulkResidentsModal)"
     >
-      <div class="adv-segment" role="tablist" :aria-label="t('rosterImport.modeLabel')">
+      <div class="adv-segment" v-bf-seg role="tablist" :aria-label="t('rosterImport.modeLabel')">
         <button
           type="button"
           role="tab"
@@ -2412,9 +2412,15 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
 
 .adv-tabs {
   display: flex;
-  gap: 0.4rem;
   flex-wrap: wrap;
   margin-bottom: 0.9rem;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 4px;
+  gap: 2px;
+  border-radius: 999px;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .adv-tab {
@@ -2423,14 +2429,15 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
   gap: 0.45rem;
   padding: 0.45rem 0.5rem 0.45rem 0.9rem;
   border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  background: #fff;
-  color: #334155;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #64748b;
   font: inherit;
   font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: color 0.28s ease;
 }
 
 .adv-tab .pi {
@@ -2438,7 +2445,7 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
 }
 
 .adv-tab:hover:not(.is-active) {
-  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .adv-tab__count,
@@ -2453,17 +2460,26 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
   text-align: center;
 }
 
-.adv-tab.is-active,
-.adv-filter.is-active {
-  background: #1e3a8a;
-  border-color: #1e3a8a;
-  color: #fff;
+.adv-tab.is-active {
+  background: transparent;
+  border-color: transparent;
+  color: #0f172a;
 }
 
-.adv-tab.is-active .adv-tab__count,
+.adv-filter.is-active {
+  background: transparent;
+  border-color: transparent;
+  color: #0f172a;
+}
+
+.adv-tab.is-active .adv-tab__count {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
 .adv-filter.is-active .adv-filter__count {
-  background: #fff;
-  color: #1e3a8a;
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .adv-panel {
@@ -2543,8 +2559,14 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
 
 .adv-filters {
   display: flex;
-  gap: 0.35rem;
   flex-wrap: wrap;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 4px;
+  gap: 2px;
+  border-radius: 999px;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .adv-filter {
@@ -2553,18 +2575,19 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
   gap: 0.4rem;
   padding: 0.35rem 0.4rem 0.35rem 0.8rem;
   border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  background: #fff;
-  color: #334155;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #64748b;
   font: inherit;
   font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: color 0.28s ease;
 }
 
 .adv-filter:hover:not(.is-active) {
-  background: #f1f5f9;
+  color: #0f172a;
 }
 
 /* ---------- Residents table ---------- */
@@ -3291,7 +3314,7 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
   padding: 0.25rem;
   margin: 0 0 0.9rem;
   border-radius: 999px;
-  background: #f1f5f9;
+  background: rgba(15, 23, 42, 0.06);
   max-width: 100%;
   flex-wrap: wrap;
 }
@@ -3312,8 +3335,8 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
 }
 
 .adv-segment__tab.is-active {
-  background: #1e3a8a;
-  color: #fff;
+  background: transparent;
+  color: #0f172a;
 }
 
 .adv-segment__tab:disabled {
@@ -3727,6 +3750,7 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
   }
   .adv-tabs {
     flex-wrap: nowrap;
+    width: 100%;
   }
   .adv-tab {
     flex: 1 1 0;

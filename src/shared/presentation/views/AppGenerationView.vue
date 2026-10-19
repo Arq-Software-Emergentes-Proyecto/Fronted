@@ -663,7 +663,7 @@ onMounted(load)
           </div>
           <div
             v-if="dayReservations.length"
-            class="gen-filters"
+            class="gen-filters" v-bf-seg
             role="group"
             :aria-label="t('app.generationFiltersLabel')"
           >
@@ -1417,8 +1417,14 @@ onMounted(load)
 
 .gen-filters {
   display: flex;
-  gap: 0.4rem;
   flex-wrap: wrap;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 4px;
+  gap: 2px;
+  border-radius: 999px;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .gen-filter {
@@ -1427,18 +1433,19 @@ onMounted(load)
   gap: 0.45rem;
   padding: 0.4rem 0.45rem 0.4rem 0.85rem;
   border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  background: #fff;
-  color: #334155;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #64748b;
   font: inherit;
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: color 0.28s ease;
 }
 
 .gen-filter:hover:not(.is-active) {
-  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .gen-filter__count {
@@ -1453,14 +1460,14 @@ onMounted(load)
 }
 
 .gen-filter.is-active {
-  background: #1e3a8a;
-  border-color: #1e3a8a;
-  color: #fff;
+  background: transparent;
+  border-color: transparent;
+  color: #0f172a;
 }
 
 .gen-filter.is-active .gen-filter__count {
-  background: #fff;
-  color: #1e3a8a;
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .gen-timeline {

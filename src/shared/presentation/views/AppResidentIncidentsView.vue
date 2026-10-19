@@ -252,7 +252,7 @@ onBeforeUnmount(() => stopRealtime())
           <h2 id="rinc-list-title" class="rinc-card__title">{{ t('incidentFlow.residentListTitle') }}</h2>
           <div
             v-if="incidents.length"
-            class="rinc-filters"
+            class="rinc-filters" v-bf-seg
             role="group"
             :aria-label="t('incidentFlow.filterAria')"
           >
@@ -655,8 +655,14 @@ onBeforeUnmount(() => stopRealtime())
 
 .rinc-filters {
   display: flex;
-  gap: 0.4rem;
   flex-wrap: wrap;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 4px;
+  gap: 2px;
+  border-radius: 999px;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .rinc-filter {
@@ -665,18 +671,19 @@ onBeforeUnmount(() => stopRealtime())
   gap: 0.45rem;
   padding: 0.4rem 0.5rem 0.4rem 0.85rem;
   border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  background: #fff;
-  color: #334155;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #64748b;
   font: inherit;
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: color 0.28s ease;
 }
 
 .rinc-filter:hover:not(.is-active) {
-  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .rinc-filter__count {
@@ -691,14 +698,14 @@ onBeforeUnmount(() => stopRealtime())
 }
 
 .rinc-filter.is-active {
-  background: #1e3a8a;
-  border-color: #1e3a8a;
-  color: #fff;
+  background: transparent;
+  border-color: transparent;
+  color: #0f172a;
 }
 
 .rinc-filter.is-active .rinc-filter__count {
-  background: #fff;
-  color: #1e3a8a;
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .rinc-list {
