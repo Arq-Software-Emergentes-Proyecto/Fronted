@@ -841,6 +841,14 @@ defineExpose({ reload: loadCatalog })
   .plans-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  /* Keep the sticky feature column narrow so plan columns stay visible while swiping. */
+  .bf-compare__table tbody th[scope='row'],
+  .bf-compare__feature-col {
+    min-width: 8.5rem;
+    max-width: 9.5rem;
+    white-space: normal;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
