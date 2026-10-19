@@ -2137,7 +2137,7 @@
     "listHint": "Asigna proveedores, cambia el estado o crea tareas para tu equipo.",
     "filterAria": "Filtrar por estado",
     "searchLabel": "Buscar incidencias",
-    "searchPlaceholder": "Buscar por asunto, residente o proveedor",
+    "searchPlaceholder": "Buscar asunto, residente o proveedor",
     "priorityFilterLabel": "Filtrar por prioridad",
     "priorityAll": "Todas las prioridades",
     "colIncident": "Incidencia",

@@ -143,12 +143,13 @@ async function sendComment() {
         <textarea
           id="idd-comment-input"
           v-model="comment"
+          class="incd-textarea--compact"
           rows="2"
           maxlength="2000"
           :placeholder="t('incidentFlow.commentPlaceholder')"
           :disabled="sending"
         />
-        <div class="incd-footer" style="justify-content: flex-end">
+        <div class="incd-footer incd-footer--end">
           <button
             type="submit"
             class="incd-btn incd-btn--primary"

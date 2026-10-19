@@ -1364,7 +1364,8 @@ onBeforeUnmount(() => stopRealtime())
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
+  justify-content: flex-end;
   min-width: 0;
 }
 
@@ -1422,7 +1423,7 @@ onBeforeUnmount(() => stopRealtime())
 
 .inc-search {
   position: relative;
-  flex: 0 1 20rem;
+  flex: 0 1 21rem;
   min-width: 12rem;
 }
 
@@ -1458,7 +1459,8 @@ onBeforeUnmount(() => stopRealtime())
   height: 2.4rem;
   border-radius: 999px;
   border-color: rgba(15, 23, 42, 0.12);
-  min-width: 11.5rem;
+  flex: 0 0 auto;
+  min-width: 11rem;
   align-items: center;
 }
 

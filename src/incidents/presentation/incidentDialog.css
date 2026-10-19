@@ -377,6 +377,14 @@
   flex-wrap: wrap;
 }
 
+.inc-dialog .incd-field textarea.incd-textarea--compact {
+  min-height: 4.25rem;
+}
+
+.inc-dialog .incd-footer--end {
+  justify-content: flex-end;
+}
+
 /* Status / priority pills (shared by views and dialogs) */
 .inc-pill {
   display: inline-flex;

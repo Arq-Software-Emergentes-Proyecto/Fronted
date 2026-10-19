@@ -2137,7 +2137,7 @@
     "listHint": "Assign providers, change the status or create tasks for your team.",
     "filterAria": "Filter by status",
     "searchLabel": "Search incidents",
-    "searchPlaceholder": "Search by subject, resident or provider",
+    "searchPlaceholder": "Search subject, resident or provider",
     "priorityFilterLabel": "Filter by priority",
     "priorityAll": "All priorities",
     "colIncident": "Incident",
