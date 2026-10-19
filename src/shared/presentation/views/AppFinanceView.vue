@@ -11,6 +11,7 @@ import { useFinancesStore } from '../../../finances/application/financesStore.js
 import { financesApi } from '../../../finances/infrastructure/financesApi.js'
 import DebtTrafficLightGrid from '../../../finances/presentation/components/DebtTrafficLightGrid.vue'
 import KpiPills from '@/shared/presentation/components/KpiPills.vue'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 import {
   addMonths,
   applyLateFeeToReceipt,
@@ -69,7 +70,7 @@ function shiftSelectedMonth(delta) {
 
 const selectedMonthLabel = computed(() => chargeMonthLabel(selectedMonth.value))
 
-/** Page-level feedback (receipts generated, fee saved, extra charge added). */
+/** Page-level feedback (receipts generated, with counts). */
 const notice = ref({ text: '', tone: 'ok' })
 
 function showNotice(text, tone = 'ok') {
@@ -98,7 +99,9 @@ const isChargeDialogOpen = ref(false)
 const selectedCharge = computed(() =>
   findCharge(editSettings.value.monthlyCharges, chargeForm.value.month),
 )
-const isChargeRegistered = computed(() => Boolean(selectedCharge.value))
+/** True from saving a fee until the dialog is reopened: keeps its button for the green confirmation. */
+const chargeJustSaved = ref(false)
+const isChargeRegistered = computed(() => Boolean(selectedCharge.value) && !chargeJustSaved.value)
 const isReceiptsModalOpen = ref(false)
 const extraCharges = ref([])
 const residentsSearch = ref('')
@@ -149,11 +152,13 @@ function resetChargeForm(monthKey) {
 }
 
 function shiftChargeMonth(delta) {
+  chargeJustSaved.value = false
   chargeInvalid.value = { month: false, paymentOpen: false, amount: false }
   resetChargeForm(shiftMonthKey(chargeForm.value.month, delta))
 }
 
 function openChargeDialog(monthKey) {
+  chargeJustSaved.value = false
   chargeInvalid.value = { month: false, paymentOpen: false, amount: false }
   resetChargeForm(monthKey || selectedMonth.value)
   isChargeDialogOpen.value = true
@@ -196,15 +201,23 @@ function billingAlertMonthLabel(alert) {
   return chargeMonthLabel(alert?.month) || String(alert?.month ?? '')
 }
 
-async function onGenerateReceipts() {
+async function onGenerateReceipts(event) {
   if (isGeneratingReceipts.value) return
   isGeneratingReceipts.value = true
   dismissNotice()
   // Bill exactly the month shown in the month selector (not whatever the server deems current).
   const month = selectedMonth.value
+  const knownReceiptIds = new Set((store.state.receipts || []).map((receipt) => String(receipt.id)))
   try {
     const result = await store.generateMonthlyReceipts(month)
     const label = chargeMonthLabel(result?.month || month)
+    if (Number(result?.created) > 0) {
+      await confirmSuccess(event, t('feedback.receiptsGenerated'))
+      // Highlight the residents that just got a receipt.
+      ;(store.state.receipts || [])
+        .filter((receipt) => !knownReceiptIds.has(String(receipt.id)))
+        .forEach((receipt) => markFresh('financeResident', receipt.residentId))
+    }
     showNotice(
       Number(result?.created) > 0
         ? t('financeOps.generateDone', {
@@ -516,7 +529,7 @@ function closeExtraDialog() {
   isExtraDialogOpen.value = false
 }
 
-async function onAddExtraCharge() {
+async function onAddExtraCharge(event) {
   const title = String(extraForm.value.title ?? '').trim()
   const description = String(extraForm.value.description ?? '').trim()
   const amount = Number(extraForm.value.amount)
@@ -533,21 +546,22 @@ async function onAddExtraCharge() {
 
   isSavingExtra.value = true
   extraError.value = ''
-  const residentName = selectedExtraResident.value?.name || ''
+  const residentId = selectedResidentId.value
   try {
     const created = await residentExtraChargesApi.add({
-      residentId: selectedResidentId.value,
+      residentId,
       title,
       amount,
       description,
     })
-    extraCharges.value = [created, ...extraCharges.value]
-    resetExtraForm()
     await store.loadData()
     applySettingsToForm(store.state.settings)
+    await confirmSuccess(event, t('feedback.extraChargeAdded'))
     isSavingExtra.value = false
     isExtraDialogOpen.value = false
-    showNotice(t('financeAdmin.extraAdded', { name: residentName }))
+    extraCharges.value = [created, ...extraCharges.value]
+    resetExtraForm()
+    markFresh('financeResident', residentId)
     await loadCalendar()
   } catch (e) {
     extraError.value = e?.payload?.message || t('auth.genericError')
@@ -564,7 +578,7 @@ async function persistCharges(nextCharges) {
   applySettingsToForm(updated)
 }
 
-async function onSaveCharge() {
+async function onSaveCharge(event) {
   const month = normalizeMonthKey(chargeForm.value.month)
   const amount = Number(chargeForm.value.amount)
   const billingStart = String(chargeForm.value.billingStart ?? '').trim()
@@ -595,12 +609,15 @@ async function onSaveCharge() {
       billingEnd,
       paymentOpen,
     })
+    // Set before saving: the fee becomes "registered" as soon as the settings come back.
+    chargeJustSaved.value = true
     await persistCharges([nextCharge, ...editSettings.value.monthlyCharges])
+    await confirmSuccess(event, t('feedback.monthlyChargeSaved'))
+    isChargeDialogOpen.value = false
     resetChargeForm(month)
     await loadBillingAlerts()
-    isChargeDialogOpen.value = false
-    showNotice(`${t('financeAdmin.chargeSaved')} · ${chargeMonthLabel(month)}`)
   } catch (e) {
+    chargeJustSaved.value = false
     chargeError.value = e?.payload?.message || t('auth.genericError')
   } finally {
     isSavingCharge.value = false
@@ -894,7 +911,11 @@ const getStatusBadgeClass = (status) => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in pagedRows" :key="row.id" :class="`is-${row.group}`">
+            <tr
+              v-for="row in pagedRows"
+              :key="row.id"
+              :class="[`is-${row.group}`, { 'bf-fresh': isFresh('financeResident', row.id) }]"
+            >
               <td class="c-resident">
                 <div class="fin-res">
                   <span class="fin-avatar" :class="`fin-avatar--${row.group}`" aria-hidden="true">

@@ -2,6 +2,7 @@
 import { useI18n } from 'vue-i18n'
 import { formatIncidentWhen, incidentEventLabel } from '../incidentLabels.js'
 import { IncidentEventType } from '@/incidents/domain/model/incidentConstants.js'
+import { isFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 /** Historial de la incidencia (RNF010): estado, asignaciones, comentarios y cierre. */
 defineProps({
@@ -25,7 +26,12 @@ function showComment(ev) {
 <template>
   <p v-if="!events.length" class="itl__empty">{{ t('incidentFlow.noEventsYet') }}</p>
   <ol v-else class="itl" role="list">
-    <li v-for="ev in events" :key="ev.id" class="itl__item" :class="`itl__item--${ev.type}`">
+    <li
+      v-for="ev in events"
+      :key="ev.id"
+      class="itl__item"
+      :class="[`itl__item--${ev.type}`, { 'bf-fresh': isFresh('incidentEvent', ev.id) }]"
+    >
       <span class="itl__dot" aria-hidden="true" />
       <div class="itl__content">
         <p class="itl__label">{{ incidentEventLabel(t, ev) }}</p>

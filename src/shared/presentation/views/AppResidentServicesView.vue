@@ -9,6 +9,7 @@ import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.j
 import { useSession } from '@/iam/application/sessionStore.js'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -456,7 +457,7 @@ function selectCalendarDate(dateKey) {
   }
 }
 
-async function onReserveSubmit() {
+async function onReserveSubmit(event) {
   if (isSubmittingReservation.value || !selectedSpace.value) return
 
   if (!profile.value.id) {
@@ -477,7 +478,9 @@ async function onReserveSubmit() {
       startTime: reservationForm.startTime,
       endTime: reservationForm.endTime,
     })
+    await confirmSuccess(event, t('feedback.booked'))
     confirmation.value = {
+      reservationId: created?.id,
       space: space.name,
       date: formatFriendlyDate(created?.date ?? reservationForm.date),
       start: formatTimeDisplay(created?.startTime ?? reservationForm.startTime),
@@ -516,6 +519,8 @@ async function onReserveSubmit() {
 }
 
 function closeConfirmation() {
+  // Al cerrar el resumen, "Tu próxima reserva" se marca en verde si es la que se acaba de hacer.
+  markFresh('reservation', confirmation.value?.reservationId)
   confirmation.value = null
 }
 
@@ -543,7 +548,12 @@ function goToGuests() {
     </p>
 
     <!-- Tu próxima reserva -->
-    <section v-if="nextReservation" class="svc-next" aria-labelledby="svc-next-heading">
+    <section
+      v-if="nextReservation"
+      class="svc-next"
+      :class="{ 'bf-fresh': isFresh('reservation', nextReservation.id) }"
+      aria-labelledby="svc-next-heading"
+    >
       <span class="svc-next__icon" aria-hidden="true"><i class="pi pi-calendar-clock" /></span>
       <div class="svc-next__body">
         <h2 id="svc-next-heading" class="svc-next__eyebrow">{{ t('socialSpaces.book.nextTitle') }}</h2>

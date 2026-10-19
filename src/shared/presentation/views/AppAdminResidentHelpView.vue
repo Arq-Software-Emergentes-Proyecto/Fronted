@@ -13,6 +13,7 @@ import {
   onSupportChatUpdated,
   realtimeAvailable,
 } from '@/residentCare/infrastructure/supportRealtime.js'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const { t, locale } = useI18n()
 const { state: sessionState } = useSession()
@@ -180,7 +181,7 @@ function refreshAll() {
   void bindChats()
 }
 
-async function setSelectedStatus(status) {
+async function setSelectedStatus(status, event = null) {
   const id = selected.value?.id
   if (!id || statusBusy.value) return
   statusBusy.value = true
@@ -188,6 +189,10 @@ async function setSelectedStatus(status) {
     const updated = status === ChatStatus.CLOSED
       ? await supportApi.closeChat(id)
       : await supportApi.updateStatus(id, status)
+    if (status === 'answered') {
+      await confirmSuccess(event, t('feedback.markedAttended'))
+      markFresh('supportChat', id)
+    }
     upsertChat(updated)
     loadError.value = ''
   } catch (e) {
@@ -357,9 +362,13 @@ async function sendReply() {
   const text = replyText.value.trim()
   if (!id || !text || sending.value || !ownerId.value) return
   sending.value = true
+  const knownIds = new Set((selected.value?.messages || []).map((m) => m.id))
   try {
     const updated = await supportApi.postMessage(id, text, locale.value)
     upsertChat(updated)
+    // Icon-only send button: no green button, only the new bubble lights up.
+    const sentMessages = (updated?.messages || []).filter((m) => !knownIds.has(m.id) && msgKind(m) === 'admin')
+    sentMessages.forEach((m) => markFresh('supportMsg', m.id))
     replyText.value = ''
     loadError.value = ''
     await nextTick()
@@ -487,7 +496,7 @@ async function sendReply() {
               <button
                 type="button"
                 class="chat-card"
-                :class="{ 'is-active': c.id === selectedId }"
+                :class="{ 'is-active': c.id === selectedId, 'bf-fresh': isFresh('supportChat', c.id) }"
                 :aria-current="c.id === selectedId ? 'true' : undefined"
                 @click="selectChat(c)"
               >
@@ -564,10 +573,10 @@ async function sendReply() {
                   type="button"
                   class="btn btn--primary btn--sm"
                   :disabled="statusBusy"
-                  @click="setSelectedStatus('answered')"
+                  @click="setSelectedStatus('answered', $event)"
                 >
                   <i class="pi pi-check" aria-hidden="true" />
-                  {{ t('supportAdmin.markAnswered') }}
+                  <span>{{ t('supportAdmin.markAnswered') }}</span>
                 </button>
                 <button
                   v-if="selected.status !== 'open'"
@@ -626,7 +635,7 @@ async function sendReply() {
                     {{ bubbleRole(m.authorRole) }}
                     <span class="msg__time">{{ messageTime(m) }}</span>
                   </span>
-                  <div class="msg__bubble"><p>{{ m.body }}</p></div>
+                  <div class="msg__bubble" :class="{ 'bf-fresh': isFresh('supportMsg', m.id) }"><p>{{ m.body }}</p></div>
                   <span v-if="m.citedSource" class="source-pill">
                     <i class="pi pi-file" aria-hidden="true" />
                     {{ t('supportAdmin.sourceLabel') }}: {{ m.citedSource }}
@@ -1453,6 +1462,20 @@ async function sendReply() {
   background: var(--navy);
   border-color: var(--navy);
   color: #fff;
+}
+
+/* Respuesta recién enviada: la burbuja azul conserva su fondo (texto blanco) y solo la rodea un halo verde. */
+.msg--admin .msg__bubble.bf-fresh {
+  animation:
+    bf-fresh-in 0.8s var(--bf-ease),
+    msg-fresh-ring 3.4s var(--bf-ease-soft);
+}
+
+@keyframes msg-fresh-ring {
+  0%,
+  45% {
+    box-shadow: 0 0 0 3px var(--bf-success-line);
+  }
 }
 
 .bot-avatar,

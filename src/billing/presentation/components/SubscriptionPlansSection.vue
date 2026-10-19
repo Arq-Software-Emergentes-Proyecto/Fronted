@@ -124,9 +124,9 @@ function isButtonDisabled(plan) {
   return false
 }
 
-function onSelect(plan) {
+function onSelect(plan, event) {
   if (isButtonDisabled(plan)) return
-  emit('select', plan.id)
+  emit('select', plan.id, event)
 }
 
 function moduleLabel(key) {
@@ -257,9 +257,9 @@ defineExpose({ reload: loadCatalog })
             :class="!isCurrent(plan) && (plan.highlighted || recommendedPlanId === plan.id) ? 'plan-card__btn--primary' : 'plan-card__btn--ghost'"
             :disabled="isButtonDisabled(plan)"
             :aria-busy="busyPlanId === plan.id"
-            @click="onSelect(plan)"
+            @click="onSelect(plan, $event)"
           >
-            {{ buttonLabel(plan) }}
+            <span>{{ buttonLabel(plan) }}</span>
           </button>
         </article>
       </div>

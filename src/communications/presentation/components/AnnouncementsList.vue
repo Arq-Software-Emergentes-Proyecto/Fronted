@@ -8,6 +8,7 @@ import {
   normalizePriority,
   useAnnouncementFormat,
 } from '../composables/useAnnouncementFormat.js'
+import { isFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const props = defineProps({
   announcements: { type: Array, required: true },
@@ -84,7 +85,7 @@ function bodyId(ann) {
     <li v-for="ann in announcements" :key="ann.id" class="annl__item">
       <article
         class="annl-card"
-        :class="{ 'is-expired': isAnnouncementExpired(ann) }"
+        :class="{ 'is-expired': isAnnouncementExpired(ann), 'bf-fresh': isFresh('announcement', ann.id) }"
         :aria-labelledby="`ann-title-${ann.id}`"
       >
         <div class="annl-card__top">

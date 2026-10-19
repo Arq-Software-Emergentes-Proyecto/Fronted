@@ -14,6 +14,7 @@ import {
   positionTone,
   toDate,
 } from '@/team/presentation/teamUi.js'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 /** Team — shifts (Tabla 80 Shift). The API rejects overlapping shifts of one worker (409 SHIFT_OVERLAP). */
 const props = defineProps({
@@ -106,7 +107,10 @@ function closeCreate() {
   dialogOpen.value = false
 }
 
-async function createShift() {
+/** Botón "Agregar turno" del pie del diálogo (también al enviar el formulario con Enter). */
+const createActionsRef = ref(null)
+
+async function createShift(event) {
   if (saving.value) return
   formError.value = ''
   formErrors.staffId = !form.staffId
@@ -123,11 +127,14 @@ async function createShift() {
   }
   saving.value = true
   try {
-    await teamShiftsApi.create({ staffId: form.staffId, start: form.start, end: form.end })
+    const created = await teamShiftsApi.create({ staffId: form.staffId, start: form.start, end: form.end })
+    const button = event?.type === 'click' ? event : createActionsRef.value?.$el?.querySelector('.bf-btn--confirm')
+    await confirmSuccess(button, t('feedback.shiftAdded'))
     form.start = ''
     form.end = ''
     dialogOpen.value = false
     await loadShifts()
+    markFresh('shift', created?.id)
   } catch (err) {
     if (err?.code === 'SHIFT_OVERLAP') formError.value = t('teamMgmt.shifts.overlap')
     else if (err?.code === 'SHIFT_INVALID_RANGE') formError.value = t('teamMgmt.shifts.invalidRange')
@@ -206,7 +213,12 @@ onMounted(loadShifts)
           <span class="tm-day__count">{{ t('teamMgmt.shifts.countLabel', { n: group.items.length }, group.items.length) }}</span>
         </header>
         <ul class="tm-day__list">
-          <li v-for="shift in group.items" :key="shift.id" class="tm-shift">
+          <li
+            v-for="shift in group.items"
+            :key="shift.id"
+            class="tm-shift"
+            :class="{ 'bf-fresh': isFresh('shift', shift.id) }"
+          >
             <span class="tm-shift__time">
               <strong>{{ formatTimeRange(shift.start, shift.end, locale) }}</strong>
               <small>{{ durationLabel(shift) }}</small>
@@ -318,6 +330,7 @@ onMounted(loadShifts)
       </form>
       <template #footer>
         <ConfirmActions
+          ref="createActionsRef"
           :cancel-label="t('app.cancelAction')"
           :confirm-label="t('teamMgmt.shifts.create')"
           confirm-icon="pi pi-calendar-plus"

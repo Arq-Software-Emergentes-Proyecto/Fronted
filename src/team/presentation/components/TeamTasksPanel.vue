@@ -8,6 +8,7 @@ import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 import { teamTasksApi, TASK_STATUSES } from '@/team/infrastructure/teamTasksApi.js'
 import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
 import { formatDateTime, initialsOf, toDate } from '@/team/presentation/teamUi.js'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 /**
  * Team — maintenance tasks (Tabla 80 MaintenanceTask): board grouped by status, filters, create, start, complete.
@@ -153,7 +154,10 @@ function closeCreate() {
   dialogOpen.value = false
 }
 
-async function createTask() {
+/** Botón "Crear tarea" del pie del diálogo (también al enviar el formulario con Enter). */
+const createActionsRef = ref(null)
+
+async function createTask(event) {
   if (creating.value) return
   formError.value = ''
   formErrors.staffId = !form.staffId
@@ -164,15 +168,21 @@ async function createTask() {
   }
   creating.value = true
   try {
-    await teamTasksApi.create({
+    const created = await teamTasksApi.create({
       staffId: form.staffId,
       description: form.description,
       scheduledFor: form.scheduledFor || null,
     })
+    const button = event?.type === 'click' ? event : createActionsRef.value?.$el?.querySelector('.bf-btn--confirm')
+    await confirmSuccess(button, t('feedback.taskCreated'))
     form.description = ''
     form.scheduledFor = ''
     dialogOpen.value = false
     await loadTasks()
+    // Que la tarea nueva quede a la vista (pendiente, del trabajador elegido).
+    if (filters.status && filters.status !== created?.status) filters.status = null
+    if (filters.staffId && filters.staffId !== created?.staffId) filters.staffId = null
+    markFresh('task', created?.id)
     emit('changed')
   } catch (err) {
     formError.value = errorMessage(err, 'teamMgmt.tasks.saveError')
@@ -189,6 +199,7 @@ async function transition(task, action) {
   try {
     await (action === 'start' ? teamTasksApi.start(task.id) : teamTasksApi.complete(task.id))
     await loadTasks()
+    markFresh('task', task.id)
     emit('changed')
   } catch (err) {
     error.value = errorMessage(err, 'teamMgmt.tasks.saveError')
@@ -283,7 +294,12 @@ onMounted(() => {
         </header>
 
         <ul v-if="col.items.length" class="tm-col__list">
-          <li v-for="task in col.items" :key="task.id" class="tm-task">
+          <li
+            v-for="task in col.items"
+            :key="task.id"
+            class="tm-task"
+            :class="{ 'bf-fresh': isFresh('task', task.id) }"
+          >
             <p class="tm-task__desc">{{ task.description }}</p>
 
             <div class="tm-task__meta">
@@ -431,6 +447,7 @@ onMounted(() => {
       </form>
       <template #footer>
         <ConfirmActions
+          ref="createActionsRef"
           :cancel-label="t('app.cancelAction')"
           :confirm-label="t('teamMgmt.tasks.create')"
           confirm-icon="pi pi-plus"

@@ -5,6 +5,7 @@ import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
 import { authApi } from '@/iam/infrastructure/authApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
@@ -48,6 +49,8 @@ const descriptionTouched = ref(false)
 const statusFilter = ref('all')
 const detailId = ref('')
 const detailRefreshKey = ref(0)
+/** Botones del diálogo de reporte: el Enter del formulario también confirma en el botón "Enviar". */
+const composeActionsRef = ref(null)
 
 // US024: campos vacíos en rojo con mensaje; el botón de envío queda bloqueado.
 const titleInvalid = computed(
@@ -157,7 +160,7 @@ async function loadIncidents() {
   }
 }
 
-async function reportIncident() {
+async function reportIncident(event) {
   submitAttempted.value = true
   const title = draftTitle.value.trim()
   const text = draftDescription.value.trim()
@@ -175,8 +178,9 @@ async function reportIncident() {
       ownerAdminId = row?.ownerAdminId ?? null
     }
 
-    await incidentsApi.add({
-      id: `incident-${Date.now()}`,
+    const draftId = `incident-${Date.now()}`
+    const created = await incidentsApi.add({
+      id: draftId,
       residentId,
       residentName,
       title,
@@ -186,10 +190,14 @@ async function reportIncident() {
       provider: '',
       ...(ownerAdminId ? { ownerAdminId } : {}),
     })
+    const sendButton =
+      event?.type === 'click' ? event : composeActionsRef.value?.$el?.querySelector('.bf-btn--confirm')
+    await confirmSuccess(sendButton, t('feedback.incidentReported'))
     sending.value = false
     cancelCompose()
     statusFilter.value = 'all'
     await loadIncidents()
+    markFresh('incident', created?.id ?? draftId)
   } catch (err) {
     composeError.value = err?.payload?.message || t('app.incidentsSaveError')
   } finally {
@@ -288,7 +296,11 @@ onBeforeUnmount(() => stopRealtime())
 
         <ul v-else class="rinc-list" role="list">
           <li v-for="row in visibleIncidents" :key="row.id">
-            <article class="rinc-item" :aria-labelledby="`rinc-item-${row.id}`">
+            <article
+              class="rinc-item"
+              :class="{ 'bf-fresh': isFresh('incident', row.id) }"
+              :aria-labelledby="`rinc-item-${row.id}`"
+            >
               <div class="rinc-item__top">
                 <span class="inc-pill" :class="`inc-pill--${row.status || 'open'}`">
                   <span class="inc-pill__dot" aria-hidden="true" />
@@ -418,6 +430,7 @@ onBeforeUnmount(() => stopRealtime())
       </form>
       <template #footer>
         <ConfirmActions
+          ref="composeActionsRef"
           :cancel-label="t('app.cancelAction')"
           :confirm-label="t('incidentFlow.submitReport')"
           confirm-icon="pi pi-send"

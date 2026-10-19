@@ -19,6 +19,7 @@ import {
   onSupportChatUpdated,
   realtimeAvailable,
 } from '@/residentCare/infrastructure/supportRealtime.js'
+import { isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const { t, locale } = useI18n()
 const { state: sessionState } = useSession()
@@ -206,6 +207,12 @@ let creatingBlankLock = false
 let stopHub = null
 /** Set on unmount: async work resumed after an await must not (re)register anything. */
 let disposed = false
+
+/** Mensaje propio que el servidor acaba de guardar: su burbuja entra en verde (sin demorar el chat). */
+function markSentMessage(chat, knownIds) {
+  const sent = (chat?.messages || []).filter((m) => m.role === 'user' && !knownIds.has(m.id)).at(-1)
+  if (sent) markFresh('supportMessage', sent.id)
+}
 
 function upsertLocalChat(chat) {
   if (!chat?.id) return
@@ -421,9 +428,11 @@ async function sendAiMessage(preset) {
   sendFailure.value = null
   aiNotice.value = ''
   scrollAiToBottom()
+  const knownIds = new Set((activeAiChat.value?.messages || []).map((m) => m.id))
   try {
     const updated = await supportApi.postMessage(chatId, text, locale.value)
     upsertLocalChat(updated)
+    markSentMessage(updated, knownIds)
     if (aiInput.value.trim() === text) aiInput.value = ''
     if (updated.escalatedChatId) await refreshAdminThread()
     syncError.value = ''
@@ -431,7 +440,11 @@ async function sendAiMessage(preset) {
     console.error(error)
     if (error?.code === 'AI_MONTHLY_CAP_REACHED') {
       // Tope del plan: el servidor ya guardó y derivó la consulta a administración.
-      if (error?.payload?.chat) upsertLocalChat(normalizeChat(error.payload.chat))
+      if (error?.payload?.chat) {
+        const chat = normalizeChat(error.payload.chat)
+        upsertLocalChat(chat)
+        markSentMessage(chat, knownIds)
+      }
       if (aiInput.value.trim() === text) aiInput.value = ''
       aiNotice.value = t('supportResident.aiCapReached')
       await refreshAdminThread()
@@ -823,7 +836,7 @@ function onAiSuggestion(kind) {
               <div class="msg__col">
                 <span v-if="m.role === 'admin'" class="msg__label">{{ t('supportResident.labelAdmin') }}</span>
                 <span v-else class="sr-only">{{ messageWho(m.role) }}:</span>
-                <div class="msg__bubble">
+                <div class="msg__bubble" :class="{ 'bf-fresh': isFresh('supportMessage', m.id) }">
                   <p>{{ m.body }}</p>
                 </div>
                 <span v-if="m.citedSource" class="source-pill">
@@ -1933,6 +1946,18 @@ function onAiSuggestion(kind) {
 
 .msg--admin .msg__bubble {
   background: var(--tint-green);
+}
+
+/* Recién enviado: la burbuja propia pasa por verde y vuelve al azul (texto blanco legible). */
+.msg--user .msg__bubble.bf-fresh {
+  animation: msg-sent-tint 3.4s var(--bf-ease-soft);
+}
+
+@keyframes msg-sent-tint {
+  0%,
+  45% {
+    background-color: var(--bf-success);
+  }
 }
 
 .msg.is-pending .msg__bubble {

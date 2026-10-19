@@ -12,6 +12,7 @@ import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import TeamTasksPanel from '@/team/presentation/components/TeamTasksPanel.vue'
 import TeamShiftsPanel from '@/team/presentation/components/TeamShiftsPanel.vue'
 import { initialsOf, localeTag, positionTone } from '@/team/presentation/teamUi.js'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const { t, locale } = useI18n()
 
@@ -149,7 +150,7 @@ async function onPhotoChange(event) {
   }
 }
 
-async function submitWorker() {
+async function submitWorker(event) {
   if (saving.value) return
   submitError.value = ''
 
@@ -169,7 +170,7 @@ async function submitWorker() {
 
   saving.value = true
   try {
-    await teamWorkersApi.add({
+    const created = await teamWorkersApi.add({
       name: form.name,
       phone: form.phone,
       dni: form.dni,
@@ -177,8 +178,13 @@ async function submitWorker() {
       photoUrl: form.photoUrl,
       position: form.position,
     })
+    await confirmSuccess(event, t('feedback.workerAdded'))
     closeModal()
     await loadWorkers()
+    // Mostrar al nuevo trabajador aunque se esté en otra pestaña o con el filtro "Inactivos".
+    activeTab.value = 'workers'
+    if (workerFilter.value === 'inactive') workerFilter.value = 'all'
+    markFresh('worker', created?.id)
   } catch (err) {
     if (err?.code === 'TEAM_WORKER_FIELDS_REQUIRED') {
       submitError.value = t('teamMgmt.requiredFields')
@@ -511,7 +517,7 @@ onMounted(loadWorkers)
               v-for="w in visibleWorkers"
               :key="w.id"
               class="tm-worker"
-              :class="{ 'is-inactive': w.status === 'INACTIVE' }"
+              :class="{ 'is-inactive': w.status === 'INACTIVE', 'bf-fresh': isFresh('worker', w.id) }"
             >
               <div class="tm-worker__top">
                 <img

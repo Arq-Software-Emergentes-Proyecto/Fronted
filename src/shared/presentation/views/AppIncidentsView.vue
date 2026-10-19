@@ -36,6 +36,7 @@ import {
 import { teamWorkersApi } from '@/team/infrastructure/teamWorkersApi.js'
 import { teamTasksApi } from '@/team/infrastructure/teamTasksApi.js'
 import KpiPills from '@/shared/presentation/components/KpiPills.vue'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const { t, locale } = useI18n()
 
@@ -54,14 +55,14 @@ async function loadActiveWorkers() {
   }
 }
 
-async function createTaskFromIncident(row, staffId) {
+async function createTaskFromIncident(row, staffId, event) {
   if (!staffId || taskBusyId.value) return
   taskBusyId.value = row.id
   taskNotice.value = { id: '', text: '', error: false }
   try {
     const description = [row.title, row.description].filter(Boolean).join(' — ').slice(0, 2000)
     await teamTasksApi.create({ staffId, incidentId: row.id, description: description || row.id })
-    taskNotice.value = { id: row.id, text: t('teamMgmt.tasks.createdFromIncident'), error: false }
+    await confirmSuccess(event, t('feedback.taskCreated'))
     taskWorkerId.value = ''
   } catch (err) {
     const text =
@@ -377,7 +378,10 @@ async function loadIncidents({ silent = false } = {}) {
   }
 }
 
-async function createIncident() {
+/** Botón "Registrar incidencia" del pie del diálogo (también al enviar el formulario con Enter). */
+const createActionsRef = ref(null)
+
+async function createIncident(event) {
   titleTouched.value = true
   descriptionTouched.value = true
   const title = draftTitle.value.trim()
@@ -387,8 +391,9 @@ async function createIncident() {
   try {
     composeError.value = ''
     error.value = null
-    await incidentsApi.add({
-      id: `incident-${Date.now()}`,
+    const id = `incident-${Date.now()}`
+    const created = await incidentsApi.add({
+      id,
       title,
       description,
       status: IncidentStatus.OPEN,
@@ -399,9 +404,12 @@ async function createIncident() {
       residentName: '',
       createdAt: new Date().toISOString(),
     })
+    const button = event?.type === 'click' ? event : createActionsRef.value?.$el?.querySelector('.bf-btn--confirm')
+    await confirmSuccess(button, t('feedback.incidentLogged'))
     sending.value = false
     cancelCompose()
     await loadIncidents()
+    markFresh('incident', created?.id ?? id)
   } catch (err) {
     composeError.value = resolveErrorMessage(err)
   } finally {
@@ -409,14 +417,30 @@ async function createIncident() {
   }
 }
 
+/** Ids del historial abierto, para resaltar los eventos que agrega un cambio. */
+function detailEventIds() {
+  return new Set(detailEvents.value.map((ev) => String(ev?.id)))
+}
+
+function markNewEvents(before) {
+  for (const ev of detailEvents.value) {
+    if (ev?.id != null && !before.has(String(ev.id))) markFresh('incidentEvent', ev.id)
+  }
+}
+
 async function runSave(row, action) {
   if (!row?.id || savingId.value) return
   savingId.value = row.id
+  const before = detailEventIds()
   try {
     error.value = null
     await action()
     await loadIncidents({ silent: true })
-    if (detailId.value === String(row.id)) await loadDetail()
+    if (detailId.value === String(row.id)) {
+      await loadDetail()
+      markNewEvents(before)
+    }
+    markFresh('incident', row.id)
   } catch (err) {
     error.value = resolveErrorMessage(err)
   } finally {
@@ -443,16 +467,22 @@ function assignProvider(row, value) {
   runSave(row, () => incidentsApi.assign(row.id, providerId))
 }
 
-async function confirmResolve(comment) {
+async function confirmResolve(comment, event) {
   const row = resolving.value
   if (!row) return
   savingId.value = row.id
   resolveError.value = ''
+  const before = detailEventIds()
   try {
     await incidentsApi.resolve(row.id, comment)
+    await confirmSuccess(event, t('feedback.incidentResolved'))
     resolving.value = null
     await loadIncidents({ silent: true })
-    if (detailId.value === String(row.id)) await loadDetail()
+    if (detailId.value === String(row.id)) {
+      await loadDetail()
+      markNewEvents(before)
+    }
+    markFresh('incident', row.id)
   } catch (err) {
     resolveError.value = resolveErrorMessage(err)
   } finally {
@@ -725,7 +755,11 @@ onBeforeUnmount(() => stopRealtime())
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in visibleIncidents" :key="row.id" :class="{ 'is-saving': savingId === row.id }">
+              <tr
+                v-for="row in visibleIncidents"
+                :key="row.id"
+                :class="{ 'is-saving': savingId === row.id, 'bf-fresh': isFresh('incident', row.id) }"
+              >
                 <td class="c-main">
                   <div class="inc-item">
                     <strong class="inc-item__title">{{ row.title || row.description }}</strong>
@@ -907,6 +941,7 @@ onBeforeUnmount(() => stopRealtime())
       </form>
       <template #footer>
         <ConfirmActions
+          ref="createActionsRef"
           :cancel-label="t('app.cancelAction')"
           :confirm-label="t('incidentFlow.createSubmit')"
           confirm-icon="pi pi-check"
@@ -1032,7 +1067,7 @@ onBeforeUnmount(() => stopRealtime())
                 type="button"
                 class="incd-btn"
                 :disabled="!taskWorkerId || taskBusyId === detailRow.id"
-                @click="createTaskFromIncident(detailRow, taskWorkerId)"
+                @click="createTaskFromIncident(detailRow, taskWorkerId, $event)"
               >
                 <i class="pi" :class="taskBusyId === detailRow.id ? 'pi-spin pi-spinner' : 'pi-briefcase'" aria-hidden="true" />
                 {{ t('incidentFlow.taskCreate') }}

@@ -8,6 +8,7 @@ import AnnouncementsList from '../components/AnnouncementsList.vue'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 import KpiPills from '@/shared/presentation/components/KpiPills.vue'
+import { confirmSuccess, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 import {
   expiresWithinWeek,
   isAnnouncementExpired,
@@ -142,6 +143,8 @@ const editing = ref(null)
 const saving = ref(false)
 const formError = ref('')
 const formRef = ref(null)
+/** Pie del diálogo: su botón "Publicar" / "Guardar cambios" se pone verde al guardar. */
+const formActionsRef = ref(null)
 
 const authorName = computed(() => session.profile?.name ?? 'Admin')
 
@@ -168,11 +171,12 @@ async function handleSubmit(payload) {
   formError.value = ''
   saving.value = true
   const isEdit = Boolean(editing.value?.id)
+  let saved = null
   try {
     if (isEdit) {
-      await announcementsApi.update(editing.value.id, payload)
+      saved = await announcementsApi.update(editing.value.id, payload)
     } else {
-      await announcementsApi.add({
+      saved = await announcementsApi.add({
         ...payload,
         authorId: session.profile?.id ?? '',
         authorName: authorName.value,
@@ -183,12 +187,16 @@ async function handleSubmit(payload) {
     saving.value = false
     return
   }
+  await confirmSuccess(
+    formActionsRef.value?.$el?.querySelector('.bf-btn--confirm'),
+    isEdit ? t('feedback.changesSaved') : t('feedback.announcementPublished'),
+  )
   saving.value = false
   formOpen.value = false
   // Server recomputes expiresAt and the priority ordering: reload.
   await fetchAnnouncements()
   if (!isEdit && statusFilter.value === 'expired') statusFilter.value = 'active'
-  flash(isEdit ? t('information.updated') : t('information.published'))
+  markFresh('announcement', isEdit ? editing.value.id : saved?.id)
 }
 
 /* ---------- Delete ---------- */
@@ -348,6 +356,7 @@ onMounted(fetchAnnouncements)
       />
       <template #footer>
         <ConfirmActions
+          ref="formActionsRef"
           :cancel-label="t('information.cancel')"
           :confirm-label="
             saving

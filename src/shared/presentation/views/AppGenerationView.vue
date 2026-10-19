@@ -6,6 +6,7 @@ import { spacesApi } from '@/socialSpaces/infrastructure/spacesApi.js'
 import { reservationInviteExpiresAtMs } from '@/shared/infrastructure/api/utils.js'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import KpiPills from '@/shared/presentation/components/KpiPills.vue'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const { t, locale } = useI18n()
 
@@ -278,12 +279,22 @@ function clearPass() {
   passInputEl.value?.focus()
 }
 
-async function onPassCheckIn(guestId, checkedIn = true) {
+async function onPassCheckIn(guestId, checkedIn = true, event = null) {
   if (!passToken.value || passSavingKey.value) return
   passSavingKey.value = guestId || '*'
   passError.value = ''
   try {
-    pass.value = await reservationsApi.checkInGuestPass(passToken.value, guestId, checkedIn)
+    const pendingIds = passGuests.value
+      .filter((g) => !g.checkedIn && (!guestId || g.id === guestId))
+      .map((g) => g.id)
+    const updated = await reservationsApi.checkInGuestPass(passToken.value, guestId, checkedIn)
+    if (checkedIn && pendingIds.length) {
+      await confirmSuccess(event, guestId ? t('feedback.entryRegistered') : t('feedback.entriesRegistered'))
+    }
+    pass.value = updated
+    // Same key as the agenda row, so the guest also lights up there after the reload.
+    const resId = pass.value?.reservation?.id
+    if (checkedIn) pendingIds.forEach((id) => markFresh('guest', `${resId}:${id}`))
     void load()
   } catch (error) {
     passError.value = checkInRefusalMessage(error)
@@ -404,17 +415,19 @@ async function load() {
   }
 }
 
-async function onGuestCheckedIn(r, guest, checkedIn) {
+async function onGuestCheckedIn(r, guest, checkedIn, event = null) {
   const key = `${r.id}:${guest.id}`
   if (savingKey.value) return
   savingKey.value = key
   actionError.value = ''
   try {
     const updated = await reservationsApi.setGuestCheckedIn(r.id, guest.id, checkedIn)
+    if (checkedIn) await confirmSuccess(event, t('feedback.entryRegistered'))
     const idx = reservations.value.findIndex((x) => x.id === updated.id)
     if (idx !== -1) {
       reservations.value[idx] = updated
     }
+    if (checkedIn) markFresh('guest', key)
   } catch (error) {
     if (
       error?.status === 410 ||
@@ -571,7 +584,12 @@ onMounted(load)
             </dl>
 
             <ul v-if="passGuests.length" class="gen-guests" role="list">
-              <li v-for="g in passGuests" :key="g.id" class="gen-guest">
+              <li
+                v-for="g in passGuests"
+                :key="g.id"
+                class="gen-guest"
+                :class="{ 'bf-fresh': isFresh('guest', `${pass.reservation?.id}:${g.id}`) }"
+              >
                 <span class="gen-avatar gen-avatar--sm" aria-hidden="true">{{ initials(g.name) }}</span>
                 <span class="gen-guest__text">
                   <span class="gen-guest__name">{{ g.name }}</span>
@@ -586,14 +604,14 @@ onMounted(load)
                   :disabled="pass.status !== 'VALID' || passSavingKey === g.id"
                   :aria-pressed="Boolean(g.checkedIn)"
                   :aria-label="t('app.generationGuestEntryAria', { name: g.name })"
-                  @click="onPassCheckIn(g.id, !g.checkedIn)"
+                  @click="onPassCheckIn(g.id, !g.checkedIn, $event)"
                 >
                   <i
                     class="pi"
                     :class="passSavingKey === g.id ? 'pi-spin pi-spinner' : g.checkedIn ? 'pi-check-circle' : 'pi-sign-in'"
                     aria-hidden="true"
                   />
-                  {{ g.checkedIn ? t('app.generationAdminEntered') : t('app.generationMarkEntry') }}
+                  <span>{{ g.checkedIn ? t('app.generationAdminEntered') : t('app.generationMarkEntry') }}</span>
                 </button>
               </li>
             </ul>
@@ -625,10 +643,10 @@ onMounted(load)
                 type="button"
                 class="gen-btn gen-btn--primary"
                 :disabled="Boolean(passSavingKey)"
-                @click="onPassCheckIn(null, true)"
+                @click="onPassCheckIn(null, true, $event)"
               >
                 <i class="pi" :class="passSavingKey === '*' ? 'pi-spin pi-spinner' : 'pi-check'" aria-hidden="true" />
-                {{ t('socialSpaces.validatorCheckInAll') }}
+                <span>{{ t('socialSpaces.validatorCheckInAll') }}</span>
               </button>
             </div>
           </div>
@@ -758,7 +776,12 @@ onMounted(load)
                 {{ t('app.generationAdminNoGuests') }}
               </p>
               <ul v-else class="gen-guests" role="list">
-                <li v-for="g in guestList(r)" :key="g.id" class="gen-guest">
+                <li
+                  v-for="g in guestList(r)"
+                  :key="g.id"
+                  class="gen-guest"
+                  :class="{ 'bf-fresh': isFresh('guest', `${r.id}:${g.id}`) }"
+                >
                   <span class="gen-avatar gen-avatar--sm gen-avatar--soft" aria-hidden="true">{{ initials(g.name) }}</span>
                   <span class="gen-guest__text">
                     <span class="gen-guest__name">{{ g.name }}</span>
@@ -773,7 +796,7 @@ onMounted(load)
                     :disabled="savingKey === `${r.id}:${g.id}` || (!g.checkedIn && passExpired(r))"
                     :aria-pressed="Boolean(g.checkedIn)"
                     :aria-label="t('app.generationGuestEntryAria', { name: g.name })"
-                    @click="onGuestCheckedIn(r, g, !g.checkedIn)"
+                    @click="onGuestCheckedIn(r, g, !g.checkedIn, $event)"
                   >
                     <i
                       class="pi"
@@ -786,7 +809,7 @@ onMounted(load)
                       "
                       aria-hidden="true"
                     />
-                    {{ g.checkedIn ? t('app.generationAdminEntered') : t('app.generationMarkEntry') }}
+                    <span>{{ g.checkedIn ? t('app.generationAdminEntered') : t('app.generationMarkEntry') }}</span>
                   </button>
                 </li>
               </ul>

@@ -5,6 +5,7 @@ import Dialog from 'primevue/dialog'
 import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
 import { Incident } from '@/incidents/domain/model/incident.entity.js'
 import IncidentTimeline from './IncidentTimeline.vue'
+import { confirmSuccess, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 import {
   formatIncidentWhen,
   incidentPriorityLabel,
@@ -52,14 +53,20 @@ async function load() {
 
 watch(() => [props.open, props.incidentId, props.refreshKey], load, { immediate: true })
 
-async function sendComment() {
+async function sendComment(event) {
   const text = comment.value.trim()
   if (!text || sending.value || !incident.value) return
   sending.value = true
   error.value = ''
+  const before = new Set(events.value.map((ev) => String(ev?.id)))
   try {
     incident.value = new Incident(await incidentsApi.addComment(incident.value.id, text))
     comment.value = ''
+    // Como un mensaje: el comentario aparece al instante (sin esperar la animación del botón).
+    void confirmSuccess(event, t('feedback.commentSent'))
+    for (const ev of events.value) {
+      if (ev?.id != null && !before.has(String(ev.id))) markFresh('incidentEvent', ev.id)
+    }
     emit('updated', incident.value)
   } catch (err) {
     error.value = err?.payload?.message || t('app.incidentsSaveError')

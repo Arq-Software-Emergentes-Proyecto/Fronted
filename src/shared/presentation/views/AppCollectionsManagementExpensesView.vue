@@ -18,6 +18,7 @@ import { useFinancesStore } from '@/finances/application/financesStore.js'
 import { financesApi } from '@/finances/infrastructure/financesApi.js'
 import { OPEN_WIREFRAME_ACCESS } from '@/iam/application/localPreviewAuth.js'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
+import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const { t, locale } = useI18n()
 const { state, loadData } = useFinancesStore()
@@ -535,7 +536,7 @@ async function onFixedPhotoChange(event) {
   }
 }
 
-async function submitCost() {
+async function submitCost(event) {
   if (saving.value) return
   submitError.value = ''
 
@@ -555,14 +556,18 @@ async function submitCost() {
 
   saving.value = true
   try {
-    await adminManagementExpensesApi.add({
+    const created = await adminManagementExpensesApi.add({
       name: form.name,
       amount: amt,
       purchaseDate: form.purchaseDate,
       invoicePhotoUrl: form.invoicePhotoUrl,
     })
+    await confirmSuccess(event, t('feedback.expenseAdded'))
     closeModal()
+    // The header buttons open these dialogs from any tab: show the list the new item is in.
+    selectTab('expenses')
     await loadCosts()
+    markFresh('expense', created?.id)
     await loadMonthBalance()
   } catch (err) {
     const field = err?.field || err?.payload?.field
@@ -585,7 +590,7 @@ async function submitCost() {
   }
 }
 
-async function submitSharedService() {
+async function submitSharedService(event) {
   if (serviceSaving.value) return
   serviceSubmitError.value = ''
 
@@ -601,12 +606,15 @@ async function submitSharedService() {
 
   serviceSaving.value = true
   try {
-    await sharedUtilityServicesApi.add({
+    const created = await sharedUtilityServicesApi.add({
       type: serviceForm.type,
       amount: amt,
     })
+    await confirmSuccess(event, t('feedback.sharedServiceAdded'))
     closeServiceModal()
+    selectTab('services')
     await Promise.all([loadSharedServices(), loadData()])
+    markFresh('sharedService', created?.id)
   } catch (err) {
     if (err?.code === 'SHARED_SERVICE_FIELDS_REQUIRED') {
       serviceSubmitError.value = t('sharedServices.requiredFields')
@@ -618,7 +626,7 @@ async function submitSharedService() {
   }
 }
 
-async function submitFixedRecipient() {
+async function submitFixedRecipient(event) {
   if (fixedSaving.value) return
   fixedSubmitError.value = ''
 
@@ -645,7 +653,7 @@ async function submitFixedRecipient() {
 
   fixedSaving.value = true
   try {
-    await fixedPayoutRecipientsApi.add({
+    const created = await fixedPayoutRecipientsApi.add({
       name: fixedForm.name,
       dni: fixedForm.dni,
       phone: fixedForm.phone,
@@ -653,8 +661,11 @@ async function submitFixedRecipient() {
       intervalDays: interval,
       photoUrl: fixedForm.photoUrl,
     })
+    await confirmSuccess(event, t('feedback.fixedPayoutAdded'))
     closeFixedModal()
+    selectTab('fixed')
     await loadFixedRecipients()
+    markFresh('fixedPayout', created?.id)
   } catch (err) {
     if (err?.code === 'FIXED_PAYOUT_FIELDS_REQUIRED') {
       fixedSubmitError.value = t('fixedPay.requiredFields')
@@ -935,7 +946,7 @@ onMounted(async () => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="row in visibleExpenses" :key="row.id">
+                <tr v-for="row in visibleExpenses" :key="row.id" :class="{ 'bf-fresh': isFresh('expense', row.id) }">
                   <td class="c-main">
                     <div class="cme-item">
                       <img
@@ -1035,7 +1046,7 @@ onMounted(async () => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="row in sharedServices" :key="row.id">
+                <tr v-for="row in sharedServices" :key="row.id" :class="{ 'bf-fresh': isFresh('sharedService', row.id) }">
                   <td class="c-main">
                     <div class="cme-item">
                       <span
@@ -1116,7 +1127,7 @@ onMounted(async () => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="row in fixedRecipients" :key="row.id">
+                <tr v-for="row in fixedRecipients" :key="row.id" :class="{ 'bf-fresh': isFresh('fixedPayout', row.id) }">
                   <td class="c-main">
                     <div class="cme-item">
                       <img
