@@ -714,10 +714,7 @@ const chartOptions = ref({
   padding: 1.5rem 1.6rem;
   border-radius: 20px;
   color: #fff;
-  background:
-    radial-gradient(120% 140% at 100% 0%, rgba(96, 165, 250, 0.35) 0%, rgba(96, 165, 250, 0) 55%),
-    linear-gradient(135deg, #1e3a8a 0%, #172554 100%);
-  box-shadow: 0 10px 30px rgba(23, 37, 84, 0.18);
+  background: #1e3a8a;
 }
 
 .dash-hero__date {
@@ -796,37 +793,26 @@ const chartOptions = ref({
 }
 
 .kpi-card {
-  --kpi-accent: #1e3a8a;
   position: relative;
   overflow: hidden;
-  background: #fff;
-  border: 1px solid rgba(15, 23, 42, 0.07);
+  background: var(--kpi-bg, #f1f5f9);
   border-radius: 16px;
   padding: 1.05rem 1.1rem 1.1rem;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
-}
-
-.kpi-card::before {
-  content: '';
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 3px;
-  background: var(--kpi-accent);
+  transition: transform 0.15s ease;
 }
 
 .kpi-card:hover {
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.07);
   transform: translateY(-1px);
 }
 
-.kpi-card--blue { --kpi-accent: #1e3a8a; }
-.kpi-card--green { --kpi-accent: #16a34a; }
-.kpi-card--orange { --kpi-accent: #ea580c; }
-.kpi-card--amber { --kpi-accent: #d97706; }
-.kpi-card--red { --kpi-accent: #dc2626; }
+/* Cada indicador es una tarjeta de color sólido (sin degradados ni franjas). */
+.kpi-card--blue { --kpi-bg: #e8eefc; }
+.kpi-card--green { --kpi-bg: #e3f4e8; }
+.kpi-card--orange { --kpi-bg: #fdeee2; }
+.kpi-card--amber { --kpi-bg: #fdf3dc; }
+.kpi-card--red { --kpi-bg: #fde4e4; }
 
 .kpi-header {
   display: flex;
@@ -847,11 +833,11 @@ const chartOptions = ref({
   font-size: 0.95rem;
 }
 
-.icon-blue { background: #e8eefc; color: #1e3a8a; }
-.icon-green { background: #e7f6ec; color: #15803d; }
-.icon-orange { background: #fff1e6; color: #c2410c; }
-.icon-amber { background: #fef6e4; color: #b45309; }
-.icon-red { background: #fdecee; color: #b42318; }
+.icon-blue { background: #fff; color: #1e3a8a; }
+.icon-green { background: #fff; color: #15803d; }
+.icon-orange { background: #fff; color: #c2410c; }
+.icon-amber { background: #fff; color: #b45309; }
+.icon-red { background: #fff; color: #b42318; }
 
 .kpi-label {
   color: #6e6e73;
@@ -905,13 +891,13 @@ const chartOptions = ref({
   height: 1.5rem;
   border-radius: 50%;
   font-size: 0.72rem;
-  background: #eef0f4;
+  background: #fff;
   color: #64748b;
 }
 
 /* Deuda que sube es mala (rojo); que baja es buena (verde). */
-.kpi-trend--up { background: #fdecee; color: #b42318; }
-.kpi-trend--down { background: #e7f6ec; color: #15803d; }
+.kpi-trend--up { color: #b42318; }
+.kpi-trend--down { color: #15803d; }
 
 .kpi-state {
   display: inline-flex;
@@ -924,14 +910,14 @@ const chartOptions = ref({
   text-transform: uppercase;
 }
 
-.kpi-state--critical { background: #fdecee; color: #b42318; }
-.kpi-state--healthy { background: #e7f6ec; color: #15803d; }
-.kpi-state--none { background: #eef0f4; color: #64748b; }
+.kpi-state--critical { background: #fff; color: #b42318; }
+.kpi-state--healthy { background: #fff; color: #15803d; }
+.kpi-state--none { background: #fff; color: #64748b; }
 
 .kpi-meter {
   height: 6px;
   border-radius: 999px;
-  background: #eef0f4;
+  background: rgba(255, 255, 255, 0.85);
   overflow: hidden;
   margin-bottom: 0.5rem;
 }
@@ -943,9 +929,9 @@ const chartOptions = ref({
   transition: width 0.4s ease;
 }
 
-.kpi-meter__fill--green { background: linear-gradient(90deg, #22c55e, #16a34a); }
-.kpi-meter__fill--amber { background: linear-gradient(90deg, #fbbf24, #d97706); }
-.kpi-meter__fill--red { background: linear-gradient(90deg, #f87171, #dc2626); }
+.kpi-meter__fill--green { background: #16a34a; }
+.kpi-meter__fill--amber { background: #d97706; }
+.kpi-meter__fill--red { background: #dc2626; }
 
 .visually-hidden {
   position: absolute;
@@ -963,12 +949,12 @@ const chartOptions = ref({
   margin-top: 0.25rem;
   font-size: 0.7rem;
   line-height: 1.4;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .text-red { color: #b42318; }
 .text-green { color: #15803d; }
-.card-danger { background: linear-gradient(180deg, #fff5f5 0%, #fff 70%); }
+/* card-danger: el fondo rojo sólido lo da .kpi-card--red */
 
 /* ---------- Cards ---------- */
 .dash-grid {
@@ -1232,28 +1218,18 @@ const chartOptions = ref({
 
 .inc-row {
   --inc-accent: #dc2626;
-  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 0.7rem;
-  padding: 0.8rem 0.85rem 0.8rem 1rem;
+  padding: 0.85rem 0.9rem;
   border-radius: 14px;
-  background: #f8fafc;
-  border: 1px solid rgba(15, 23, 42, 0.05);
-  overflow: hidden;
+  background: var(--inc-bg, #f1f5f9);
 }
 
-.inc-row::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: var(--inc-accent);
-}
-
-.inc-row--open { --inc-accent: #dc2626; }
-.inc-row--in-progress { --inc-accent: #ea580c; }
-.inc-row--resolved { --inc-accent: #16a34a; }
+/* Cada incidencia es una tarjeta de color sólido según su estado. */
+.inc-row--open { --inc-accent: #dc2626; --inc-bg: #fde4e4; }
+.inc-row--in-progress { --inc-accent: #ea580c; --inc-bg: #fdeee2; }
+.inc-row--resolved { --inc-accent: #16a34a; --inc-bg: #e3f4e8; }
 
 .inc-row__dot {
   flex-shrink: 0;
@@ -1262,7 +1238,6 @@ const chartOptions = ref({
   margin-top: 0.38rem;
   border-radius: 50%;
   background: var(--inc-accent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--inc-accent) 15%, transparent);
 }
 
 .guest-badge,
@@ -1279,9 +1254,9 @@ const chartOptions = ref({
   white-space: nowrap;
 }
 
-.inc-badge--open { background: #fdecee; color: #b42318; }
-.inc-badge--in-progress { background: #fff1e6; color: #c2410c; }
-.inc-badge--resolved { background: #e7f6ec; color: #15803d; }
+.inc-badge--open { background: #fff; color: #b42318; }
+.inc-badge--in-progress { background: #fff; color: #c2410c; }
+.inc-badge--resolved { background: #fff; color: #15803d; }
 
 /* ---------- Responsive ---------- */
 @media (max-width: 1180px) {
