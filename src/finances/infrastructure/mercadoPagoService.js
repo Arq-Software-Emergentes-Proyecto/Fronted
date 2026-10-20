@@ -8,7 +8,6 @@ import { apiClient } from '@/shared/infrastructure/api/apiClient.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
 import {
   checkoutReturnUrl,
-  readMercadoPagoPayment,
   startMercadoPagoCheckout,
 } from '@/shared/infrastructure/mercadoPagoCheckoutClient.js'
 import { AppPaths } from '@/shared/domain/appRoutes.js'
@@ -71,18 +70,14 @@ export async function checkoutMaintenanceFees({
 }
 
 /**
- * Confirm maintenance payment after Checkout Pro return.
+ * Confirm maintenance payment after Checkout Pro return. The API reads the payment from
+ * Mercado Pago itself (status, amount, reference), so there is no browser-side pre-check:
+ * it needed its own token on Vercel and, without it, the payment was never confirmed.
  */
 export async function confirmMaintenancePayment({ residentId, paymentId = null } = {}) {
   if (paymentId == null || !String(paymentId).length) {
     const error = new Error('PAYMENT_REQUIRED')
     error.code = 'PAYMENT_REQUIRED'
-    throw error
-  }
-  const payment = await readMercadoPagoPayment(paymentId)
-  if (!payment.approved) {
-    const error = new Error('PAYMENT_NOT_APPROVED')
-    error.code = 'PAYMENT_NOT_APPROVED'
     throw error
   }
 
