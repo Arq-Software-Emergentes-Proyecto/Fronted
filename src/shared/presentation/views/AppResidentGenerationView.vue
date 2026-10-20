@@ -1355,11 +1355,13 @@ onUnmounted(() => {
 }
 
 .gen-icon-btn--danger {
-  color: #b42318;
+  background: #dc2626;
+  color: #fff;
 }
 
 .gen-icon-btn--danger:hover:not(:disabled) {
-  background: #fde4e4;
+  background: #b91c1c;
+  color: #fff;
 }
 
 .gen-icon-btn:disabled {
@@ -1433,11 +1435,10 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.4rem;
   padding: 0.4rem 0.7rem;
-  margin-left: -0.7rem;
   border: none;
   border-radius: 999px;
-  background: transparent;
-  color: #b42318;
+  background: #dc2626;
+  color: #fff;
   font: inherit;
   font-size: 0.8rem;
   font-weight: 600;
@@ -1445,7 +1446,7 @@ onUnmounted(() => {
 }
 
 .gen-link-danger:hover:not(:disabled) {
-  background: #fde4e4;
+  background: #b91c1c;
 }
 
 .gen-link-danger:disabled {

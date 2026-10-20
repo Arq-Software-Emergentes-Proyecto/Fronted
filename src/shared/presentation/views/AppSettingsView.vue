@@ -1555,11 +1555,14 @@ watch(planSaveNotice, (msg) => {
 }
 
 .st-btn--danger {
-  color: #b42318;
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
 }
 
 .st-btn--danger:hover:not(:disabled) {
-  background: #fde4e4;
+  background: #b91c1c;
+  border-color: #b91c1c;
 }
 
 .st-btn--sm {

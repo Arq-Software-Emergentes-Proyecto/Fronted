@@ -2299,12 +2299,13 @@ onMounted(loadList)
 }
 
 .imp-action--danger {
-  color: #b42318;
+  background: #dc2626;
+  color: #fff;
 }
 
 .imp-action--danger:hover:not(:disabled) {
-  background: #fde4e4;
-  color: #b42318;
+  background: #b91c1c;
+  color: #fff;
 }
 
 .imp-action:disabled {
