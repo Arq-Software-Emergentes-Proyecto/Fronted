@@ -5,6 +5,7 @@ import {
   OPEN_WIREFRAME_ACCESS,
 } from '@/iam/application/localPreviewAuth.js'
 import { clearSession, getAccessToken } from '@/iam/application/sessionStore.js'
+import { freshSessionToken, signOutFirebase } from '@/iam/infrastructure/firebaseSession.js'
 
 /**
  * Centralized axios instance pointing at the BuildingFex API.
@@ -33,10 +34,13 @@ if (OPEN_WIREFRAME_ACCESS) {
   }
 }
 
-apiClient.interceptors.request.use((config) => {
-  const token = getAccessToken()
+apiClient.interceptors.request.use(async (config) => {
+  // Sign-in flows pass the new user's token explicitly: never replace it with the stored session.
+  if (config.headers?.Authorization) return config
+  const token = await freshSessionToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
+    config.bfSessionAuth = true
   }
   return config
 })
@@ -81,8 +85,18 @@ apiClient.interceptors.response.use(
       const url = String(error.config?.url ?? '')
       const isAuthRoute = url.includes('/authentication/')
       const token = getAccessToken()
+      // The Firebase token may have just expired: renew it once and repeat the request.
+      if (!isAuthRoute && error.config?.bfSessionAuth && !error.config.bfRetried) {
+        const fresh = await freshSessionToken({ force: true })
+        if (fresh && fresh !== token) {
+          error.config.bfRetried = true
+          error.config.headers.Authorization = `Bearer ${fresh}`
+          return apiClient(error.config)
+        }
+      }
       if (!isAuthRoute && token && !isPreviewAccessToken(token)) {
         clearSession()
+        void signOutFirebase()
         if (typeof window !== 'undefined') {
           const path = window.location.pathname
           if (!path.includes('/login') && !path.includes('/register')) {
@@ -99,6 +113,7 @@ apiClient.interceptors.response.use(
       const token = getAccessToken()
       if (!url.includes('/authentication/') && token && !isPreviewAccessToken(token)) {
         clearSession()
+        void signOutFirebase()
         if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
           window.location.assign('/login?session=deactivated')
         }

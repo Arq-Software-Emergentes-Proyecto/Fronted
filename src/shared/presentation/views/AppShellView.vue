@@ -8,6 +8,7 @@ import SkipLink from '../components/SkipLink.vue'
 import BfConfirmDialog from '../components/BfConfirmDialog.vue'
 import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import { useSession } from '@/iam/application/sessionStore.js'
+import { signOutFirebase } from '@/iam/infrastructure/firebaseSession.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
 import {
   markIncidentsSeen,
@@ -214,6 +215,8 @@ function onLogout() {
   stopIncidentRealtime()
   void stopSupportHub()
   clearSession()
+  // Firebase keeps its own session in the browser: end it too, or the next person here inherits it.
+  void signOutFirebase()
   router.push({ name: AppRouteNames.LOGIN })
 }
 

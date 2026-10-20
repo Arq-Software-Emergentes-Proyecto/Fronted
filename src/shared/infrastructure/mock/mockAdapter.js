@@ -337,14 +337,6 @@ function handleV1(config, method, parts) {
   const params = readParams(config)
   const body = readBody(config)
 
-  if (route === 'authentication/check-email' && method === 'GET') {
-    const email = String(params.email ?? '').trim().toLowerCase()
-    const exists = listCollection('users').some(
-      (user) => String(user.email ?? '').trim().toLowerCase() === email,
-    )
-    return ok(config, { exists })
-  }
-
   if (route === 'authentication/sign-in' && method === 'POST') {
     const email = String(body.email ?? '').trim().toLowerCase()
     const password = String(body.password ?? '')

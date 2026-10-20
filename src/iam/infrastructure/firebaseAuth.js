@@ -7,12 +7,14 @@ import {
   linkWithCredential,
   reauthenticateWithPopup,
   sendEmailVerification,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   updatePassword,
   updateProfile,
 } from 'firebase/auth'
 import { apiError, normalizeEmail } from '@/shared/infrastructure/api/utils.js'
 import { getFirebaseAuth } from './firebaseApp.js'
+import { sessionFirebaseUid } from './firebaseSession.js'
 
 function mapAuthError(error) {
   if (
@@ -50,6 +52,9 @@ function mapAuthError(error) {
     details.includes('missing_password')
   ) {
     return apiError('INVALID_PASSWORD')
+  }
+  if (code === 'auth/user-disabled' || details.includes('user_disabled')) {
+    return apiError('ACCOUNT_DEACTIVATED')
   }
   if (code === 'auth/too-many-requests' || details.includes('too_many_attempts')) {
     return apiError('TOO_MANY_REQUESTS')
@@ -94,8 +99,11 @@ export async function registerAdminWithFirebase(payload) {
   try {
     const credential = await createUserWithEmailAndPassword(getFirebaseAuth(), email, password)
     if (name) {
-      await updateProfile(credential.user, { displayName: name })
+      await updateProfile(credential.user, { displayName: name }).catch(() => {})
     }
+    // Confirma que el correo es suyo (y evita que Firebase descarte la contraseña si luego
+    // entra con Google con el mismo correo). Best effort: no bloquea el registro.
+    sendEmailVerification(credential.user).catch(() => {})
     const token = await credential.user.getIdToken()
     return {
       identity: adminIdentityFrom(credential.user.uid, email, name),
@@ -110,6 +118,26 @@ export async function registerAdminWithFirebase(payload) {
       },
     }
   } catch (error) {
+    const code = String(error?.code ?? '')
+    if (code === 'auth/weak-password') throw apiError('PASSWORD_TOO_SHORT')
+    if (code === 'auth/invalid-email') throw apiError('INVALID_EMAIL')
+    throw mapAuthError(error)
+  }
+}
+
+/**
+ * "¿Olvidaste tu contraseña?": Firebase envía el enlace para elegir una nueva. No revela si el
+ * correo existe (la pantalla muestra el mismo mensaje en ambos casos).
+ */
+export async function sendPasswordReset(email) {
+  const normalized = normalizeEmail(email)
+  if (!normalized) throw apiError('INVALID_EMAIL')
+  try {
+    await sendPasswordResetEmail(getFirebaseAuth(), normalized)
+  } catch (error) {
+    const code = String(error?.code ?? '')
+    if (code === 'auth/user-not-found') return
+    if (code === 'auth/invalid-email') throw apiError('INVALID_EMAIL')
     throw mapAuthError(error)
   }
 }
@@ -174,6 +202,7 @@ export async function createResidentPasswordAccount({ email, password, name }) {
   } catch (error) {
     const code = String(error?.code ?? '')
     if (code === 'auth/weak-password') throw apiError('PASSWORD_TOO_SHORT')
+    if (code === 'auth/invalid-email') throw apiError('INVALID_EMAIL')
     if (code !== 'auth/email-already-in-use') throw mapAuthError(error)
   }
 
@@ -185,9 +214,24 @@ export async function createResidentPasswordAccount({ email, password, name }) {
       token: await credential.user.getIdToken(),
       created: false,
     }
-  } catch {
+  } catch (error) {
+    const code = String(error?.code ?? '')
+    if (code === 'auth/too-many-requests') throw apiError('TOO_MANY_REQUESTS')
+    if (code === 'auth/network-request-failed') throw apiError('NETWORK_ERROR')
     throw apiError('EMAIL_ALREADY_EXISTS')
   }
+}
+
+/**
+ * Invite with email + password and the API asks for a verified email: re-reads the Firebase
+ * user (after the resident opened the verification link) and returns a token with the new state.
+ */
+export async function reloadVerifiedToken({ resend = false } = {}) {
+  const user = getFirebaseAuth().currentUser
+  if (!user) throw apiError('REAUTH_REQUIRED')
+  await user.reload()
+  if (!user.emailVerified && resend) await sendEmailVerification(user).catch(() => {})
+  return { verified: user.emailVerified, email: normalizeEmail(user.email), token: await user.getIdToken(true) }
 }
 
 /**
@@ -225,7 +269,9 @@ export async function setPasswordForCurrentUser(password) {
   const auth = getFirebaseAuth()
   if (typeof auth.authStateReady === 'function') await auth.authStateReady()
   const user = auth.currentUser
-  if (!user) throw apiError('REAUTH_REQUIRED')
+  // The Firebase user of this browser must be the one signed into the app.
+  const sessionUid = sessionFirebaseUid()
+  if (!user || (sessionUid && user.uid !== sessionUid)) throw apiError('REAUTH_REQUIRED')
   const email = normalizeEmail(user.email)
   if (!email) throw apiError('EMAIL_NOT_FOUND')
 

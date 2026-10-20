@@ -18,6 +18,17 @@ function mapFirebaseError(error) {
   if (code === 'auth/unauthorized-domain') {
     return googleError('GOOGLE_NOT_CONFIGURED')
   }
+  if (code === 'auth/popup-blocked') return googleError('GOOGLE_POPUP_BLOCKED')
+  // Navegadores dentro de apps (Instagram, Facebook…) o sin almacenamiento: Google no deja entrar.
+  if (
+    code === 'auth/operation-not-supported-in-this-environment' ||
+    code === 'auth/web-storage-unsupported'
+  ) {
+    return googleError('GOOGLE_BROWSER_UNSUPPORTED')
+  }
+  if (code === 'auth/user-disabled') return googleError('ACCOUNT_DEACTIVATED')
+  if (code === 'auth/network-request-failed') return googleError('NETWORK_ERROR')
+  if (code === 'auth/too-many-requests') return googleError('TOO_MANY_REQUESTS')
   return googleError('GOOGLE_UNAVAILABLE')
 }
 

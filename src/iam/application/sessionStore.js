@@ -82,6 +82,13 @@ export function clearSession() {
   applySession(null, null, null)
 }
 
+/** Renewed token for the SAME signed-in user (no identity change, listeners are not fired). */
+export function updateSessionToken(token) {
+  if (!state.role || !token) return
+  state.token = token
+  persist()
+}
+
 /** Module-level setters for router bootstrap (outside component setup). */
 export function setAdminSession(profile = {}, token = null) {
   applySession(SessionRoles.ADMIN, profile, token)

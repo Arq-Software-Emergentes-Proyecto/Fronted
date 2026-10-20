@@ -14,7 +14,10 @@ import { signInWithGoogle, refreshFirebaseIdToken } from '@/iam/infrastructure/g
 import {
   createResidentPasswordAccount,
   deleteJustCreatedFirebaseUser,
+  reloadVerifiedToken,
+  sendPasswordReset,
 } from '@/iam/infrastructure/firebaseAuth.js'
+import { currentFirebaseIdToken, signOutFirebase } from '@/iam/infrastructure/firebaseSession.js'
 import BuildingForm from '@/profiles/presentation/components/BuildingForm.vue'
 import DashboardHeroArt from '@/shared/presentation/components/dashboard/DashboardHeroArt.vue'
 
@@ -86,6 +89,11 @@ function applyResidentSession(user, token) {
 function googleAuthMessage(error) {
   if (error?.code === 'GOOGLE_NOT_CONFIGURED') return t('auth.inviteGoogleNotConfigured')
   if (error?.code === 'GOOGLE_CANCELLED') return t('auth.inviteGoogleCancelled')
+  if (error?.code === 'GOOGLE_POPUP_BLOCKED') return t('auth.googlePopupBlocked')
+  if (error?.code === 'GOOGLE_BROWSER_UNSUPPORTED') return t('auth.googleBrowserUnsupported')
+  if (error?.code === 'INVALID_ID_TOKEN') return t('auth.googleTokenInvalid')
+  if (error?.code === 'INVALID_EMAIL') return t('auth.emailInvalid')
+  if (error?.code === 'INVITE_EMAIL_UNVERIFIED') return t('auth.inviteVerifyStill')
   if (error?.code === 'GOOGLE_SCRIPT' || error?.code === 'GOOGLE_UNAVAILABLE') {
     return t('auth.inviteGoogleError')
   }
@@ -109,6 +117,8 @@ function googleAuthMessage(error) {
 watchEffect(async () => {
   if (!isResidentInvite.value || !inviteToken.value) {
     inviteResident.value = null
+    // Invite link without its token (cut off when copied): say so instead of an empty card.
+    inviteFetchError.value = isResidentInvite.value ? t('auth.inviteNotFound') : ''
     return
   }
   inviteLoading.value = true
@@ -155,6 +165,7 @@ async function onResidentGoogleSignUp() {
     await applyResidentSession(authResult.user, sessionToken)
   } catch (error) {
     residentError.value = googleAuthMessage(error)
+    void signOutFirebase()
   } finally {
     residentLoading.value = false
   }
@@ -169,6 +180,47 @@ const inviteErrorField = ref(null)
 watch(residentError, (msg) => {
   if (!msg) inviteErrorField.value = null
 }, { flush: 'sync' })
+
+/**
+ * The invite is for a specific email and the API wants it verified: the Firebase account stays
+ * signed in until the resident opens the verification link and confirms here.
+ */
+const inviteVerifyEmail = ref('')
+const inviteVerifyNotice = ref('')
+
+async function finishPasswordInvite(account) {
+  const authResult = await residentsApi.completeInviteWithPassword({
+    token: inviteToken.value,
+    email: account.email,
+    name: inviteName.value,
+    idToken: account.token,
+  })
+  inviteVerifyEmail.value = ''
+  const sessionToken = OPEN_WIREFRAME_ACCESS
+    ? authResult.token
+    : await resolveResidentToken({ token: null })
+  await applyResidentSession(authResult.user, sessionToken)
+}
+
+async function onInviteVerifyRetry({ resend = false } = {}) {
+  if (residentLoading.value) return
+  residentError.value = ''
+  inviteVerifyNotice.value = ''
+  residentLoading.value = true
+  try {
+    const account = await reloadVerifiedToken({ resend })
+    if (!account.verified) {
+      if (resend) inviteVerifyNotice.value = t('auth.inviteVerifyResent')
+      else residentError.value = t('auth.inviteVerifyStill')
+      return
+    }
+    await finishPasswordInvite(account)
+  } catch (error) {
+    residentError.value = googleAuthMessage(error)
+  } finally {
+    residentLoading.value = false
+  }
+}
 
 async function onResidentPasswordSignUp() {
   if (residentLoading.value) return
@@ -202,15 +254,16 @@ async function onResidentPasswordSignUp() {
           password: invitePwPassword.value,
           name: inviteName.value,
         })
-    let authResult
     try {
-      authResult = await residentsApi.completeInviteWithPassword({
-        token: inviteToken.value,
-        email: account.email,
-        name: inviteName.value,
-        idToken: account.token,
-      })
+      await finishPasswordInvite(account)
     } catch (apiFailure) {
+      if (apiFailure?.code === 'INVITE_EMAIL_UNVERIFIED') {
+        // Right email, not verified yet: keep the account and wait for the verification link.
+        // A reused account may never have received it, so send it (again) now.
+        if (!account.created) await reloadVerifiedToken({ resend: true }).catch(() => {})
+        inviteVerifyEmail.value = account.email
+        return
+      }
       // API rejected it (e.g. INVITE_EMAIL_MISMATCH): undo the account we just created.
       // Not on network / 5xx errors: the server may have linked it before the failure.
       const indeterminate =
@@ -218,12 +271,9 @@ async function onResidentPasswordSignUp() {
         apiFailure?.code === 'TIMEOUT' ||
         Number(apiFailure?.status) >= 500
       if (account.created && !indeterminate) await deleteJustCreatedFirebaseUser(account.uid)
+      else if (!indeterminate) void signOutFirebase()
       throw apiFailure
     }
-    const sessionToken = OPEN_WIREFRAME_ACCESS
-      ? authResult.token
-      : await resolveResidentToken({ token: null })
-    await applyResidentSession(authResult.user, sessionToken)
   } catch (error) {
     residentError.value = googleAuthMessage(error)
   } finally {
@@ -243,13 +293,38 @@ watch(loginEmailError, (msg) => {
 }, { flush: 'sync' })
 
 /** "Session expired" is informational (blue notice); every other login message is an error. */
+const LOGIN_INFO_KEYS = ['auth.sessionExpired', 'auth.resetSent']
 const loginNoticeTone = computed(() =>
-  loginEmailError.value && loginEmailError.value === t('auth.sessionExpired') ? 'info' : 'error',
+  loginEmailError.value && LOGIN_INFO_KEYS.some((key) => loginEmailError.value === t(key))
+    ? 'info'
+    : 'error',
 )
 
 function setLoginError(message, field = null) {
   loginEmailError.value = message
   loginErrorField.value = field
+}
+
+async function onForgotPassword() {
+  if (loginLoading.value) return
+  const email = loginEmail.value.trim()
+  if (!EMAIL_PATTERN.test(email)) {
+    setLoginError(t('auth.resetNeedsEmail'), 'email')
+    return
+  }
+  loginLoading.value = true
+  loginEmailError.value = ''
+  try {
+    if (!OPEN_WIREFRAME_ACCESS) await sendPasswordReset(email)
+    loginEmailError.value = t('auth.resetSent')
+  } catch (error) {
+    if (error?.code === 'INVALID_EMAIL') setLoginError(t('auth.emailInvalid'), 'email')
+    else if (error?.code === 'TOO_MANY_REQUESTS') loginEmailError.value = t('auth.tooManyRequests')
+    else if (error?.code === 'NETWORK_ERROR') loginEmailError.value = t('auth.apiUnavailable')
+    else loginEmailError.value = t('auth.genericError')
+  } finally {
+    loginLoading.value = false
+  }
 }
 
 const regName = ref('')
@@ -410,12 +485,14 @@ async function onLoginWithGoogle() {
     })
     if (authResult.user.role !== 'resident') {
       loginEmailError.value = t('auth.residentGoogleAdminBlocked')
+      void signOutFirebase()
       return
     }
     const sessionToken = await resolveResidentToken(authResult)
     await applyResidentSession(authResult.user, sessionToken)
   } catch (error) {
     loginEmailError.value = googleAuthMessage(error)
+    void signOutFirebase()
   } finally {
     loginLoading.value = false
   }
@@ -453,6 +530,13 @@ async function onLoginSubmit() {
       return
     }
 
+    if (profileIncomplete && isResidentLogin.value) {
+      // Firebase account with no BuildingFex account: a resident joins only through an invite.
+      setLoginError(t('auth.residentAccountNotFound'), 'email')
+      void signOutFirebase()
+      return
+    }
+
     if (profileIncomplete) {
       enterCompleteProfile({
         token,
@@ -464,6 +548,8 @@ async function onLoginSubmit() {
 
     finishAdminSession(user, token)
   } catch (error) {
+    // Signed into Firebase but rejected by the API: do not leave that Firebase session behind.
+    void signOutFirebase()
     if (error?.code === 'NETWORK_ERROR' || error?.code === 'TIMEOUT') {
       loginEmailError.value = t('auth.apiUnavailable')
       return
@@ -521,7 +607,9 @@ async function onCompleteProfileSubmit() {
   completeProfileLoading.value = true
   completeProfileError.value = ''
   try {
-    const { user, token } = await authApi.completeProfile(pendingAuthToken.value, {
+    // The token saved when the form opened may be over an hour old: ask Firebase for a current one.
+    const authToken = await currentFirebaseIdToken(pendingAuthToken.value)
+    const { user, token } = await authApi.completeProfile(authToken, {
       name: regName.value,
       email: regEmail.value,
       dni: regDni.value,
@@ -531,8 +619,12 @@ async function onCompleteProfileSubmit() {
     })
     finishAdminSession(user, token, { onboarding: true })
   } catch (error) {
-    if (error?.code === 'ADMIN_BOOTSTRAP_CLOSED' || error?.status === 409 || error?.code === 'HTTP_409') {
+    if (error?.code === 'ADMIN_BOOTSTRAP_CLOSED') {
       completeProfileError.value = t('auth.adminBootstrapClosed')
+      return
+    }
+    if (error?.code === 'EMAIL_ALREADY_EXISTS' || error?.status === 409) {
+      completeProfileError.value = t('auth.emailAlreadyExists')
       return
     }
     if (error?.code === 'NETWORK_ERROR' || error?.code === 'TIMEOUT') {
@@ -582,6 +674,20 @@ async function onRegisterSubmit() {
       regErrors.value = { ...regErrors.value, email: 'auth.emailAlreadyExists' }
       return
     }
+    if (error?.code === 'PASSWORD_TOO_SHORT') {
+      registerError.value = t('auth.passwordTooShort')
+      regErrors.value = { ...regErrors.value, password: 'auth.passwordTooShort' }
+      return
+    }
+    if (error?.code === 'INVALID_EMAIL') {
+      registerError.value = t('auth.emailInvalid')
+      regErrors.value = { ...regErrors.value, email: 'auth.emailInvalid' }
+      return
+    }
+    if (error?.code === 'TOO_MANY_REQUESTS') {
+      registerError.value = t('auth.tooManyRequests')
+      return
+    }
     if (error?.code === 'NETWORK_ERROR' || error?.code === 'TIMEOUT') {
       registerError.value = t('auth.apiUnavailable')
       return
@@ -599,6 +705,8 @@ async function onRegisterSubmit() {
 watch(inviteToken, () => {
   inviteStep.value = 'welcome'
   residentError.value = ''
+  inviteVerifyEmail.value = ''
+  inviteVerifyNotice.value = ''
 })
 
 watch(
@@ -771,7 +879,32 @@ watch(loginEmail, () => {
 
                 <p class="auth-divider" role="separator">{{ t('auth.orPasswordDivider') }}</p>
 
+                <div v-if="inviteVerifyEmail" class="auth-form auth-verify">
+                  <p class="auth-notice auth-notice--info" role="status">
+                    <i class="pi pi-envelope auth-notice__icon" aria-hidden="true" />
+                    <span>{{ inviteVerifyNotice || t('auth.inviteVerifyEmail', { email: inviteVerifyEmail }) }}</span>
+                  </p>
+                  <Button
+                    type="button"
+                    class="auth-submit"
+                    rounded
+                    :label="t('auth.inviteVerifyDone')"
+                    :loading="residentLoading"
+                    :disabled="residentLoading"
+                    @click="onInviteVerifyRetry()"
+                  />
+                  <button
+                    type="button"
+                    class="auth-text-button"
+                    :disabled="residentLoading"
+                    @click="onInviteVerifyRetry({ resend: true })"
+                  >
+                    {{ t('auth.inviteVerifyResend') }}
+                  </button>
+                </div>
+
                 <form
+                  v-else
                   class="auth-form"
                   :aria-label="t('auth.invitePasswordAria')"
                   novalidate
@@ -1021,6 +1154,14 @@ watch(loginEmail, () => {
                   :aria-invalid="loginErrorField === 'password' ? 'true' : 'false'"
                   :aria-describedby="loginErrorField === 'password' ? 'login-error' : undefined"
                 />
+                <button
+                  type="button"
+                  class="auth-text-button auth-forgot"
+                  :disabled="loginLoading"
+                  @click="onForgotPassword"
+                >
+                  {{ t('auth.forgotPassword') }}
+                </button>
               </div>
               <p
                 v-if="loginEmailError"
@@ -1129,6 +1270,14 @@ watch(loginEmail, () => {
                     :aria-invalid="loginErrorField === 'password' ? 'true' : 'false'"
                     :aria-describedby="loginErrorField === 'password' ? 'login-error' : undefined"
                   />
+                  <button
+                    type="button"
+                    class="auth-text-button auth-forgot"
+                    :disabled="loginLoading"
+                    @click="onForgotPassword"
+                  >
+                    {{ t('auth.forgotPassword') }}
+                  </button>
                 </div>
                 <Button
                   type="submit"
@@ -1593,6 +1742,38 @@ watch(loginEmail, () => {
 }
 
 /* Inline notices (soft solid tints) */
+.auth-text-button {
+  align-self: center;
+  padding: 0.2rem 0.35rem;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--auth-navy);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-text-button:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.auth-text-button:focus-visible {
+  outline: 2px solid var(--auth-navy);
+  outline-offset: 2px;
+}
+
+.auth-text-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.auth-forgot {
+  align-self: flex-end;
+  margin-top: 0.15rem;
+}
+
 .auth-notice {
   display: flex;
   align-items: flex-start;

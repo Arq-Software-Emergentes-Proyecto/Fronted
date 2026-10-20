@@ -1104,7 +1104,19 @@
     "passwordEnter": "Enter your password",
     "optional": "optional",
     "inviteEyebrow": "Resident invitation",
-    "inviteDetailsAria": "Your invitation details"
+    "inviteDetailsAria": "Your invitation details",
+    "forgotPassword": "Forgot your password?",
+    "resetSent": "If the email is registered, we sent you a link to create a new password. Check your spam folder too.",
+    "resetNeedsEmail": "Enter your email so we can send you the link.",
+    "googlePopupBlocked": "Your browser blocked the Google window. Allow pop-ups for this site and try again.",
+    "googleBrowserUnsupported": "Google does not allow signing in from this browser. Open the link in Chrome or Safari.",
+    "googleTokenInvalid": "We could not verify your account. Please try again.",
+    "inviteVerifyEmail": "We sent a verification email to {email}. Open it, confirm your email and then press “I verified my email”.",
+    "inviteVerifyDone": "I verified my email",
+    "inviteVerifyResend": "Resend email",
+    "inviteVerifyResent": "We sent the verification email again.",
+    "inviteVerifyStill": "Your email is not verified yet. Open the link in the email we sent you and try again.",
+    "residentAccountNotFound": "We could not find a resident account with this email. Use the invitation link your administrator sent you."
   },
   "financeAdmin": {
     "title": "Resident billing",

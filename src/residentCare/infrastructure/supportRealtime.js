@@ -10,6 +10,7 @@ import {
   isPreviewAccessToken,
   OPEN_WIREFRAME_ACCESS,
 } from '@/iam/application/localPreviewAuth.js'
+import { freshSessionToken } from '@/iam/infrastructure/firebaseSession.js'
 
 function hubUrl() {
   const base = String(API_BASE_URL || '').replace(/\/$/, '')
@@ -168,7 +169,7 @@ export async function ensureSupportHub() {
   const gen = generation
   const conn = new signalR.HubConnectionBuilder()
     .withUrl(hubUrl(), {
-      accessTokenFactory: () => getAccessToken() || '',
+      accessTokenFactory: async () => (await freshSessionToken()) || '',
       // Token travels via accessTokenFactory; the API's CORS policy has no AllowCredentials.
       withCredentials: false,
     })
@@ -229,9 +230,12 @@ export async function ensureSupportHub() {
   return startPromise
 }
 
+/** VITE_REALTIME=false: the API has no SignalR hub (AWS Lambda); views keep polling. */
+const REALTIME_CONFIGURED = String(import.meta.env.VITE_REALTIME ?? 'true') !== 'false'
+
 function realtimeEnabled() {
   const token = getAccessToken()
-  return !!token && !OPEN_WIREFRAME_ACCESS && !isPreviewAccessToken(token)
+  return REALTIME_CONFIGURED && !!token && !OPEN_WIREFRAME_ACCESS && !isPreviewAccessToken(token)
 }
 
 async function joinGroup(method, set, id) {
