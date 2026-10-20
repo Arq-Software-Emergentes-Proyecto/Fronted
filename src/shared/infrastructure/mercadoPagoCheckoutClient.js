@@ -56,13 +56,6 @@ export async function startMercadoPagoCheckout(payload) {
   return parseResponse(response)
 }
 
-export async function readMercadoPagoPayment(paymentId) {
-  const response = await fetch(`/mp/payment?id=${encodeURIComponent(String(paymentId ?? ''))}`, {
-    headers: { Accept: 'application/json' },
-  })
-  return parseResponse(response)
-}
-
 export function checkoutReturnUrl(path, params) {
   const url = new URL(path, window.location.origin)
   Object.entries(params || {}).forEach(([key, value]) => {

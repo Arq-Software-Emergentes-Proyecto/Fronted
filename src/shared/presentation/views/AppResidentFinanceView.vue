@@ -114,6 +114,89 @@ async function downloadReceipt(pay) {
   }
 }
 
+/**
+ * Pago aprobado en Mercado Pago que el servidor aún no registró. Se muestra en la tarjeta
+ * "Por pagar" (no solo un aviso pasajero) y se reintenta: la confirmación o el webhook pueden
+ * tardar unos segundos. El id queda en la sesión para volver a comprobar si recarga la página.
+ * state: 'verifying' | 'delayed' | 'in_process' | 'failed'
+ */
+const paymentCheck = ref(null)
+const VERIFY_KEY = 'bf.mp.maintenance.verify'
+const VERIFY_DELAYS_MS = [0, 3000, 6000, 10000, 15000]
+
+function rememberVerify(paymentId) {
+  try {
+    sessionStorage.setItem(VERIFY_KEY, String(paymentId))
+  } catch {
+    /* ignore */
+  }
+}
+
+function forgetVerify() {
+  try {
+    sessionStorage.removeItem(VERIFY_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
+function storedVerifyPaymentId() {
+  try {
+    const id = Number(sessionStorage.getItem(VERIFY_KEY))
+    return Number.isFinite(id) && id > 0 ? id : null
+  } catch {
+    return null
+  }
+}
+
+/** Errores que no se arreglan reintentando: el pago no coincide con la deuda o ya se cobró. */
+function isFinalConfirmError(err) {
+  if (err?.status === 403) return true
+  const message = String(err?.payload?.message ?? '')
+  return /no coincide|ya fue pagado|does not match|not found|no encontrado/i.test(message)
+}
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+async function verifyPayment(paymentId) {
+  if (!profile.value.id || paymentCheck.value?.state === 'verifying') return
+  paymentCheck.value = { state: 'verifying', paymentId }
+  rememberVerify(paymentId)
+
+  let lastError = null
+  for (const delay of VERIFY_DELAYS_MS) {
+    if (delay) await wait(delay)
+    try {
+      await confirmMaintenancePayment({ residentId: profile.value.id, paymentId })
+      forgetVerify()
+      paymentCheck.value = null
+      await Promise.all([loadData(profile.value.id), loadMyCalendar()])
+      toast.add({
+        severity: 'success',
+        summary: t('residentFinance.paymentSuccessTitle'),
+        detail: `${t('residentFinance.paymentSuccessDetail')} ${t('financeOps.paymentReceiptReady')}`,
+        life: 6000,
+      })
+      return
+    } catch (err) {
+      lastError = err
+      if (isFinalConfirmError(err)) break
+    }
+  }
+
+  await loadData(profile.value.id)
+  // El webhook pudo registrarlo mientras tanto: si ya no hay deuda, está listo.
+  if (!pendingFees.value.length) {
+    forgetVerify()
+    paymentCheck.value = null
+    return
+  }
+  paymentCheck.value = {
+    state: isFinalConfirmError(lastError) ? 'failed' : 'delayed',
+    paymentId,
+  }
+}
+
 async function handlePaymentReturnFromRoute() {
   if (!profile.value.id) return
 
@@ -122,12 +205,15 @@ async function handlePaymentReturnFromRoute() {
   ).toLowerCase()
   const paymentRaw = route.query.payment_id ?? route.query.collection_id
   const hasReturn = Boolean(status || paymentRaw)
-  if (!hasReturn) return
-
-  const clearReturn = () => {
-    clearPendingCheckout(MpPendingKeys.maintenance)
-    router.replace({ path: route.path })
+  if (!hasReturn) {
+    // Volvió a la página con un pago que aún no se había registrado.
+    const stored = storedVerifyPaymentId()
+    if (stored) await verifyPayment(stored)
+    return
   }
+
+  clearPendingCheckout(MpPendingKeys.maintenance)
+  router.replace({ path: route.path })
 
   if (status === 'failure' || status === 'rejected' || status === 'cancelled' || status === 'null') {
     toast.add({
@@ -136,60 +222,25 @@ async function handlePaymentReturnFromRoute() {
       detail: t('residentFinance.paymentErrorDetail'),
       life: 5000,
     })
-    clearReturn()
     return
   }
 
+  const paymentId = paymentRaw != null && String(paymentRaw).length ? Number(paymentRaw) : null
+
   if (status === 'pending' || status === 'in_process' || status === 'in_mediation') {
-    toast.add({
-      severity: 'warn',
-      summary: t('residentFinance.paymentPendingTitle'),
-      detail: t('residentFinance.paymentPendingDetail'),
-      life: 5000,
-    })
-    clearReturn()
+    // Efectivo / transferencia: Mercado Pago avisa al servidor (webhook) cuando se apruebe.
+    paymentCheck.value = { state: 'in_process', paymentId }
     return
   }
 
   if (status && status !== 'success' && status !== 'approved') return
 
-  try {
-    const paymentId = paymentRaw != null && String(paymentRaw).length ? Number(paymentRaw) : null
-
-    if (!Number.isFinite(paymentId)) {
-      toast.add({
-        severity: 'warn',
-        summary: t('residentFinance.paymentPendingTitle'),
-        detail: t('residentFinance.paymentPendingDetail'),
-        life: 5000,
-      })
-      clearReturn()
-      return
-    }
-
-    await confirmMaintenancePayment({
-      residentId: profile.value.id,
-      paymentId,
-    })
-
-    await Promise.all([loadData(profile.value.id), loadMyCalendar()])
-    toast.add({
-      severity: 'success',
-      summary: t('residentFinance.paymentSuccessTitle'),
-      detail: `${t('residentFinance.paymentSuccessDetail')} ${t('financeOps.paymentReceiptReady')}`,
-      life: 6000,
-    })
-  } catch {
-    await loadData(profile.value.id)
-    toast.add({
-      severity: 'warn',
-      summary: t('residentFinance.paymentPendingTitle'),
-      detail: t('residentFinance.paymentPendingDetail'),
-      life: 5000,
-    })
-  } finally {
-    clearReturn()
+  if (!Number.isFinite(paymentId) || paymentId <= 0) {
+    paymentCheck.value = { state: 'delayed', paymentId: null }
+    return
   }
+
+  await verifyPayment(paymentId)
 }
 
 async function startMaintenanceCheckout() {
@@ -548,6 +599,35 @@ const detailTitle = computed(() => {
           </template>
           <template v-else-if="pendingFees.length">
             <p class="rf-hero__amount">{{ formatMoney(pendingTotal) }}</p>
+            <div
+              v-if="paymentCheck"
+              class="rf-verify"
+              :class="`rf-verify--${paymentCheck.state}`"
+              role="status"
+              aria-live="polite"
+            >
+              <i
+                class="pi rf-verify__icon"
+                :class="{
+                  'pi-spin pi-spinner': paymentCheck.state === 'verifying',
+                  'pi-clock': paymentCheck.state === 'delayed' || paymentCheck.state === 'in_process',
+                  'pi-exclamation-circle': paymentCheck.state === 'failed',
+                }"
+                aria-hidden="true"
+              />
+              <div class="rf-verify__text">
+                <strong>{{ t(`residentFinance.verify.${paymentCheck.state}Title`) }}</strong>
+                <span>{{ t(`residentFinance.verify.${paymentCheck.state}Detail`) }}</span>
+                <button
+                  v-if="paymentCheck.state === 'delayed' && paymentCheck.paymentId"
+                  type="button"
+                  class="rf-verify__retry"
+                  @click="verifyPayment(paymentCheck.paymentId)"
+                >
+                  {{ t('residentFinance.verify.retry') }}
+                </button>
+              </div>
+            </div>
             <p class="rf-hero__due" :class="{ 'is-late': hasOverdue }">
               <i class="pi pi-calendar" aria-hidden="true" />
               <span>{{ dueText(nextDueFee) }}</span>
@@ -560,7 +640,7 @@ const detailTitle = computed(() => {
                 type="button"
                 class="rf-btn rf-btn--primary rf-btn--lg"
                 :class="{ 'rf-btn--danger': hasOverdue }"
-                :disabled="isProcessing || paymentState.isLoading"
+                :disabled="isProcessing || paymentState.isLoading || Boolean(paymentCheck)"
                 :aria-label="t('residentFinance.payAmount', { amount: formatMoney(pendingTotal) })"
                 @click="startMaintenanceCheckout"
               >
@@ -1166,6 +1246,60 @@ const detailTitle = computed(() => {
   align-items: center;
   gap: 0.6rem 1rem;
   flex-wrap: wrap;
+}
+
+.rf-verify {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 14px;
+  background: #eef4ff;
+  color: #1e3a8a;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.rf-verify--delayed,
+.rf-verify--in_process {
+  background: #fdf6e3;
+  color: #8a5a00;
+}
+
+.rf-verify--failed {
+  background: #fdecec;
+  color: #a1251b;
+}
+
+.rf-verify__icon {
+  margin-top: 0.15rem;
+  font-size: 0.95rem;
+}
+
+.rf-verify__text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+}
+
+.rf-verify__retry {
+  margin-top: 0.3rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.rf-verify__retry:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .rf-hero__secure {

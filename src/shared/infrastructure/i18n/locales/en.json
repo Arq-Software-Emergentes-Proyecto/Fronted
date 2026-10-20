@@ -1852,7 +1852,18 @@
     "detailStatus": "Status",
     "detailClose": "Close",
     "paidOn": "Paid on {date}",
-    "methodUnknown": "Method not specified"
+    "methodUnknown": "Method not specified",
+    "verify": {
+      "verifyingTitle": "Confirming your payment…",
+      "verifyingDetail": "Mercado Pago approved your payment and we are recording it. It takes a few seconds.",
+      "delayedTitle": "Your payment is being verified",
+      "delayedDetail": "It will show up in a few minutes. Do not pay again; if the balance is still there tomorrow, tell your administrator.",
+      "in_processTitle": "Payment in process",
+      "in_processDetail": "Mercado Pago is still processing your payment. We will record it as soon as it is approved; do not pay again.",
+      "failedTitle": "We could not record your payment",
+      "failedDetail": "Mercado Pago approved it, but it does not match your current balance. Your administrator will review it; do not pay again.",
+      "retry": "Check again"
+    }
   },
   "information": {
     "pageTitle": "Announcements",

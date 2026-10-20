@@ -1852,7 +1852,18 @@
     "detailStatus": "Estado",
     "detailClose": "Cerrar",
     "paidOn": "Pagado el {date}",
-    "methodUnknown": "Método no indicado"
+    "methodUnknown": "Método no indicado",
+    "verify": {
+      "verifyingTitle": "Confirmando tu pago…",
+      "verifyingDetail": "Mercado Pago aprobó tu pago y lo estamos registrando. Toma unos segundos.",
+      "delayedTitle": "Tu pago está en verificación",
+      "delayedDetail": "Se reflejará en unos minutos. No vuelvas a pagar; si mañana sigue apareciendo la deuda, avisa a tu administrador.",
+      "in_processTitle": "Pago en proceso",
+      "in_processDetail": "Mercado Pago aún está procesando tu pago. Lo registraremos apenas se apruebe; no vuelvas a pagar.",
+      "failedTitle": "No pudimos registrar tu pago",
+      "failedDetail": "Mercado Pago lo aprobó, pero no coincide con tu deuda actual. Tu administrador lo revisará; no vuelvas a pagar.",
+      "retry": "Volver a comprobar"
+    }
   },
   "information": {
     "pageTitle": "Comunicados",

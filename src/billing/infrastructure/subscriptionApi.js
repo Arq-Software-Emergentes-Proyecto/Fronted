@@ -2,7 +2,6 @@ import { apiClient } from '@/shared/infrastructure/api/apiClient.js'
 import { apiError } from '@/shared/infrastructure/api/utils.js'
 import {
   checkoutReturnUrl,
-  readMercadoPagoPayment,
   startMercadoPagoCheckout,
 } from '@/shared/infrastructure/mercadoPagoCheckoutClient.js'
 import { AppPaths } from '@/shared/domain/appRoutes.js'
@@ -120,13 +119,7 @@ export const subscriptionApi = {
       error.code = 'PAYMENT_REQUIRED'
       throw error
     }
-    const payment = await readMercadoPagoPayment(paymentId)
-    if (!payment.approved) {
-      const error = new Error('PAYMENT_NOT_APPROVED')
-      error.code = 'PAYMENT_NOT_APPROVED'
-      throw error
-    }
-
+    // The API verifies the payment with Mercado Pago (status, amount, plan): no browser pre-check.
     const { data } = await apiClient.post('/api/v1/subscription/confirm', {
       planId,
       paymentId,
