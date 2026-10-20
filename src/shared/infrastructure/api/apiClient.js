@@ -14,7 +14,7 @@ import { freshSessionToken, signOutFirebase } from '@/iam/infrastructure/firebas
  * (e.g. 'NETWORK_ERROR', 'TIMEOUT', 'EMAIL_NOT_FOUND', or 'HTTP_404').
  *
  * Open-wireframe builds use the in-browser mock (local + Vercel).
- * Otherwise production hits the real backend (Vercel rewrites → Railway).
+ * Otherwise production hits the real backend (Vercel rewrites → AWS API Gateway).
  */
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,

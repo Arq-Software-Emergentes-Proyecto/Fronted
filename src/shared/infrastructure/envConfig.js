@@ -1,6 +1,6 @@
 /** Default deployed API (use in VITE_API_BASE_URL on hosts without API rewrites). */
 export const DEFAULT_PRODUCTION_API_URL =
-  'https://backend-production-5e544.up.railway.app'
+  'https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com'
 
 /**
  * Ensures the API base URL is absolute. Hostnames without a scheme (common in
@@ -30,7 +30,7 @@ function normalizeApiBaseUrl(raw) {
  * Base URL of the BuildingFex API (no trailing slash).
  *
  * Development: empty → Vite proxy (see VITE_API_PROXY_TARGET).
- * Production: empty → same-origin; Vercel rewrites in vercel.json proxy to Railway.
+ * Production: empty → same-origin; Vercel rewrites in vercel.json proxy to the API on AWS.
  * Production: set VITE_API_BASE_URL=https://... when the host has no API rewrites.
  */
 function resolveApiBaseUrl() {

@@ -13,155 +13,151 @@
     },
     {
       "source": "/api/v1/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/api/v1/:path*"
-    },
-    {
-      "source": "/hubs/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/hubs/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/api/v1/:path*"
     },
     {
       "source": "/users/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/users/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/users/:path*"
     },
     {
       "source": "/users",
-      "destination": "https://backend-production-5e544.up.railway.app/users"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/users"
     },
     {
       "source": "/incidents/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/incidents/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/incidents/:path*"
     },
     {
       "source": "/incidents",
-      "destination": "https://backend-production-5e544.up.railway.app/incidents"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/incidents"
     },
     {
       "source": "/announcements/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/announcements/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/announcements/:path*"
     },
     {
       "source": "/announcements",
-      "destination": "https://backend-production-5e544.up.railway.app/announcements"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/announcements"
     },
     {
       "source": "/socialSpaces/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/socialSpaces/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/socialSpaces/:path*"
     },
     {
       "source": "/socialSpaces",
-      "destination": "https://backend-production-5e544.up.railway.app/socialSpaces"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/socialSpaces"
     },
     {
       "source": "/reservations/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/reservations/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/reservations/:path*"
     },
     {
       "source": "/reservations",
-      "destination": "https://backend-production-5e544.up.railway.app/reservations"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/reservations"
     },
     {
       "source": "/receipts/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/receipts/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/receipts/:path*"
     },
     {
       "source": "/receipts",
-      "destination": "https://backend-production-5e544.up.railway.app/receipts"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/receipts"
     },
     {
       "source": "/payments/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/payments/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/payments/:path*"
     },
     {
       "source": "/payments",
-      "destination": "https://backend-production-5e544.up.railway.app/payments"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/payments"
     },
     {
       "source": "/fees/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/fees/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/fees/:path*"
     },
     {
       "source": "/fees",
-      "destination": "https://backend-production-5e544.up.railway.app/fees"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/fees"
     },
     {
       "source": "/financeSettings/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/financeSettings/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/financeSettings/:path*"
     },
     {
       "source": "/financeSettings",
-      "destination": "https://backend-production-5e544.up.railway.app/financeSettings"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/financeSettings"
     },
     {
       "source": "/kpi/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/kpi/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/kpi/:path*"
     },
     {
       "source": "/kpi",
-      "destination": "https://backend-production-5e544.up.railway.app/kpi"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/kpi"
     },
     {
       "source": "/adminManagementExpenses/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/adminManagementExpenses/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/adminManagementExpenses/:path*"
     },
     {
       "source": "/adminManagementExpenses",
-      "destination": "https://backend-production-5e544.up.railway.app/adminManagementExpenses"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/adminManagementExpenses"
     },
     {
       "source": "/sharedUtilityServices/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/sharedUtilityServices/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/sharedUtilityServices/:path*"
     },
     {
       "source": "/sharedUtilityServices",
-      "destination": "https://backend-production-5e544.up.railway.app/sharedUtilityServices"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/sharedUtilityServices"
     },
     {
       "source": "/fixedPayoutRecipients/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/fixedPayoutRecipients/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/fixedPayoutRecipients/:path*"
     },
     {
       "source": "/fixedPayoutRecipients",
-      "destination": "https://backend-production-5e544.up.railway.app/fixedPayoutRecipients"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/fixedPayoutRecipients"
     },
     {
       "source": "/teamWorkers/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/teamWorkers/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/teamWorkers/:path*"
     },
     {
       "source": "/teamWorkers",
-      "destination": "https://backend-production-5e544.up.railway.app/teamWorkers"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/teamWorkers"
     },
     {
       "source": "/serviceProviders/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/serviceProviders/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/serviceProviders/:path*"
     },
     {
       "source": "/serviceProviders",
-      "destination": "https://backend-production-5e544.up.railway.app/serviceProviders"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/serviceProviders"
     },
     {
       "source": "/importUploads/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/importUploads/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/importUploads/:path*"
     },
     {
       "source": "/importUploads",
-      "destination": "https://backend-production-5e544.up.railway.app/importUploads"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/importUploads"
     },
     {
       "source": "/importFolders/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/importFolders/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/importFolders/:path*"
     },
     {
       "source": "/importFolders",
-      "destination": "https://backend-production-5e544.up.railway.app/importFolders"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/importFolders"
     },
     {
       "source": "/residentExtraCharges/:path*",
-      "destination": "https://backend-production-5e544.up.railway.app/residentExtraCharges/:path*"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/residentExtraCharges/:path*"
     },
     {
       "source": "/residentExtraCharges",
-      "destination": "https://backend-production-5e544.up.railway.app/residentExtraCharges"
+      "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/residentExtraCharges"
     },
     {
       "source": "/((?!api/).*)",
