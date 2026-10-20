@@ -1104,7 +1104,19 @@
     "passwordEnter": "Ingresa tu contraseña",
     "optional": "opcional",
     "inviteEyebrow": "Invitación de residente",
-    "inviteDetailsAria": "Datos de tu invitación"
+    "inviteDetailsAria": "Datos de tu invitación",
+    "forgotPassword": "¿Olvidaste tu contraseña?",
+    "resetSent": "Si el correo está registrado, te enviamos un enlace para crear una nueva contraseña. Revisa también la carpeta de spam.",
+    "resetNeedsEmail": "Escribe tu correo para enviarte el enlace.",
+    "googlePopupBlocked": "Tu navegador bloqueó la ventana de Google. Permite las ventanas emergentes para este sitio y vuelve a intentarlo.",
+    "googleBrowserUnsupported": "Google no permite iniciar sesión desde este navegador. Abre el enlace en Chrome o Safari.",
+    "googleTokenInvalid": "No pudimos verificar tu cuenta. Vuelve a intentarlo.",
+    "inviteVerifyEmail": "Te enviamos un correo de verificación a {email}. Ábrelo, confirma tu correo y luego pulsa «Ya verifiqué mi correo».",
+    "inviteVerifyDone": "Ya verifiqué mi correo",
+    "inviteVerifyResend": "Reenviar correo",
+    "inviteVerifyResent": "Te reenviamos el correo de verificación.",
+    "inviteVerifyStill": "Tu correo aún no está verificado. Abre el enlace del correo que te enviamos e inténtalo de nuevo.",
+    "residentAccountNotFound": "No encontramos una cuenta de residente con este correo. Usa el enlace de invitación que te envió tu administrador."
   },
   "financeAdmin": {
     "title": "Cobros a residentes",

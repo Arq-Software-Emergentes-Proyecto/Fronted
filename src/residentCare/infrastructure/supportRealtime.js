@@ -10,6 +10,7 @@ import {
   isPreviewAccessToken,
   OPEN_WIREFRAME_ACCESS,
 } from '@/iam/application/localPreviewAuth.js'
+import { freshSessionToken } from '@/iam/infrastructure/firebaseSession.js'
 
 function hubUrl() {
   const base = String(API_BASE_URL || '').replace(/\/$/, '')
@@ -168,7 +169,7 @@ export async function ensureSupportHub() {
   const gen = generation
   const conn = new signalR.HubConnectionBuilder()
     .withUrl(hubUrl(), {
-      accessTokenFactory: () => getAccessToken() || '',
+      accessTokenFactory: async () => (await freshSessionToken()) || '',
       // Token travels via accessTokenFactory; the API's CORS policy has no AllowCredentials.
       withCredentials: false,
     })

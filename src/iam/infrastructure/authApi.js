@@ -12,6 +12,7 @@ import {
   resolvePreviewRole,
 } from '@/iam/application/localPreviewAuth.js'
 import {
+  deleteJustCreatedFirebaseUser,
   isFirebaseEmailRegistered,
   registerAdminWithFirebase,
   signInWithPasswordFirebase,
@@ -308,19 +309,7 @@ export const authApi = {
       await seedAdminDefaults(profile.id, token)
       return { user: profile, token, profileIncomplete: false }
     } catch (error) {
-      // 409: ya hay admin — no es recuperable con completar-perfil
-      if (
-        error?.code === 'ADMIN_BOOTSTRAP_CLOSED' ||
-        error?.status === 409 ||
-        error?.code === 'HTTP_409'
-      ) {
-        throw apiError(
-          'ADMIN_BOOTSTRAP_CLOSED',
-          error?.payload?.message
-            || 'Ya existe un administrador. El auto-registro está cerrado.',
-        )
-      }
-      // Cuenta Firebase ya existe: el usuario puede login y completar perfil
+      // Sin respuesta clara del servidor: la cuenta de Firebase queda y se completa el perfil.
       if (
         error?.code === 'PROFILE_SAVE_FAILED' ||
         error?.code === 'NETWORK_ERROR' ||
@@ -336,6 +325,15 @@ export const authApi = {
         incomplete.identity = identity
         incomplete.profileDraft = profileDraft
         throw incomplete
+      }
+      // El servidor rechazó el alta (correo ya usado por otra cuenta, datos inválidos): se borra la
+      // cuenta de Firebase recién creada para que el reintento no choque con "correo ya registrado".
+      await deleteJustCreatedFirebaseUser(identity.id)
+      if (error?.code === 'ADMIN_BOOTSTRAP_CLOSED') {
+        throw apiError('ADMIN_BOOTSTRAP_CLOSED', error?.payload?.message)
+      }
+      if (error?.code === 'EMAIL_ALREADY_EXISTS' || error?.status === 409) {
+        throw apiError('EMAIL_ALREADY_EXISTS', error?.payload?.message)
       }
       throw error
     }

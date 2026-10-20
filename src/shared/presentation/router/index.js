@@ -10,6 +10,7 @@ import {
   ensureOpenAccessSession,
   OPEN_WIREFRAME_ACCESS,
 } from '@/iam/application/localPreviewAuth.js'
+import { freshSessionToken } from '@/iam/infrastructure/firebaseSession.js'
 import { AppPaths, AppRouteNames } from '@/shared/domain/appRoutes.js'
 import AuthView from '@/iam/presentation/views/AuthView.vue'
 import AppShellView from '@/shared/presentation/views/AppShellView.vue'
@@ -153,7 +154,7 @@ function wantsResidentSurface(to) {
   return to.matched.some((record) => record.meta?.surface === RESIDENT_SURFACE)
 }
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   // Wireframe mode: keep login/register visible for screenshots; any submit still lets you in.
   // Only auto-provision a demo session when entering /app.
   if (OPEN_WIREFRAME_ACCESS && requiresAuth(to)) {
@@ -188,6 +189,11 @@ router.beforeEach((to) => {
   }
 
   const role = getSessionRole()
+  // An expired Firebase token is renewed while Firebase still holds the session (it lasts
+  // until sign-out); only when that fails does the user go back to the login.
+  if (role && getAccessToken() && !isAccessTokenValid()) {
+    await freshSessionToken({ force: true })
+  }
   const token = getAccessToken()
   if (!role || !token || !isAccessTokenValid()) {
     if (token && !isAccessTokenValid()) {
