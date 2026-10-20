@@ -2648,8 +2648,8 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
 .adv-action--amber:hover:not(:disabled) { background: #fdf3dc; }
 .adv-action--green { color: #15803d; }
 .adv-action--green:hover:not(:disabled) { background: #e3f4e8; }
-.adv-action--danger { color: #b42318; }
-.adv-action--danger:hover:not(:disabled) { background: #fde4e4; }
+.adv-action--danger { background: #dc2626; color: #fff; }
+.adv-action--danger:hover:not(:disabled) { background: #b91c1c; color: #fff; }
 
 .adv-action[data-tip]::after {
   content: attr(data-tip);

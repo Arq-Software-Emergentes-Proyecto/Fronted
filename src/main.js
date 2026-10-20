@@ -1,6 +1,7 @@
 import { createApp, watch } from 'vue'
 import PrimeVue from 'primevue/config'
 import Aura from '@primevue/themes/aura'
+import { definePreset } from '@primevue/themes'
 import ToastService from 'primevue/toastservice'
 import ConfirmationService from 'primevue/confirmationservice'
 import App from '@/shared/presentation/App.vue'
@@ -17,13 +18,33 @@ import { storeLocale } from '@/shared/infrastructure/i18n/localePreference.js'
 import { startFirebaseAnalytics } from '@/iam/infrastructure/firebaseApp.js'
 import { hydratePreviewMockFromBrowser } from '@/shared/infrastructure/mock/hydratePreviewMock.js'
 
+// Aura trae esmeralda como color principal (bordes de foco verdes en inputs, selects y fechas de los
+// modales). Se reemplaza por el azul marino de la marca (#1e3a8a).
+const BuildingFexPreset = definePreset(Aura, {
+  semantic: {
+    primary: {
+      50: '#eef2fb',
+      100: '#dbe4f7',
+      200: '#b8c8ee',
+      300: '#8ea6e0',
+      400: '#5b7bc9',
+      500: '#1e3a8a',
+      600: '#1b347c',
+      700: '#172554',
+      800: '#142049',
+      900: '#101a3b',
+      950: '#0b122a',
+    },
+  },
+})
+
 const app = createApp(App)
 
 app.use(i18n)
 app.use(router)
 app.use(PrimeVue, {
   theme: {
-    preset: Aura,
+    preset: BuildingFexPreset,
   },
   // Toasts must never steal focus from what the user is doing (PrimeVue autofocuses the close button).
   pt: {

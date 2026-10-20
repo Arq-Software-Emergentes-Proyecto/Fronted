@@ -1326,12 +1326,15 @@ onMounted(loadWorkers)
   font-size: 0.85rem;
 }
 
+/* Eliminar: rojo sólido (sin contorno ni brillo) en toda la app. */
 .tm .tm-icon-btn--danger {
-  color: #b42318;
+  background: #dc2626;
+  color: #fff;
 }
 
 .tm .tm-icon-btn--danger:hover:not(:disabled) {
-  background: #fde4e4;
+  background: #b91c1c;
+  color: #fff;
 }
 
 .tm .tm-icon-btn:disabled {

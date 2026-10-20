@@ -378,11 +378,13 @@ function bodyId(ann) {
 }
 
 .annl-action--danger {
-  color: #b42318;
+  background: #dc2626;
+  color: #fff;
 }
 
 .annl-action--danger:hover {
-  background: #fde4e4;
+  background: #b91c1c;
+  color: #fff;
 }
 
 .annl-action[data-tip]::after {

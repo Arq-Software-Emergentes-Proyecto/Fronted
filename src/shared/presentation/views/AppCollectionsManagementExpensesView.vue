@@ -2276,11 +2276,13 @@ onMounted(async () => {
 }
 
 .cme-action--danger {
-  color: #b42318;
+  background: #dc2626;
+  color: #fff;
 }
 
 .cme-action--danger:hover {
-  background: #fde4e4;
+  background: #b91c1c;
+  color: #fff;
 }
 
 .cme-action[data-tip]::after {
