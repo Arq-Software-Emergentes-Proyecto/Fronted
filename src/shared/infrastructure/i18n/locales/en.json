@@ -860,7 +860,9 @@
     "settingsClearSearch": "Clear search",
     "generationPassClosedHint": "Check-in is no longer allowed with this invitation.",
     "openMenu": "Open menu",
-    "closeMenu": "Close menu"
+    "closeMenu": "Close menu",
+    "demoMode": "Demo mode",
+    "demoModeHint": "Test account: the data are samples that live only in this browser."
   },
   "incidentStatusOpen": "Open",
   "incidentStatusInProgress": "In Progress",

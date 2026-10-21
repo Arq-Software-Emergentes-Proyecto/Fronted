@@ -22,6 +22,27 @@ export const OPEN_WIREFRAME_ACCESS =
 /** Preview auth + mock API (same flag as open wireframes). */
 export const LOCAL_PREVIEW_ENABLED = OPEN_WIREFRAME_ACCESS
 
+/**
+ * Cuenta demo pública: usuario "test" + contraseña "123456" abre la app con los datos de ejemplo del
+ * navegador (mock), también en producción. Nunca toca la API real, Firebase ni Mercado Pago, así que
+ * quien la use no puede ver ni cambiar datos de un condominio real.
+ */
+export const DEMO_USERNAME = 'test'
+export const DEMO_PASSWORD = '123456'
+
+export function isDemoUsername(value) {
+  return String(value ?? '').trim().toLowerCase() === DEMO_USERNAME
+}
+
+export function isDemoCredentials(username, password) {
+  return isDemoUsername(username) && String(password ?? '') === DEMO_PASSWORD
+}
+
+/** Datos de ejemplo activos: build de wireframes o una sesión demo (token de preview). */
+export function isDemoSession() {
+  return OPEN_WIREFRAME_ACCESS || isPreviewAccessToken(getAccessToken())
+}
+
 function encodeJwtSegment(value) {
   const json = JSON.stringify(value)
   const base64 = btoa(json)

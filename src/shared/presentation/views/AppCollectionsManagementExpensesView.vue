@@ -16,7 +16,7 @@ import { adminManagementExpensesApi } from '@/finances/infrastructure/adminManag
 import { sharedUtilityServicesApi } from '@/finances/infrastructure/sharedUtilityServicesApi.js'
 import { useFinancesStore } from '@/finances/application/financesStore.js'
 import { financesApi } from '@/finances/infrastructure/financesApi.js'
-import { OPEN_WIREFRAME_ACCESS } from '@/iam/application/localPreviewAuth.js'
+import { isDemoSession } from '@/iam/application/localPreviewAuth.js'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
@@ -119,7 +119,7 @@ async function loadMonthBalance() {
     monthBalance.value = result
   } catch {
     if (seq !== balanceSeq) return
-    if (OPEN_WIREFRAME_ACCESS) {
+    if (isDemoSession()) {
       // Demo without backend: same criterion as the Income vs Expenses chart.
       monthBalance.value = localMonthBalance(month)
     } else {

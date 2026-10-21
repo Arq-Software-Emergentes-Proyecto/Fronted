@@ -11,6 +11,7 @@ import {
   startMercadoPagoCheckout,
 } from '@/shared/infrastructure/mercadoPagoCheckoutClient.js'
 import { AppPaths } from '@/shared/domain/appRoutes.js'
+import { isDemoSession } from '@/iam/application/localPreviewAuth.js'
 
 /**
  * Start Checkout Pro for pending maintenance fees (resident).
@@ -22,6 +23,18 @@ export async function checkoutMaintenanceFees({
   amount,
   title,
 } = {}) {
+  // Demo account: no real Mercado Pago. Comes back as an approved payment and the mock confirms it.
+  if (isDemoSession()) {
+    return {
+      preferenceId: 'DEMO',
+      initPoint: checkoutReturnUrl(AppPaths.APP_RESIDENT_FINANCE, {
+        status: 'approved',
+        payment_id: String(Date.now()),
+      }),
+      demo: true,
+    }
+  }
+
   const ownerId = getActiveDataOwnerId()
   const frontendBaseUrl = typeof window !== 'undefined' ? window.location.origin : undefined
 

@@ -1,7 +1,7 @@
 import { apiClient } from '@/shared/infrastructure/api/apiClient.js'
 import { withOwnerParams } from '@/shared/infrastructure/api/ownerQuery.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
-import { OPEN_WIREFRAME_ACCESS } from '@/iam/application/localPreviewAuth.js'
+import { isDemoSession } from '@/iam/application/localPreviewAuth.js'
 import { Receipt } from '../domain/receipt.js'
 import { normalizeSettings, settingsToPayload } from '../domain/billingCycle.js'
 
@@ -124,7 +124,7 @@ export const financesApi = {
 
     // 5. Wireframe/mock mode only: placeholder row so screenshots are not empty.
     // With the real API an empty list means "no debt" — never invent a pending fee.
-    if (combined.length === 0 && OPEN_WIREFRAME_ACCESS) {
+    if (combined.length === 0 && isDemoSession()) {
       return [
         {
           id: `mock-1-${residentId}`,

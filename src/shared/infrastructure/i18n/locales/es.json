@@ -860,7 +860,9 @@
     "settingsClearSearch": "Limpiar búsqueda",
     "generationPassClosedHint": "Ya no se puede registrar el ingreso con esta invitación.",
     "openMenu": "Abrir menú",
-    "closeMenu": "Cerrar menú"
+    "closeMenu": "Cerrar menú",
+    "demoMode": "Modo demo",
+    "demoModeHint": "Cuenta de prueba: los datos son de ejemplo y solo viven en este navegador."
   },
   "incidentStatusOpen": "Abierta",
   "incidentStatusInProgress": "En progreso",

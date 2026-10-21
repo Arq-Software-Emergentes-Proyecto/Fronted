@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useSession } from '@/iam/application/sessionStore.js'
 import { authApi } from '@/iam/infrastructure/authApi.js'
 import { setPasswordForCurrentUser } from '@/iam/infrastructure/firebaseAuth.js'
-import { OPEN_WIREFRAME_ACCESS } from '@/iam/application/localPreviewAuth.js'
+import { isDemoSession } from '@/iam/application/localPreviewAuth.js'
 import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import {
   SubscriptionPlanId,
@@ -69,7 +69,7 @@ async function onSaveResidentPassword(event) {
   }
   residentPasswordSaving.value = true
   try {
-    if (!OPEN_WIREFRAME_ACCESS) {
+    if (!isDemoSession()) {
       await setPasswordForCurrentUser(residentPassword.value)
     }
     await confirmSuccess(event, t('feedback.passwordSaved'))
