@@ -1445,18 +1445,9 @@ async function sendReply() {
   color: #fff;
 }
 
-/* Respuesta recién enviada: la burbuja azul conserva su fondo (texto blanco) y solo la rodea un halo verde. */
+/* Respuesta recién enviada: la burbuja azul solo entra deslizándose (sin halo de color). */
 .msg--admin .msg__bubble.bf-fresh {
-  animation:
-    bf-fresh-in 0.8s var(--bf-ease),
-    msg-fresh-ring 3.4s var(--bf-ease-soft);
-}
-
-@keyframes msg-fresh-ring {
-  0%,
-  45% {
-    box-shadow: 0 0 0 3px var(--bf-success-line);
-  }
+  animation: bf-fresh-in 0.8s var(--bf-ease);
 }
 
 .bot-avatar,
