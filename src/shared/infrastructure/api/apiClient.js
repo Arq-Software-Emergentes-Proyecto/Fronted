@@ -1,8 +1,8 @@
 import axios from 'axios'
 import { API_BASE_URL } from '@/shared/infrastructure/envConfig.js'
 import {
+  isDemoSession,
   isPreviewAccessToken,
-  OPEN_WIREFRAME_ACCESS,
 } from '@/iam/application/localPreviewAuth.js'
 import { clearSession, getAccessToken } from '@/iam/application/sessionStore.js'
 import { freshSessionToken, signOutFirebase } from '@/iam/infrastructure/firebaseSession.js'
@@ -25,13 +25,13 @@ export const apiClient = axios.create({
   },
 })
 
-if (OPEN_WIREFRAME_ACCESS) {
-  apiClient.defaults.adapter = async (config) => {
-    const { localMockAdapter } = await import(
-      '@/shared/infrastructure/mock/mockAdapter.js'
-    )
-    return localMockAdapter(config)
-  }
+// Wireframes or the "test" demo account: every request goes to the in-browser mock (decided per
+// request, so signing out of the demo goes straight back to the real API).
+const networkAdapter = axios.getAdapter(apiClient.defaults.adapter)
+apiClient.defaults.adapter = async (config) => {
+  if (!isDemoSession()) return networkAdapter(config)
+  const { localMockAdapter } = await import('@/shared/infrastructure/mock/mockAdapter.js')
+  return localMockAdapter(config)
 }
 
 apiClient.interceptors.request.use(async (config) => {

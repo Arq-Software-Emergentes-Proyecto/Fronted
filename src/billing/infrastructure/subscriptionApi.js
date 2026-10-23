@@ -6,6 +6,7 @@ import {
 } from '@/shared/infrastructure/mercadoPagoCheckoutClient.js'
 import { AppPaths } from '@/shared/domain/appRoutes.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
+import { isDemoSession } from '@/iam/application/localPreviewAuth.js'
 
 function optionalNumber(value) {
   if (value == null || value === '') return null
@@ -74,6 +75,20 @@ export const subscriptionApi = {
   },
 
   async checkout(planId) {
+    // Demo account: no real Mercado Pago. Comes back as an approved payment and the mock confirms it.
+    if (isDemoSession()) {
+      return {
+        preferenceId: 'DEMO',
+        initPoint: checkoutReturnUrl(AppPaths.APP_SETTINGS, {
+          status: 'approved',
+          plan: planId,
+          payment_id: String(Date.now()),
+        }),
+        demo: true,
+        amount: 0,
+        planId,
+      }
+    }
     const frontendBaseUrl = typeof window !== 'undefined' ? window.location.origin : undefined
     let serverCheckout = null
     try {

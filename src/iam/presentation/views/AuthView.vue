@@ -9,7 +9,13 @@ import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import { authApi } from '@/iam/infrastructure/authApi.js'
 import { residentsApi } from '@/residents/infrastructure/residentsApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
-import { OPEN_WIREFRAME_ACCESS } from '@/iam/application/localPreviewAuth.js'
+import {
+  isDemoCredentials,
+  isDemoUsername,
+  OPEN_WIREFRAME_ACCESS,
+  previewAdminAuthResult,
+  previewResidentAuthResult,
+} from '@/iam/application/localPreviewAuth.js'
 import { signInWithGoogle, refreshFirebaseIdToken } from '@/iam/infrastructure/googleIdentity.js'
 import {
   createResidentPasswordAccount,
@@ -441,6 +447,11 @@ function finishAdminSession(user, token, { onboarding = false } = {}) {
 async function onLoginContinue() {
   loginEmailError.value = ''
   const raw = loginEmail.value.trim()
+  // Cuenta demo: no es un correo ni existe en Firebase.
+  if (isDemoUsername(raw)) {
+    loginStep.value = 2
+    return
+  }
   if (OPEN_WIREFRAME_ACCESS) {
     if (!raw) {
       setLoginError(t('auth.emailInvalid'), 'email')
@@ -515,7 +526,41 @@ async function handleLoginSubmit() {
   }
 }
 
+/**
+ * Usuario "test" / "123456": sesión demo con los datos de ejemplo del navegador (se reinician en cada
+ * ingreso). Admin desde la pestaña de administrador, residente desde la de residente.
+ */
+async function startDemoSession(role) {
+  if (!isDemoCredentials(loginEmail.value, loginPassword.value)) {
+    setLoginError(t('auth.passwordInvalid'), 'password')
+    return
+  }
+  loginLoading.value = true
+  loginEmailError.value = ''
+  try {
+    // La demo nunca debe heredar la sesión de Firebase de una cuenta real abierta en este navegador.
+    void signOutFirebase()
+    const { resetMockDb } = await import('@/shared/infrastructure/mock/mockDb.js')
+    resetMockDb()
+    if (role === 'resident') {
+      const { user, token } = previewResidentAuthResult()
+      await applyResidentSession(user, token)
+    } else {
+      const { user, token } = previewAdminAuthResult()
+      finishAdminSession(user, token)
+    }
+  } catch {
+    loginEmailError.value = t('auth.genericError')
+  } finally {
+    loginLoading.value = false
+  }
+}
+
 async function onLoginSubmit() {
+  if (isDemoUsername(loginEmail.value)) {
+    await startDemoSession(isResidentLogin.value ? 'resident' : 'admin')
+    return
+  }
   loginLoading.value = true
   loginEmailError.value = ''
   try {
@@ -586,7 +631,7 @@ async function onLoginSubmit() {
 async function onResidentPasswordLogin() {
   if (loginLoading.value) return
   loginEmailError.value = ''
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail.value.trim())) {
+  if (!isDemoUsername(loginEmail.value) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail.value.trim())) {
     setLoginError(t('auth.emailInvalid'), 'email')
     return
   }

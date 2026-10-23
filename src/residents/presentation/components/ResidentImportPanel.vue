@@ -4,7 +4,7 @@ import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import { residentInviteLink, residentsApi } from '@/residents/infrastructure/residentsApi.js'
-import { OPEN_WIREFRAME_ACCESS } from '@/iam/application/localPreviewAuth.js'
+import { isDemoSession } from '@/iam/application/localPreviewAuth.js'
 
 /**
  * US016 — Excel/CSV roster import. The server validates every row; if any is invalid the whole file
@@ -136,7 +136,7 @@ async function downloadTemplate(format) {
     saveBlob(blob, `plantilla-residentes.${format}`)
   } catch (error) {
     const code = error?.code
-    if (OPEN_WIREFRAME_ACCESS || code === 'NETWORK_ERROR' || code === 'TIMEOUT') {
+    if (isDemoSession() || code === 'NETWORK_ERROR' || code === 'TIMEOUT') {
       // Offline / preview: the CSV template can still be generated locally.
       saveBlob(new Blob(['﻿' + LOCAL_CSV_TEMPLATE], { type: 'text/csv;charset=utf-8' }), 'plantilla-residentes.csv')
     } else {

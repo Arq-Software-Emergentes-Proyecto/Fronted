@@ -9,6 +9,7 @@ import BfConfirmDialog from '../components/BfConfirmDialog.vue'
 import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import { useSession } from '@/iam/application/sessionStore.js'
 import { signOutFirebase } from '@/iam/infrastructure/firebaseSession.js'
+import { isPreviewAccessToken } from '@/iam/application/localPreviewAuth.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
 import {
   markIncidentsSeen,
@@ -32,6 +33,8 @@ const sessionInitials = computed(() => {
   return words.length ? words.slice(0, 2).map((w) => w[0]).join('').toUpperCase() : '?'
 })
 const sessionRoleLabel = computed(() => (isResident.value ? t('app.roleResident') : t('app.roleAdmin')))
+/** Cuenta demo ("test"): los datos son de ejemplo y viven solo en este navegador. */
+const isDemoSession = computed(() => isPreviewAccessToken(sessionState.token))
 const toast = useToast()
 const { state: incidentRealtime } = useIncidentRealtime()
 
@@ -478,6 +481,9 @@ onBeforeUnmount(() => {
           <div class="app-shell__user-text">
             <strong class="app-shell__user-name">{{ sessionName || sessionRoleLabel }}</strong>
             <span class="app-shell__user-role">{{ sessionRoleLabel }}</span>
+            <span v-if="isDemoSession" class="app-shell__demo" :title="t('app.demoModeHint')">
+              {{ t('app.demoMode') }}
+            </span>
           </div>
           <div class="app-shell__user-actions">
             <RouterLink
@@ -996,6 +1002,17 @@ onBeforeUnmount(() => {
   display: block;
   font-size: 0.64rem;
   color: var(--shell-muted);
+}
+
+.app-shell__demo {
+  display: inline-block;
+  margin-top: 0.2rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: #fdf3dc;
+  color: #8a5a00;
+  font-size: 0.62rem;
+  font-weight: 650;
 }
 
 .app-shell__user-actions {

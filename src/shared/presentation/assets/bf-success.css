@@ -1,13 +1,13 @@
 /*
  * Confirmación verde (successFeedback.js): el botón se funde a verde, se traza un check y aparece
- * el texto; la fila nueva entra con un verde suave que se apaga solo.
+ * el texto; la fila nueva entra con un azul de marca muy suave (no verde) que se apaga solo.
  * Las clases se repiten para ganarle a los estilos de cada vista (hover, disabled).
  */
 :root {
   --bf-success: #16a34a;
   --bf-success-ink: #15803d;
-  --bf-success-soft: #ecf8f0;
-  --bf-success-line: rgba(22, 163, 74, 0.35);
+  /* Resaltado de lo recién agregado: azul de marca casi blanco, sin borde. */
+  --bf-fresh-soft: #eef2fb;
   --bf-ease: cubic-bezier(0.16, 1, 0.3, 1);
   --bf-ease-soft: cubic-bezier(0.45, 0, 0.2, 1);
 }
@@ -127,7 +127,7 @@
 .bf-fresh {
   animation:
     bf-fresh-in 0.8s var(--bf-ease),
-    bf-fresh-tint 3.4s var(--bf-ease-soft);
+    bf-fresh-tint 2.2s var(--bf-ease-soft);
 }
 
 /* Tablas: el color va en las celdas (sin borde, para no marcar líneas entre columnas). */
@@ -138,7 +138,7 @@ tr.bf-fresh {
 tr.bf-fresh > td {
   animation:
     bf-fresh-in 0.8s var(--bf-ease),
-    bf-fresh-cell 3.4s var(--bf-ease-soft);
+    bf-fresh-cell 2.2s var(--bf-ease-soft);
 }
 
 @keyframes bf-fresh-in {
@@ -148,20 +148,18 @@ tr.bf-fresh > td {
   }
 }
 
-/* Sin "to": vuelve sola al fondo y borde propios del elemento. */
+/* Sin "to": vuelve sola al fondo propio del elemento. Solo fondo: sin borde ni contorno. */
 @keyframes bf-fresh-tint {
   0%,
-  45% {
-    background-color: var(--bf-success-soft);
-    border-color: var(--bf-success-line);
-    box-shadow: inset 0 0 0 1px var(--bf-success-line);
+  35% {
+    background-color: var(--bf-fresh-soft);
   }
 }
 
 @keyframes bf-fresh-cell {
   0%,
-  45% {
-    background-color: var(--bf-success-soft);
+  35% {
+    background-color: var(--bf-fresh-soft);
   }
 }
 
