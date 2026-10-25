@@ -1761,7 +1761,11 @@
     "agendaChatsShort": "Chats pendientes",
     "agendaBudgetShort": "Cuota mensual",
     "agendaOverdueShort": "Deuda vencida",
-    "agendaGuestsShort": "Invitados hoy"
+    "agendaGuestsShort": "Invitados hoy",
+    "agendaEscalatedTitle": "{n} incidencia escalada | {n} incidencias escaladas",
+    "agendaEscalatedShort": "Escaladas",
+    "agendaEscalatedDetail": "Llevan más de {hours} h sin proveedor asignado.",
+    "agendaEscalatedAction": "Asignar proveedor"
   },
   "residentFinance": {
     "totalDue": "Total a pagar",
@@ -2187,7 +2191,27 @@
     "residentEmptyHint": "Si algo no funciona en tu unidad o en las áreas comunes, cuéntanos.",
     "residentListTitle": "Mis reportes",
     "callProvider": "Llamar a {name}",
-    "detailFor": "Ver detalle de «{title}»"
+    "detailFor": "Ver detalle de «{title}»",
+    "filterEscalated": "Escaladas",
+    "summaryUnassignedEscalatedHint": "{count} escalada(s): más de {hours} h sin asignar",
+    "escalatedBadge": "Escalada",
+    "escalatedHint": "Lleva más de {hours} h sin proveedor asignado",
+    "escalatedNotice": "Incidencia escalada: lleva más de {hours} horas sin proveedor asignado. Asigna uno para atenderla.",
+    "eventEscalated": "Incidencia escalada a la administración",
+    "eventAiTriageSuggested": "La IA sugirió una clasificación",
+    "eventTriageConfirmed": "Clasificación confirmada",
+    "authorAssistant": "Asistente IA",
+    "triageTitle": "Clasificación sugerida por la IA",
+    "triageHint": "La IA puede sugerir la categoría y la prioridad a partir del asunto y la descripción. Tú decides si aplicarla.",
+    "triagePendingBadge": "Sugerencia IA",
+    "triageApply": "Aplicar sugerencia",
+    "triageRequest": "Sugerir con IA",
+    "triageRetry": "Volver a sugerir",
+    "triageConfirmed": "Sugerencia aplicada a la incidencia.",
+    "triagePlanRequired": "El triaje con IA está incluido desde el plan Standard.",
+    "triageSeePlans": "Ver planes",
+    "triageCapReached": "Se alcanzó el tope mensual de consultas de IA del edificio. Clasifica la incidencia manualmente.",
+    "triageUnavailable": "La IA no está disponible en este momento. Intenta de nuevo en unos minutos o clasifica manualmente."
   },
   "announcementFeed": {
     "emptyCarousel": "No hay novedades por el momento",

@@ -40,6 +40,12 @@ export function incidentEventLabel(t, event) {
       return t('incidentFlow.eventResolved')
     case IncidentEventType.COMMENT:
       return t('incidentFlow.eventComment')
+    case IncidentEventType.ESCALATED:
+      return t('incidentFlow.eventEscalated')
+    case IncidentEventType.AI_TRIAGE_SUGGESTED:
+      return t('incidentFlow.eventAiTriageSuggested')
+    case IncidentEventType.TRIAGE_CONFIRMED:
+      return t('incidentFlow.eventTriageConfirmed')
     default:
       return String(event?.type ?? '')
   }

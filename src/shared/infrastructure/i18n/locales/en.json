@@ -1761,7 +1761,11 @@
     "agendaChatsShort": "Pending chats",
     "agendaBudgetShort": "Monthly fee",
     "agendaOverdueShort": "Overdue debt",
-    "agendaGuestsShort": "Guests today"
+    "agendaGuestsShort": "Guests today",
+    "agendaEscalatedTitle": "{n} escalated incident | {n} escalated incidents",
+    "agendaEscalatedShort": "Escalated",
+    "agendaEscalatedDetail": "Unassigned for more than {hours} h.",
+    "agendaEscalatedAction": "Assign a provider"
   },
   "residentFinance": {
     "totalDue": "Total due",
@@ -2187,7 +2191,27 @@
     "residentEmptyHint": "If something isn’t working in your unit or the common areas, let us know.",
     "residentListTitle": "My reports",
     "callProvider": "Call {name}",
-    "detailFor": "View details of “{title}”"
+    "detailFor": "View details of “{title}”",
+    "filterEscalated": "Escalated",
+    "summaryUnassignedEscalatedHint": "{count} escalated: unassigned for over {hours} h",
+    "escalatedBadge": "Escalated",
+    "escalatedHint": "No provider assigned for over {hours} h",
+    "escalatedNotice": "Escalated incident: no provider has been assigned for over {hours} hours. Assign one to handle it.",
+    "eventEscalated": "Incident escalated to management",
+    "eventAiTriageSuggested": "AI suggested a classification",
+    "eventTriageConfirmed": "Classification confirmed",
+    "authorAssistant": "AI assistant",
+    "triageTitle": "AI-suggested classification",
+    "triageHint": "The AI can suggest the category and priority from the subject and description. You decide whether to apply it.",
+    "triagePendingBadge": "AI suggestion",
+    "triageApply": "Apply suggestion",
+    "triageRequest": "Suggest with AI",
+    "triageRetry": "Suggest again",
+    "triageConfirmed": "Suggestion applied to the incident.",
+    "triagePlanRequired": "AI triage is included from the Standard plan.",
+    "triageSeePlans": "See plans",
+    "triageCapReached": "The building reached its monthly AI query cap. Classify the incident manually.",
+    "triageUnavailable": "The AI is not available right now. Try again in a few minutes or classify manually."
   },
   "announcementFeed": {
     "emptyCarousel": "No news at the moment",
