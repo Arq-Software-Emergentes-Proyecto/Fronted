@@ -426,6 +426,8 @@ async function removeServiceProvider(id) {
 }
 
 const lateFeePerDay = ref(0)
+/** Reglamento: los morosos (cuota vencida hace más de 30 días) no pueden reservar áreas comunes. */
+const restrictReservations = ref(false)
 const lateFeeError = ref('')
 const isSavingLateFee = ref(false)
 const lateFeeLoading = ref(false)
@@ -542,6 +544,7 @@ async function loadLateFee() {
     await financesStore.loadData()
     const settings = normalizeSettings(financesStore.state.settings)
     lateFeePerDay.value = Number(settings.lateFeePerDay) || 0
+    restrictReservations.value = settings.restrictReservationsWhenDelinquent === true
     const range = normalizeAdmissionPayRange(settings)
     admissionPayFromDay.value = range.admissionPayFromDay
     admissionPayToDay.value = range.admissionPayToDay
@@ -567,6 +570,7 @@ async function onSaveLateFee(event) {
     await financesStore.updateSettings({
       ...current,
       lateFeePerDay: amount,
+      restrictReservationsWhenDelinquent: restrictReservations.value,
     })
     await confirmSuccess(event, t('feedback.lateFeeSaved'))
   } catch (error) {
@@ -1074,6 +1078,13 @@ watch(planSaveNotice, (msg) => {
                 <p id="settingsLateFeeHint" class="st-input-field__hint">{{ t('financeAdmin.lateFeeHint') }}</p>
               </div>
             </div>
+            <label class="st-check" for="settingsRestrictReservations">
+              <input id="settingsRestrictReservations" v-model="restrictReservations" type="checkbox" />
+              <span>
+                <strong>{{ t('financeAdmin.restrictReservations') }}</strong>
+                <small>{{ t('financeAdmin.restrictReservationsHint') }}</small>
+              </span>
+            </label>
             <div class="st-card__foot">
               <p v-if="lateFeeError" class="st-notice st-notice--error" role="alert">
                 <i class="pi pi-times-circle" aria-hidden="true" />
@@ -2020,6 +2031,36 @@ watch(planSaveNotice, (msg) => {
 
 .st-input-field__hint {
   margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: #6e6e73;
+}
+
+.st-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+  cursor: pointer;
+}
+
+.st-check input {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.15rem;
+  accent-color: #1e3a8a;
+}
+
+.st-check span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.85rem;
+  color: #0f172a;
+}
+
+.st-check small {
   font-size: 0.74rem;
   line-height: 1.4;
   color: #6e6e73;

@@ -78,6 +78,12 @@ const adminNavPrimary = computed(() => [
     badgeLabel: t('incidentFlow.newBadgeLabel', { count: incidentRealtime.unseenCount }),
   },
   {
+    key: 'team',
+    label: t('app.team'),
+    icon: 'pi pi-briefcase',
+    routeName: AppRouteNames.APP_TEAM,
+  },
+  {
     key: 'information',
     label: t('app.information'),
     icon: 'pi pi-megaphone',

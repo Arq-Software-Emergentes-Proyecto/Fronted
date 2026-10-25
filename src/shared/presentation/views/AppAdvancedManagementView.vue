@@ -231,6 +231,58 @@ async function confirmDeleteResidentCascade() {
   }
 }
 
+/** US028: editar nombre y unidad de un residente. */
+const editResidentCandidate = ref(null)
+const editResidentForm = reactive({ name: '', department: '' })
+const editResidentErrors = reactive({ name: '', department: '' })
+const editResidentError = ref('')
+const isSavingResidentEdit = ref(false)
+const editDetectedFloor = computed(() => deriveFloorFromDepartment(editResidentForm.department))
+
+function openEditResidentModal(resident) {
+  editResidentForm.name = resident?.name ?? ''
+  editResidentForm.department = resident?.code ?? ''
+  editResidentErrors.name = ''
+  editResidentErrors.department = ''
+  editResidentError.value = ''
+  editResidentCandidate.value = resident
+}
+
+function closeEditResidentModal() {
+  if (isSavingResidentEdit.value) return
+  editResidentCandidate.value = null
+}
+
+async function onEditResidentSubmit(event) {
+  const resident = editResidentCandidate.value
+  if (!resident || isSavingResidentEdit.value) return
+  const name = editResidentForm.name.trim()
+  const parsed = parseDepartmentNumber(editResidentForm.department)
+  editResidentErrors.name = name ? '' : 'common.fieldRequired'
+  editResidentErrors.department = parsed ? '' : 'app.addResidentInvalidDepartment'
+  if (editResidentErrors.name || editResidentErrors.department) return
+
+  isSavingResidentEdit.value = true
+  editResidentError.value = ''
+  try {
+    const updated = await residentsApi.update(resident.id, { name, department: editResidentForm.department })
+    await confirmSuccess(event, t('feedback.residentUpdated'))
+    residents.value = residents.value.map((item) =>
+      item.id === resident.id ? { ...item, name: updated.name, floor: updated.floor, code: updated.code } : item,
+    )
+    markFresh('resident', resident.id)
+    editResidentCandidate.value = null
+  } catch (error) {
+    if (error?.code === 'RESIDENT_CODE_ALREADY_EXISTS') {
+      editResidentErrors.department = 'app.addResidentCodeExists'
+      return
+    }
+    editResidentError.value = t('app.editResidentError')
+  } finally {
+    isSavingResidentEdit.value = false
+  }
+}
+
 /** IAM AccountStatus: deactivate/reactivate a resident account (reversible, keeps data). */
 const accountStatusCandidate = ref(null)
 const isChangingAccountStatus = ref(false)
@@ -1139,6 +1191,15 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
                         <button
                           type="button"
                           class="adv-action"
+                          :aria-label="`${t('app.editResidentAction')} — ${resident.name}`"
+                          :data-tip="t('app.editResidentAction')"
+                          @click="openEditResidentModal(resident)"
+                        >
+                          <i class="pi pi-pencil" aria-hidden="true" />
+                        </button>
+                        <button
+                          type="button"
+                          class="adv-action"
                           :class="resident.accountStatus === 'DEACTIVATED' ? 'adv-action--green' : 'adv-action--amber'"
                           :aria-label="`${
                             resident.accountStatus === 'DEACTIVATED'
@@ -1439,6 +1500,66 @@ const accountStatusReactivate = computed(() => accountStatusView.value?.accountS
           :loading="isSubmitting"
           :cancel-disabled="isSubmitting"
           @cancel="closeAddResidentModal"
+        />
+      </form>
+    </Dialog>
+
+    <!-- Editar residente (US028) -->
+    <Dialog
+      :visible="!!editResidentCandidate"
+      modal
+      dismissable-mask
+      :header="t('app.editResidentModalTitle')"
+      class="adv-dialog"
+      :style="{ width: 'min(28rem, 94vw)' }"
+      :draggable="false"
+      :closable="!isSavingResidentEdit"
+      :close-on-escape="!isSavingResidentEdit"
+      @update:visible="onDialogVisible($event, closeEditResidentModal)"
+    >
+      <form class="adv-form" novalidate @submit.prevent="onEditResidentSubmit">
+        <div class="adv-field" :class="{ 'bf-field--invalid': editResidentErrors.name }">
+          <label for="adv-edit-resident-name">{{ t('app.residentNameLabel') }}</label>
+          <input
+            id="adv-edit-resident-name"
+            v-model="editResidentForm.name"
+            type="text"
+            autocomplete="name"
+            required
+            :aria-invalid="editResidentErrors.name ? 'true' : 'false'"
+            @input="editResidentErrors.name = ''"
+          />
+          <small v-if="editResidentErrors.name" class="bf-field-error">{{ t(editResidentErrors.name) }}</small>
+        </div>
+        <div class="adv-field" :class="{ 'bf-field--invalid': editResidentErrors.department }">
+          <label for="adv-edit-resident-dept">{{ t('app.residentDepartmentLabel') }}</label>
+          <input
+            id="adv-edit-resident-dept"
+            v-model="editResidentForm.department"
+            type="text"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            maxlength="4"
+            required
+            autocomplete="off"
+            :aria-invalid="editResidentErrors.department ? 'true' : 'false'"
+            @input="editResidentErrors.department = ''"
+          />
+          <small v-if="editResidentErrors.department" class="bf-field-error">{{ t(editResidentErrors.department) }}</small>
+          <small v-else-if="editDetectedFloor" class="adv-field__preview" aria-live="polite">
+            <i class="pi pi-check" aria-hidden="true" />
+            {{ t('app.residentFloorDetected', { floor: editDetectedFloor }) }}
+          </small>
+        </div>
+        <p v-if="editResidentError" class="adv-form__error" role="alert">{{ editResidentError }}</p>
+        <ConfirmActions
+          :cancel-label="t('app.cancelAction')"
+          :confirm-label="isSavingResidentEdit ? t('app.savingResidentAction') : t('app.saveChangesAction')"
+          confirm-type="submit"
+          :stagger="false"
+          :loading="isSavingResidentEdit"
+          :cancel-disabled="isSavingResidentEdit"
+          @cancel="closeEditResidentModal"
         />
       </form>
     </Dialog>

@@ -30,7 +30,16 @@ import {
   subscriptionSnapshot,
 } from './mockDb.js'
 import { MOCK_OWNER_ID } from './seed.js'
-import { fail, ok, ownerFromParams, publicUser, readBody, readParams, resolveActor } from './mockAdapter.js'
+import {
+  fail,
+  ok,
+  ownerFromParams,
+  publicUser,
+  readBody,
+  readParams,
+  resolveActor,
+  resolveMockIncidentFromTask,
+} from './mockAdapter.js'
 
 const DUE_SOON_DAYS = 5
 const MAX_OPEN_TASKS_PER_WORKER = 10
@@ -658,17 +667,26 @@ function handleTasks(config, method, rest) {
   if (action === 'complete' && method === 'PATCH') {
     if (task.status === 'COMPLETED') fail(config, 409, 'INVALID_TASK_TRANSITION', 'La tarea ya está completada.')
     const at = nowIso()
-    return ok(
-      config,
-      taskResource(
-        patchRow('maintenanceTasks', task.id, {
-          status: 'COMPLETED',
-          startedAt: task.startedAt || at,
-          completedAt: at,
-          updatedAt: at,
-        }),
-      ),
-    )
+    const done = patchRow('maintenanceTasks', task.id, {
+      status: 'COMPLETED',
+      startedAt: task.startedAt || at,
+      completedAt: at,
+      updatedAt: at,
+    })
+    // TareaCompletada → Incidents: sin tareas abiertas, la incidencia queda resuelta.
+    if (task.incidentId) {
+      const stillOpen = listCollection('maintenanceTasks').some(
+        (t) => String(t.incidentId) === String(task.incidentId) && t.status !== 'COMPLETED',
+      )
+      if (!stillOpen) {
+        const worker = findById('teamWorkers', task.staffId)
+        resolveMockIncidentFromTask(
+          task.incidentId,
+          `Resuelta al completar la tarea de ${worker?.name || 'el equipo de mantenimiento'}: ${task.description}`,
+        )
+      }
+    }
+    return ok(config, taskResource(done))
   }
 
   if (action === 'reassign' && method === 'PATCH') {
@@ -1204,6 +1222,27 @@ function checkGuests(config, space, guestCount) {
   }
 }
 
+/** Reglamento (ajuste de finanzas): un residente con una cuota vencida hace más de 30 días no reserva. */
+function checkDelinquency(config, residentId) {
+  const { actor, ownerId } = tenantOf(config)
+  if (actor.role !== SessionRoles.RESIDENT) return
+  if (!settingsFor(ownerId)?.raw?.restrictReservationsWhenDelinquent) return
+  const today = new Date()
+  const resident = String(residentId || actor.id)
+  const delinquent = [
+    ...queryCollection('receipts', {}).filter((r) => String(r.residentId) === resident),
+    ...queryCollection('fees', {}).filter((f) => String(f.residentId) === resident),
+  ].some((row) => daysOverdue(row.status, row.dueDate, today) > 30)
+  if (delinquent) {
+    fail(
+      config,
+      409,
+      'RESIDENT_DELINQUENT',
+      'Tienes una cuota vencida hace más de 30 días. El reglamento del edificio no permite reservar áreas comunes hasta regularizar el pago.',
+    )
+  }
+}
+
 /** ReservationPolicy.CanReserve on create; guest list changes re-check the capacity. */
 function handleReservations(config, method, id) {
   const body = readBody(config)
@@ -1229,6 +1268,7 @@ function handleReservations(config, method, id) {
       fail(config, 409, 'RESERVATION_DAY_FULL', 'El espacio alcanzó su límite de reservas para esa fecha.')
     }
     checkGuests(config, space, Array.isArray(body.guests) ? body.guests.length : 0)
+    checkDelinquency(config, body.residentId)
     return null // valid → generic CRUD insert
   }
   if (id && method === 'PATCH' && Array.isArray(body.guests)) {

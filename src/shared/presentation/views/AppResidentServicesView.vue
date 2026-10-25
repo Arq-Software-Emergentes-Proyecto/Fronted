@@ -505,6 +505,7 @@ async function onReserveSubmit(event) {
       RESERVATION_DAY_FULL: 'socialSpaces.errDayFull',
       SPACE_UNDER_MAINTENANCE: 'socialSpaces.errMaintenance',
       RESERVATION_TOO_MANY_GUESTS: 'socialSpaces.errTooManyGuests',
+      RESIDENT_DELINQUENT: 'socialSpaces.errDelinquent',
     }
     if (conflictMessages[error?.code] || error?.status === 409) {
       reservationError.value = t(conflictMessages[error?.code] ?? 'socialSpaces.errOverlap')

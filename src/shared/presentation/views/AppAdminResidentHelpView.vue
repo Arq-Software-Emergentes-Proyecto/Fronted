@@ -564,7 +564,7 @@ async function sendReply() {
               </div>
               <div class="pane-head__actions" role="group" :aria-label="t('supportAdmin.actionsAria')">
                 <button
-                  v-if="selected.status !== 'answered'"
+                  v-if="selected.status === 'open'"
                   type="button"
                   class="btn btn--primary btn--sm"
                   :disabled="statusBusy"
@@ -573,25 +573,16 @@ async function sendReply() {
                   <i class="pi pi-check" aria-hidden="true" />
                   <span>{{ t('supportAdmin.markAnswered') }}</span>
                 </button>
+                <!-- Cerrar la conversación lo decide el residente ("¿Se resolvió tu duda?"); cerrada es de solo lectura. -->
                 <button
-                  v-if="selected.status !== 'open'"
+                  v-if="selected.status === 'answered'"
                   type="button"
                   class="btn btn--secondary btn--sm"
                   :disabled="statusBusy"
                   @click="setSelectedStatus('open')"
                 >
-                  <i class="pi" :class="selected.status === 'closed' ? 'pi-replay' : 'pi-inbox'" aria-hidden="true" />
-                  {{ selected.status === 'closed' ? t('supportAdmin.reopenChat') : t('supportAdmin.markPending') }}
-                </button>
-                <button
-                  v-if="selected.status !== 'closed'"
-                  type="button"
-                  class="btn btn--secondary btn--sm"
-                  :disabled="statusBusy"
-                  @click="setSelectedStatus('closed')"
-                >
-                  <i class="pi pi-lock" aria-hidden="true" />
-                  {{ t('supportAdmin.closeChat') }}
+                  <i class="pi pi-inbox" aria-hidden="true" />
+                  {{ t('supportAdmin.markPending') }}
                 </button>
               </div>
             </header>
@@ -650,8 +641,8 @@ async function sendReply() {
                   ref="replyEl"
                   v-model="replyText"
                   rows="1"
-                  :placeholder="t('supportAdmin.messagePlaceholder')"
-                  :disabled="sending"
+                  :placeholder="selected.status === 'closed' ? t('supportAdmin.closedComposerPlaceholder') : t('supportAdmin.messagePlaceholder')"
+                  :disabled="sending || selected.status === 'closed'"
                   aria-describedby="admin-reply-hint"
                   @input="onReplyInput"
                   @keydown="onReplyKeydown"
@@ -659,7 +650,7 @@ async function sendReply() {
                 <button
                   type="button"
                   class="composer__send"
-                  :disabled="sending || !replyText.trim()"
+                  :disabled="sending || selected.status === 'closed' || !replyText.trim()"
                   :aria-label="t('supportAdmin.send')"
                   @click="sendReply()"
                 >

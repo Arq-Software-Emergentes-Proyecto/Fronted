@@ -43,6 +43,7 @@ function normalizeChat(row) {
     kind: String(data.kind ?? ''),
     source: String(data.source ?? 'resident'),
     linkedChatId: String(data.linkedChatId ?? ''),
+    incidentId: String(data.incidentId ?? ''),
     escalatedChatId: String(data.escalatedChatId ?? data.linkedChatId ?? ''),
     aiChatId: String(data.aiChatId ?? data.linkedChatId ?? ''),
     messages: Array.isArray(data.messages) ? data.messages.map(normalizeMessage) : [],
@@ -103,6 +104,15 @@ export const supportApi = {
     const { data } = await apiClient.patch(
       `/api/v1/support/chats/${encodeURIComponent(chatId)}/status`,
       { status },
+    )
+    return normalizeChat(data)
+  },
+
+  /** Residente: registra la consulta como incidencia (Resident Care → Incidents). */
+  async reportIncident(chatId, { title = '', description = '' } = {}) {
+    const { data } = await apiClient.post(
+      `/api/v1/support/chats/${encodeURIComponent(chatId)}/incident`,
+      { title: title || null, description: description || null },
     )
     return normalizeChat(data)
   },

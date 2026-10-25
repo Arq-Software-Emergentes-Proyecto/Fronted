@@ -130,6 +130,22 @@ export const residentsApi = {
     return response.data
   },
 
+  /** US028: el admin corrige nombre y unidad (el número de departamento define piso y código). */
+  async update(id, { name, department }) {
+    const cleanId = String(id ?? '').trim()
+    if (!cleanId) throw apiError('RESIDENT_NOT_FOUND')
+    const parsed = parseDepartmentNumber(department)
+    if (!parsed) throw apiError('INVALID_DEPARTMENT_NUMBER')
+    const cleanName = String(name ?? '').trim()
+    if (!cleanName) throw apiError('RESIDENT_FIELDS_REQUIRED')
+    const { data } = await apiClient.patch(`${USERS_BASE}/${encodeURIComponent(cleanId)}`, {
+      name: cleanName,
+      floor: parsed.floor,
+      code: parsed.department,
+    })
+    return publicResident(data)
+  },
+
   async setBillFromNextMonth(id, billFromNextMonth) {
     const cleanId = String(id ?? '').trim()
     if (!cleanId) throw apiError('RESIDENT_NOT_FOUND')

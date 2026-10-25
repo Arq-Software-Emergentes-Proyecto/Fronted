@@ -87,11 +87,11 @@
       },
       "documents": {
         "label": "Documentos",
-        "help": "Reglamento, actas y archivos del edificio compartidos con los residentes."
+        "help": "Reglamento, actas y archivos del edificio; el asistente responde a los residentes con ellos."
       },
       "visits": {
-        "label": "Registro de visitas",
-        "help": "Control de invitados y visitas al edificio."
+        "label": "Invitados con QR",
+        "help": "Pases con código QR para los invitados de una reserva y registro de su ingreso en portería."
       },
       "aiAssistant": {
         "label": "Asistente de IA",
@@ -99,31 +99,19 @@
       },
       "debtVisibility": {
         "label": "Visibilidad de deudas",
-        "help": "Reporte de morosidad: quién debe, cuánto y desde cuándo."
-      },
-      "massNotifications": {
-        "label": "Notificaciones masivas",
-        "help": "Envío de avisos a todos los residentes a la vez."
+        "help": "Morosidad del edificio: quién debe, cuánto y desde cuándo (calendario semaforizado)."
       },
       "aiIncidentClassification": {
         "label": "Clasificación de incidencias con IA",
         "help": "La IA sugiere la categoría y la prioridad de cada incidencia reportada."
-      },
-      "advancedReports": {
-        "label": "Reportes avanzados",
-        "help": "Reportes financieros y operativos detallados para juntas y comités grandes."
       },
       "implementationAssistance": {
         "label": "Asistencia en la implementación",
         "help": "Acompañamiento del equipo para configurar el edificio e importar el padrón."
       },
       "multiBuildingConsole": {
-        "label": "Consola multiedificio",
-        "help": "Gestiona varios edificios de una administradora desde una sola cuenta."
-      },
-      "consolidatedReconciliation": {
-        "label": "Conciliación consolidada",
-        "help": "Conciliación de pagos de todos los edificios de la cartera en un solo lugar."
+        "label": "Varios edificios",
+        "help": "Registra varios edificios de una administradora en la misma cuenta."
       }
     }
   },
@@ -423,7 +411,8 @@
       "detailTime": "Horario",
       "timeRange": "{start} – {end}",
       "monthGridAria": "Días de {month}"
-    }
+    },
+    "errDelinquent": "Tienes una cuota vencida hace más de 30 días. El reglamento del edificio no permite reservar áreas comunes hasta regularizar el pago."
   },
   "app": {
     "residentAccountDeactivated": "Cuenta desactivada",
@@ -862,7 +851,11 @@
     "openMenu": "Abrir menú",
     "closeMenu": "Cerrar menú",
     "demoMode": "Modo demo",
-    "demoModeHint": "Cuenta de prueba: los datos son de ejemplo y solo viven en este navegador."
+    "demoModeHint": "Cuenta de prueba: los datos son de ejemplo y solo viven en este navegador.",
+    "editResidentAction": "Editar residente",
+    "editResidentModalTitle": "Editar residente",
+    "editResidentError": "No se pudieron guardar los cambios del residente.",
+    "saveChangesAction": "Guardar cambios"
   },
   "incidentStatusOpen": "Abierta",
   "incidentStatusInProgress": "En progreso",
@@ -1239,7 +1232,9 @@
     "historyDialogTitle": "Historial de pagos",
     "admissionOn": "Ingreso: {date}",
     "extraAdded": "Monto agregado a {name}.",
-    "dismissNotice": "Cerrar aviso"
+    "dismissNotice": "Cerrar aviso",
+    "restrictReservations": "Restringir reservas a residentes morosos",
+    "restrictReservationsHint": "Si el reglamento lo exige: quien tenga una cuota vencida hace más de 30 días no podrá reservar áreas comunes hasta pagar. La administración sí puede reservar a su nombre."
   },
   "teamMgmt": {
     "positionLabel": "Puesto",
@@ -1621,10 +1616,23 @@
     "threadAria": "Mensajes de la conversación",
     "derivedBanner": "Tu consulta fue derivada a la administración",
     "derivedBannerHint": "Te responderán por este mismo chat.",
-    "closedBannerHint": "Puedes iniciar un chat nuevo cuando lo necesites.",
+    "closedBannerHint": "Ya no se pueden enviar mensajes aquí. Inicia un chat nuevo cuando lo necesites.",
     "composerLabel": "Escribe tu pregunta para el asistente",
     "composerHint": "Enter para enviar · Shift + Enter para una nueva línea",
-    "justNow": "Ahora"
+    "justNow": "Ahora",
+    "reportIncident": "Reportar como incidencia",
+    "reportIncidentHint": "La administración la verá en su bandeja de incidencias.",
+    "incidentLinkedBanner": "Incidencia registrada",
+    "incidentLinkedHint": "Te avisaremos en esta conversación cuando se resuelva.",
+    "incidentLinkedLink": "Ver en Incidencias",
+    "incidentAlreadyReported": "Esta conversación ya tiene una incidencia registrada.",
+    "incidentReportError": "No se pudo registrar la incidencia. Intenta de nuevo o repórtala desde Incidencias.",
+    "resolvePrompt": "¿Se resolvió tu duda?",
+    "resolveYes": "Sí, gracias",
+    "resolveNo": "No",
+    "closeChatError": "No se pudo cerrar la conversación. Intenta de nuevo.",
+    "chatClosedSend": "Esta conversación está cerrada. Inicia una nueva para otra consulta.",
+    "closedComposerPlaceholder": "Conversación cerrada: inicia una nueva para otra consulta"
   },
   "supportAdmin": {
     "title": "Soporte",
@@ -1685,8 +1693,9 @@
     "threadAria": "Mensajes de la conversación con {name}",
     "actionsAria": "Acciones de la conversación",
     "composerHint": "Enter para enviar · Shift + Enter para una nueva línea",
-    "closedNotice": "Conversación cerrada. Si respondes, el residente verá tu mensaje.",
-    "openedOn": "Abierta el {date}"
+    "closedNotice": "El residente confirmó que se resolvió su consulta. La conversación es de solo lectura.",
+    "openedOn": "Abierta el {date}",
+    "closedComposerPlaceholder": "El residente cerró esta conversación"
   },
   "dashboard": {
     "title": "Panel de control",
@@ -2251,7 +2260,8 @@
     "providerAdded": "Proveedor agregado",
     "lateFeeSaved": "Mora guardada",
     "rulesSaved": "Reglas guardadas",
-    "planUpdated": "Plan actualizado"
+    "planUpdated": "Plan actualizado",
+    "residentUpdated": "Residente actualizado"
   },
   "kpiShort": {
     "activeAccounts": "Activas",
