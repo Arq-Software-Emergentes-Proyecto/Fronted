@@ -1,11 +1,7 @@
 import { apiClient } from '@/shared/infrastructure/api/apiClient.js'
 import { apiError } from '@/shared/infrastructure/api/utils.js'
-import {
-  checkoutReturnUrl,
-  startMercadoPagoCheckout,
-} from '@/shared/infrastructure/mercadoPagoCheckoutClient.js'
+import { checkoutReturnUrl } from '@/shared/infrastructure/mercadoPagoCheckoutClient.js'
 import { AppPaths } from '@/shared/domain/appRoutes.js'
-import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
 import { isDemoSession } from '@/iam/application/localPreviewAuth.js'
 
 function optionalNumber(value) {
@@ -89,43 +85,24 @@ export const subscriptionApi = {
         planId,
       }
     }
+    // Solo la API crea el cobro (precio del plan, referencia del admin y snapshot del checkout):
+    // el navegador nunca arma un pago por su cuenta.
     const frontendBaseUrl = typeof window !== 'undefined' ? window.location.origin : undefined
-    let serverCheckout = null
-    try {
-      const { data } = await apiClient.post('/api/v1/subscription/checkout', {
-        planId,
-        ...(frontendBaseUrl ? { frontendBaseUrl } : {}),
-      })
-      serverCheckout = data
-      if (data?.initPoint && !data?.demo && !data?.Demo) {
-        return {
-          preferenceId: data?.preferenceId ?? data?.PreferenceId ?? null,
-          initPoint: data.initPoint ?? data.InitPoint,
-          demo: false,
-          amount: Number(data?.amount ?? data?.Amount ?? 0),
-          planId: String(data?.planId ?? data?.PlanId ?? planId),
-        }
-      }
-    } catch (error) {
-      // Business rejections (e.g. too many residents for the plan) must reach the UI.
-      if (error?.status === 400 && error?.code && error.code !== 'CHECKOUT_ERROR') throw error
-      /* otherwise fall through to Checkout Pro on this app */
-    }
-
-    const departmentCount = Number(serverCheckout?.departmentCount ?? serverCheckout?.DepartmentCount)
-    return startMercadoPagoCheckout({
-      kind: 'subscription',
+    const { data } = await apiClient.post('/api/v1/subscription/checkout', {
       planId,
-      title: `BuildingFex ${planId}`,
-      ...(Number.isFinite(departmentCount) && departmentCount > 0 ? { departmentCount } : {}),
-      // Same format the API verifies on confirm: SUBSCRIPTION:{adminId}:{planId}[:{departments}] (Portafolio)
-      externalReference:
-        serverCheckout?.externalReference ??
-        `subscription:${getActiveDataOwnerId() || ''}:${planId}`,
-      successUrl: checkoutReturnUrl(AppPaths.APP_SETTINGS),
-      failureUrl: checkoutReturnUrl(AppPaths.APP_SETTINGS, { subscription: 'failure' }),
-      pendingUrl: checkoutReturnUrl(AppPaths.APP_SETTINGS, { subscription: 'pending' }),
+      ...(frontendBaseUrl ? { frontendBaseUrl } : {}),
     })
+    const initPoint = data?.initPoint ?? data?.InitPoint
+    if (!initPoint || data?.demo || data?.Demo) {
+      throw apiError('CHECKOUT_UNAVAILABLE', 'No se pudo iniciar el pago con Mercado Pago. Intenta de nuevo en unos minutos.')
+    }
+    return {
+      preferenceId: data?.preferenceId ?? data?.PreferenceId ?? null,
+      initPoint,
+      demo: false,
+      amount: Number(data?.amount ?? data?.Amount ?? 0),
+      planId: String(data?.planId ?? data?.PlanId ?? planId),
+    }
   },
 
   async confirm({ planId, paymentId = null }) {

@@ -2,7 +2,6 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import { mercadoPagoCheckoutPlugin } from './server/viteMercadoPagoPlugin.js'
 import { previewMockApiPlugin } from './server/vitePreviewMockPlugin.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -35,10 +34,6 @@ export default defineConfig(({ command, mode }) => {
   // Same default as src/iam/application/localPreviewAuth.js (on in `vite` dev unless set to false).
   const openWireframes =
     String(env.VITE_OPEN_WIREFRAMES ?? (command === 'serve' ? 'true' : 'false')) === 'true'
-  if (env.MP_ACCESS_TOKEN) process.env.MP_ACCESS_TOKEN = env.MP_ACCESS_TOKEN
-  if (env.MERCADOPAGO_ACCESS_TOKEN) {
-    process.env.MERCADOPAGO_ACCESS_TOKEN = env.MERCADOPAGO_ACCESS_TOKEN
-  }
 
   return {
     // The dev-server mock API only serves wireframe/demo mode. With VITE_OPEN_WIREFRAMES=false
@@ -46,7 +41,6 @@ export default defineConfig(({ command, mode }) => {
     plugins: [
       vue(),
       ...(openWireframes ? [previewMockApiPlugin()] : []),
-      mercadoPagoCheckoutPlugin(),
     ],
     resolve: {
       alias: {

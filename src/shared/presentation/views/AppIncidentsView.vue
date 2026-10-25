@@ -514,7 +514,10 @@ function triageErrorNotice(row, err) {
     return { id: row.id, text: t('incidentFlow.triagePlanRequired'), error: true, upgrade: true }
   }
   if (code === 'AI_MONTHLY_CAP_REACHED') return { id: row.id, text: t('incidentFlow.triageCapReached'), error: true }
-  if (code === 'AI_UNAVAILABLE') return { id: row.id, text: t('incidentFlow.triageUnavailable'), error: true }
+  // AI_UNAVAILABLE, o una API que todavía no tiene el endpoint (404/405) o falla (5xx).
+  if (code === 'AI_UNAVAILABLE' || [404, 405].includes(err?.status) || err?.status >= 500) {
+    return { id: row.id, text: t('incidentFlow.triageUnavailable'), error: true }
+  }
   return { id: row.id, text: resolveErrorMessage(err), error: true }
 }
 

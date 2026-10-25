@@ -1138,6 +1138,80 @@ function mockIncidentEvent(type, status, comment, actor) {
   }
 }
 
+const ESCALATION_MS = 48 * 3600 * 1000
+const ASSISTANT_ACTOR = { id: null, role: 'assistant' }
+
+/** Triaje de la demo (sin IA real): palabras clave → categoría y prioridad, como GeminiIncidentTriageAdvisor. */
+const TRIAGE_RULES = [
+  { re: /gas|incendio|fuego|humo|cortocircuito|atrapad|inundaci/, category: 'Seguridad', priority: 'critical', reason: 'Riesgo para las personas o el edificio: requiere atención inmediata.' },
+  { re: /ascensor|elevador/, category: 'Ascensores', priority: 'high', reason: 'El ascensor afecta la movilidad de varios departamentos.' },
+  { re: /agua|fuga|filtraci|tuber|desag|caño|inodoro|ducha|gasfiter/, category: 'Gasfitería', priority: 'high', reason: 'Una fuga de agua puede dañar otros departamentos si no se atiende pronto.' },
+  { re: /luz|luminaria|foco|eléctric|electric|enchufe|tablero/, category: 'Electricidad', priority: 'medium', reason: 'Falla eléctrica sin riesgo inmediato reportado.' },
+  { re: /puerta|cerradura|cámara|camara|robo|portón|porton|seguridad/, category: 'Seguridad', priority: 'high', reason: 'Afecta el control de acceso del edificio.' },
+  { re: /basura|limpieza|sucio|olor/, category: 'Limpieza', priority: 'low', reason: 'Tema de limpieza sin riesgo para las personas.' },
+  { re: /ruido|vecino|mascota|música|musica/, category: 'Convivencia', priority: 'low', reason: 'Tema de convivencia entre vecinos.' },
+  { re: /grieta|pared|techo|piso|estructura/, category: 'Estructura', priority: 'medium', reason: 'Daño en la estructura que conviene revisar.' },
+  { re: /piscina|gimnasio|jardín|jardin|parque|sum|terraza/, category: 'Áreas comunes', priority: 'medium', reason: 'Afecta un área común del edificio.' },
+]
+
+function mockTriage(row) {
+  const text = `${row.title ?? ''} ${row.description ?? ''}`.toLowerCase()
+  const rule = TRIAGE_RULES.find((r) => r.re.test(text))
+  return rule
+    ? { category: rule.category, priority: rule.priority, reason: rule.reason }
+    : { category: 'Otros', priority: 'medium', reason: 'No hay datos suficientes para una prioridad mayor.' }
+}
+
+function triageSummary(category, priority) {
+  return [category && `Categoría: ${category}`, priority && `Prioridad: ${priority}`].filter(Boolean).join(' · ')
+}
+
+function withTriageSuggestion(row, events) {
+  const s = mockTriage(row)
+  events.push(mockIncidentEvent('ai_triage_suggested', row.status, triageSummary(s.category, s.priority), ASSISTANT_ACTOR))
+  return { ...s, suggestedAt: new Date().toISOString() }
+}
+
+/** Campos derivados que calcula el backend (escalated, aiSuggestion.pending). */
+function derivedIncidentFields(row) {
+  const unassigned = !row.providerId && !row.provider
+  const s = row.aiSuggestion
+  return {
+    escalated: !!row.escalatedAt && row.status === 'open' && unassigned,
+    ...(s
+      ? {
+          aiSuggestion: {
+            ...s,
+            pending:
+              String(s.category ?? '').toLowerCase() !== String(row.category ?? '').toLowerCase() ||
+              (s.priority ?? null) !== (row.priority ?? null),
+          },
+        }
+      : {}),
+  }
+}
+
+/** EscalationPolicy de la demo: abierta y sin proveedor por más de 48 h → se escala una sola vez. */
+function sweepIncidents() {
+  const now = Date.now()
+  for (const row of queryCollection('incidents', {})) {
+    const patch = {}
+    const unassigned = !row.providerId && !row.provider
+    const reported = new Date(row.createdAt || 0).getTime()
+    if (!row.escalatedAt && row.status === 'open' && unassigned && reported && now - reported >= ESCALATION_MS) {
+      patch.escalatedAt = new Date().toISOString()
+      patch.events = [
+        ...(Array.isArray(row.events) ? row.events : []),
+        mockIncidentEvent('escalated', row.status, 'Sin asignar por más de 48 horas: se avisó a la administración.', { id: null, role: 'system' }),
+      ]
+    }
+    const derived = derivedIncidentFields({ ...row, ...patch })
+    if (patch.escalatedAt || derived.escalated !== row.escalated || derived.aiSuggestion?.pending !== row.aiSuggestion?.pending) {
+      patchRow('incidents', row.id, { ...patch, ...derived })
+    }
+  }
+}
+
 /**
  * Preview mock de Incidents / Communications: replica las reglas del backend
  * (asunto obligatorio, comentario de resolución, historial, vigencia y orden de comunicados).
@@ -1211,6 +1285,7 @@ function handleIncidentsAndAnnouncements(config, method, parts) {
   }
 
   if (collection !== 'incidents') return null
+  sweepIncidents()
 
   if (!id && method === 'POST') {
     if (!String(body.title ?? body.subject ?? '').trim()) {
@@ -1237,7 +1312,9 @@ function handleIncidentsAndAnnouncements(config, method, parts) {
       providerSpecialty: provider?.specialty ?? null,
       events,
     }
-    return ok(config, insertRow('incidents', row), 201)
+    // Triaje automático al reportar sin categoría o prioridad (la demo no consume cupo de IA).
+    if (!String(row.category ?? '').trim() || !row.priority) row.aiSuggestion = withTriageSuggestion(row, events)
+    return ok(config, insertRow('incidents', { ...row, ...derivedIncidentFields(row) }), 201)
   }
 
   if (!id) return null
@@ -1260,7 +1337,7 @@ function handleIncidentsAndAnnouncements(config, method, parts) {
       }
       events.push(mockIncidentEvent('status_changed', body.status, null, actor))
     }
-    return ok(config, replaceRow('incidents', id, next))
+    return ok(config, replaceRow('incidents', id, { ...next, ...derivedIncidentFields(next) }))
   }
 
   if (action === 'assign' && method === 'PATCH') {
@@ -1280,6 +1357,7 @@ function handleIncidentsAndAnnouncements(config, method, parts) {
         providerSpecialty: provider?.specialty ?? null,
         status,
         events,
+        ...derivedIncidentFields({ ...current, providerId: provider?.id ?? null, provider: provider?.name ?? '', status }),
       }),
     )
   }
@@ -1297,7 +1375,31 @@ function handleIncidentsAndAnnouncements(config, method, parts) {
         resolutionComment: comment,
         resolvedAt: new Date().toISOString(),
         events,
+        escalated: false,
       }),
+    )
+  }
+
+  if (action === 'triage-suggestion' && method === 'POST') {
+    if (actor.role !== SessionRoles.ADMIN) fail(config, 403, 'FORBIDDEN', 'Solo el administrador.')
+    const aiSuggestion = withTriageSuggestion(current, events)
+    const next = { ...current, aiSuggestion, events }
+    return ok(config, patchRow('incidents', id, { aiSuggestion, events, ...derivedIncidentFields(next) }))
+  }
+
+  if (action === 'triage' && method === 'PATCH') {
+    if (actor.role !== SessionRoles.ADMIN) fail(config, 403, 'FORBIDDEN', 'Solo el administrador.')
+    const s = current.aiSuggestion
+    const category = String(body.category ?? '').trim() || s?.category || null
+    const priority = String(body.priority ?? '').trim() || s?.priority || null
+    if (!category && !priority) {
+      fail(config, 400, 'TRIAGE_SUGGESTION_REQUIRED', 'No hay una sugerencia de triaje para confirmar.')
+    }
+    const next = { ...current, category: category ?? current.category, priority: priority ?? current.priority }
+    events.push(mockIncidentEvent('triage_confirmed', current.status, triageSummary(next.category, next.priority), actor))
+    return ok(
+      config,
+      patchRow('incidents', id, { category: next.category, priority: next.priority, events, ...derivedIncidentFields(next) }),
     )
   }
 

@@ -245,6 +245,22 @@ export function createSeedDb() {
         ],
         ownerAdminId: owner,
       },
+      {
+        // Abierta y sin proveedor por más de 48 h: la demo la escala (EscalationPolicy).
+        id: 'inc-4',
+        residentId: 'preview-resident-3',
+        residentName: 'Carla Ríos',
+        title: 'Puerta de la cochera no cierra',
+        description: 'La puerta levadiza de la cochera se queda abierta después de pasar.',
+        status: 'open',
+        provider: '',
+        providerId: null,
+        createdAt: isoHoursAgo(60),
+        events: [
+          { id: 9031, type: 'reported', status: 'open', comment: null, authorId: 'preview-resident-3', authorName: 'Carla Ríos', authorRole: 'resident', createdAt: isoHoursAgo(60) },
+        ],
+        ownerAdminId: owner,
+      },
     ],
     announcements: [
       {
