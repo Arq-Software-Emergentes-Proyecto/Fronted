@@ -22,17 +22,14 @@ export const PLAN_MODULES = /** @type {const} */ ([
   'visits',
   'aiAssistant',
   'debtVisibility',
-  'massNotifications',
   'aiIncidentClassification',
-  'advancedReports',
   'implementationAssistance',
   'multiBuildingConsole',
-  'consolidatedReconciliation',
 ])
 
-const ESSENTIAL = PLAN_MODULES.slice(0, 7)
-const STANDARD = PLAN_MODULES.slice(0, 10)
-const SCALE = PLAN_MODULES.slice(0, 12)
+const ESSENTIAL = PLAN_MODULES.slice(0, 8)
+const STANDARD = PLAN_MODULES.slice(0, 9)
+const SCALE = PLAN_MODULES.slice(0, 10)
 
 function plan(id, name, minDepartments, support, modules, extra = {}) {
   return {

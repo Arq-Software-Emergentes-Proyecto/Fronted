@@ -87,11 +87,11 @@
       },
       "documents": {
         "label": "Documents",
-        "help": "Building rules, minutes and files shared with residents."
+        "help": "Building rules, minutes and files; the assistant answers residents with them."
       },
       "visits": {
-        "label": "Visitor log",
-        "help": "Guest and visitor control for the building."
+        "label": "Guests with QR",
+        "help": "QR passes for the guests of a booking and check-in at the front desk."
       },
       "aiAssistant": {
         "label": "AI assistant",
@@ -99,31 +99,19 @@
       },
       "debtVisibility": {
         "label": "Debt visibility",
-        "help": "Delinquency report: who owes, how much and since when."
-      },
-      "massNotifications": {
-        "label": "Mass notifications",
-        "help": "Send notices to every resident at once."
+        "help": "Building delinquency: who owes, how much and since when (traffic-light calendar)."
       },
       "aiIncidentClassification": {
         "label": "AI incident triage",
         "help": "AI suggests the category and priority of each reported incident."
-      },
-      "advancedReports": {
-        "label": "Advanced reports",
-        "help": "Detailed financial and operational reports for large boards and committees."
       },
       "implementationAssistance": {
         "label": "Implementation assistance",
         "help": "Our team helps you set up the building and import the roster."
       },
       "multiBuildingConsole": {
-        "label": "Multi-building console",
-        "help": "Manage a management company's buildings from a single account."
-      },
-      "consolidatedReconciliation": {
-        "label": "Consolidated reconciliation",
-        "help": "Reconcile payments of every building in the portfolio in one place."
+        "label": "Several buildings",
+        "help": "Register several buildings of a management company under the same account."
       }
     }
   },

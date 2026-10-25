@@ -87,11 +87,11 @@
       },
       "documents": {
         "label": "Documentos",
-        "help": "Reglamento, actas y archivos del edificio compartidos con los residentes."
+        "help": "Reglamento, actas y archivos del edificio; el asistente responde a los residentes con ellos."
       },
       "visits": {
-        "label": "Registro de visitas",
-        "help": "Control de invitados y visitas al edificio."
+        "label": "Invitados con QR",
+        "help": "Pases con código QR para los invitados de una reserva y registro de su ingreso en portería."
       },
       "aiAssistant": {
         "label": "Asistente de IA",
@@ -99,31 +99,19 @@
       },
       "debtVisibility": {
         "label": "Visibilidad de deudas",
-        "help": "Reporte de morosidad: quién debe, cuánto y desde cuándo."
-      },
-      "massNotifications": {
-        "label": "Notificaciones masivas",
-        "help": "Envío de avisos a todos los residentes a la vez."
+        "help": "Morosidad del edificio: quién debe, cuánto y desde cuándo (calendario semaforizado)."
       },
       "aiIncidentClassification": {
         "label": "Clasificación de incidencias con IA",
         "help": "La IA sugiere la categoría y la prioridad de cada incidencia reportada."
-      },
-      "advancedReports": {
-        "label": "Reportes avanzados",
-        "help": "Reportes financieros y operativos detallados para juntas y comités grandes."
       },
       "implementationAssistance": {
         "label": "Asistencia en la implementación",
         "help": "Acompañamiento del equipo para configurar el edificio e importar el padrón."
       },
       "multiBuildingConsole": {
-        "label": "Consola multiedificio",
-        "help": "Gestiona varios edificios de una administradora desde una sola cuenta."
-      },
-      "consolidatedReconciliation": {
-        "label": "Conciliación consolidada",
-        "help": "Conciliación de pagos de todos los edificios de la cartera en un solo lugar."
+        "label": "Varios edificios",
+        "help": "Registra varios edificios de una administradora en la misma cuenta."
       }
     }
   },
