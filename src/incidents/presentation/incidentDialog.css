@@ -156,6 +156,12 @@
   color: #7f1d1d;
 }
 
+.inc-dialog .incd-note a {
+  color: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+}
+
 .inc-dialog .incd-note .pi {
   margin-top: 0.12rem;
   font-size: 0.75rem;
@@ -204,6 +210,22 @@
 .inc-dialog .incd-block--resolved {
   background: #e3f4e8;
   border-color: transparent;
+}
+
+.inc-dialog .incd-note--escalated {
+  background: #fde4e4;
+  color: #7f1d1d;
+  font-weight: 600;
+}
+
+.inc-dialog .incd-block--ai {
+  background: #f7f4fe;
+  border-color: rgba(91, 33, 182, 0.12);
+}
+
+.inc-dialog .incd-block--ai .incd-block__title .pi {
+  color: #5b21b6;
+  font-size: 0.72rem;
 }
 
 .inc-dialog .incd-block__title {
@@ -417,6 +439,8 @@
 .inc-pill--high { background: #fdeee2; color: #9a3412; }
 .inc-pill--critical { background: #fde4e4; color: #b42318; }
 .inc-pill--soft { background: #f1f5f9; color: #475569; font-weight: 600; }
+.inc-pill--escalated { background: #b42318; color: #fff; }
+.inc-pill--ai { background: #efe9fd; color: #5b21b6; }
 
 .inc-pill__dot {
   width: 0.42rem;

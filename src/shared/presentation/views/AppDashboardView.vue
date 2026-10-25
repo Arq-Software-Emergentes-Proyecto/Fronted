@@ -11,6 +11,7 @@ import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import { buildingsApi } from '@/profiles/infrastructure/buildingsApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
 import { AppRouteNames } from '@/shared/domain/appRoutes.js'
+import { INCIDENT_ESCALATION_HOURS } from '@/incidents/domain/model/incidentConstants.js'
 import { residentsApi } from '@/residents/infrastructure/residentsApi.js'
 import { supportApi } from '@/residentCare/infrastructure/supportApi.js'
 import KpiSparkline from '@/shared/presentation/components/dashboard/KpiSparkline.vue'
@@ -431,6 +432,7 @@ const unresolvedIncidents = computed(() => {
     total: list.length,
     open: list.filter((row) => (row.status || 'open') === 'open').length,
     inProgress: list.filter((row) => row.status === 'in-progress').length,
+    escalated: list.filter((row) => row.escalated === true).length,
   }
 })
 
@@ -447,6 +449,20 @@ const missingMonthlyCharge = computed(
 const agendaItems = computed(() => {
   const items = []
   const inc = unresolvedIncidents.value
+  // Escalamiento: abiertas y sin proveedor por más de 48 h (lo marca el backend cada hora).
+  if (inc.escalated > 0) {
+    items.push({
+      key: 'escalated',
+      tone: 'red',
+      icon: 'pi-exclamation-triangle',
+      badge: inc.escalated,
+      title: t('dashboard.agendaEscalatedTitle', { n: inc.escalated }, inc.escalated),
+      short: t('dashboard.agendaEscalatedShort'),
+      detail: t('dashboard.agendaEscalatedDetail', { hours: INCIDENT_ESCALATION_HOURS }),
+      action: t('dashboard.agendaEscalatedAction'),
+      to: { name: AppRouteNames.APP_INCIDENTS, query: { filter: 'escalated' } },
+    })
+  }
   if (inc.total > 0) {
     items.push({
       key: 'incidents',

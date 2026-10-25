@@ -34,7 +34,13 @@ export const IncidentEventType = Object.freeze({
   UNASSIGNED: 'unassigned',
   RESOLVED: 'resolved',
   COMMENT: 'comment',
+  ESCALATED: 'escalated',
+  AI_TRIAGE_SUGGESTED: 'ai_triage_suggested',
+  TRIAGE_CONFIRMED: 'triage_confirmed',
 })
+
+/** Horas sin asignar tras las que el backend escala la incidencia (EscalationPolicy). */
+export const INCIDENT_ESCALATION_HOURS = 48
 
 /** Eventos SignalR emitidos por el backend en /hubs/support. */
 export const IncidentRealtimeEvent = Object.freeze({

@@ -15,6 +15,7 @@ function authorLabel(ev) {
   if (ev.authorName) return ev.authorName
   if (ev.authorRole === 'admin') return t('incidentFlow.authorAdmin')
   if (ev.authorRole === 'resident') return t('incidentFlow.authorResident')
+  if (ev.authorRole === 'assistant') return t('incidentFlow.authorAssistant')
   return t('incidentFlow.authorSystem')
 }
 
@@ -87,6 +88,9 @@ function showComment(ev) {
 .itl__item--unassigned .itl__dot { background: #b45309; }
 .itl__item--resolved .itl__dot { background: #15803d; }
 .itl__item--comment .itl__dot { background: #64748b; }
+.itl__item--escalated .itl__dot { background: #b42318; }
+.itl__item--ai_triage_suggested .itl__dot,
+.itl__item--triage_confirmed .itl__dot { background: #5b21b6; }
 
 .itl__empty {
   margin: 0;

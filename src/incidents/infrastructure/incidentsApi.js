@@ -97,6 +97,21 @@ export const incidentsApi = {
     return data
   },
 
+  /** POST /incidents/{id}/triage-suggestion — la IA sugiere categoría y prioridad (plan Standard+). */
+  async requestTriageSuggestion(id) {
+    const { data } = await apiClient.post(incidentPath(id, '/triage-suggestion'))
+    return data
+  },
+
+  /** PATCH /incidents/{id}/triage — sin valores aplica la sugerencia de la IA; con valores la corrige. */
+  async confirmTriage(id, { category = null, priority = null } = {}) {
+    const { data } = await apiClient.patch(incidentPath(id, '/triage'), {
+      category: category || null,
+      priority: priority || null,
+    })
+    return data
+  },
+
   async remove(id) {
     await apiClient.delete(incidentPath(id))
   },
