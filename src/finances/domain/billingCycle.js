@@ -246,6 +246,7 @@ export function normalizeSettings(row = {}) {
     admissionPayToDay: admissionRange.admissionPayToDay,
     baseMonthlyExpense: Number(latest?.amount || row.baseMonthlyExpense) || 150,
     monthlyCharges: sortCharges(charges),
+    restrictReservationsWhenDelinquent: row.restrictReservationsWhenDelinquent === true,
   }
 }
 
@@ -258,5 +259,6 @@ export function settingsToPayload(settings) {
     admissionPayToDay: normalized.admissionPayToDay,
     baseMonthlyExpense: normalized.baseMonthlyExpense,
     monthlyCharges: normalized.monthlyCharges,
+    restrictReservationsWhenDelinquent: normalized.restrictReservationsWhenDelinquent,
   }
 }

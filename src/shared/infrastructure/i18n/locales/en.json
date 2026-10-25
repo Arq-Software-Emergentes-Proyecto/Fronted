@@ -423,7 +423,8 @@
       "detailTime": "Time",
       "timeRange": "{start} – {end}",
       "monthGridAria": "Days of {month}"
-    }
+    },
+    "errDelinquent": "You have a fee overdue by more than 30 days. The building rules do not allow booking common areas until the payment is settled."
   },
   "app": {
     "residentAccountDeactivated": "Account deactivated",
@@ -862,7 +863,11 @@
     "openMenu": "Open menu",
     "closeMenu": "Close menu",
     "demoMode": "Demo mode",
-    "demoModeHint": "Test account: the data are samples that live only in this browser."
+    "demoModeHint": "Test account: the data are samples that live only in this browser.",
+    "editResidentAction": "Edit resident",
+    "editResidentModalTitle": "Edit resident",
+    "editResidentError": "The resident changes could not be saved.",
+    "saveChangesAction": "Save changes"
   },
   "incidentStatusOpen": "Open",
   "incidentStatusInProgress": "In Progress",
@@ -1239,7 +1244,9 @@
     "historyDialogTitle": "Payment history",
     "admissionOn": "Joined {date}",
     "extraAdded": "Charge added for {name}.",
-    "dismissNotice": "Dismiss notice"
+    "dismissNotice": "Dismiss notice",
+    "restrictReservations": "Restrict bookings for delinquent residents",
+    "restrictReservationsHint": "If the building rules require it: residents with a fee overdue by more than 30 days cannot book common areas until they pay. Management can still book on their behalf."
   },
   "teamMgmt": {
     "positionLabel": "Position",
@@ -1624,7 +1631,14 @@
     "closedBannerHint": "You can start a new chat whenever you need.",
     "composerLabel": "Write your question for the assistant",
     "composerHint": "Enter to send · Shift + Enter for a new line",
-    "justNow": "Now"
+    "justNow": "Now",
+    "reportIncident": "Report as an incident",
+    "reportIncidentHint": "Management will see it in the incidents inbox.",
+    "incidentLinkedBanner": "Incident reported",
+    "incidentLinkedHint": "We will let you know in this conversation when it is resolved.",
+    "incidentLinkedLink": "View in Incidents",
+    "incidentAlreadyReported": "This conversation already has an incident.",
+    "incidentReportError": "The incident could not be reported. Try again or report it from Incidents."
   },
   "supportAdmin": {
     "title": "Support",
@@ -2251,7 +2265,8 @@
     "providerAdded": "Provider added",
     "lateFeeSaved": "Late fee saved",
     "rulesSaved": "Rules saved",
-    "planUpdated": "Plan updated"
+    "planUpdated": "Plan updated",
+    "residentUpdated": "Resident updated"
   },
   "kpiShort": {
     "activeAccounts": "Active",

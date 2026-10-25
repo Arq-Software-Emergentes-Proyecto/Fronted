@@ -20,6 +20,7 @@ import {
   realtimeAvailable,
 } from '@/residentCare/infrastructure/supportRealtime.js'
 import { isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
+import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 
 const { t, locale } = useI18n()
 const { state: sessionState } = useSession()
@@ -183,6 +184,36 @@ const displayMessages = computed(() => {
 })
 
 const hasAiMessages = computed(() => displayMessages.value.length > 0 || Boolean(sendFailure.value))
+
+/** ReportarIncidente: solo cuando el residente ya contó algo en esta conversación y aún no se registró. */
+const reportingIncident = ref(false)
+const canReportIncident = computed(
+  () =>
+    Boolean(activeAiChat.value?.id) &&
+    !activeAiChat.value?.incidentId &&
+    (activeAiChat.value?.messages || []).some((m) => m.role === 'user'),
+)
+
+async function reportIncidentFromChat() {
+  const chat = activeAiChat.value
+  if (!chat?.id || reportingIncident.value) return
+  reportingIncident.value = true
+  aiNotice.value = ''
+  try {
+    const updated = await supportApi.reportIncident(chat.id)
+    upsertLocalChat(updated)
+    const notice = (updated.messages || []).at(-1)
+    if (notice?.id) markFresh('supportMessage', notice.id)
+    await scrollAiToBottom()
+  } catch (error) {
+    aiNotice.value =
+      error?.payload?.code === 'INCIDENT_ALREADY_REPORTED'
+        ? t('supportResident.incidentAlreadyReported')
+        : t('supportResident.incidentReportError')
+  } finally {
+    reportingIncident.value = false
+  }
+}
 const activeStatusNote = computed(() => {
   const status = activeAiChat.value?.status
   if (status === 'derived') return t('supportResident.statusDerived')
@@ -781,6 +812,17 @@ function onAiSuggestion(kind) {
             </div>
           </div>
 
+          <div v-if="activeAiChat?.incidentId" class="banner banner--blue" role="status">
+            <i class="pi pi-flag" aria-hidden="true" />
+            <div>
+              <strong>{{ t('supportResident.incidentLinkedBanner') }}</strong>
+              <span>
+                {{ t('supportResident.incidentLinkedHint') }}
+                <RouterLink :to="{ name: AppRouteNames.APP_RESIDENT_INCIDENTS }">{{ t('supportResident.incidentLinkedLink') }}</RouterLink>
+              </span>
+            </div>
+          </div>
+
           <div v-if="!hasAiMessages" class="chat-empty">
             <span class="bot-avatar bot-avatar--xl" aria-hidden="true"><i class="pi pi-sparkles" /></span>
             <h2 class="chat-empty__title">{{ t('supportResident.aiGreeting') }}</h2>
@@ -893,6 +935,18 @@ function onAiSuggestion(kind) {
           </div>
 
           <div class="composer-dock">
+            <div v-if="canReportIncident" class="composer-actions">
+              <button
+                type="button"
+                class="pill-btn"
+                :disabled="reportingIncident || aiSending"
+                @click="reportIncidentFromChat"
+              >
+                <i class="pi" :class="reportingIncident ? 'pi-spin pi-spinner' : 'pi-flag'" aria-hidden="true" />
+                {{ t('supportResident.reportIncident') }}
+              </button>
+              <span class="composer-actions__hint">{{ t('supportResident.reportIncidentHint') }}</span>
+            </div>
             <div class="composer">
               <label class="sr-only" for="resident-composer">{{ t('supportResident.composerLabel') }}</label>
               <textarea
@@ -1826,6 +1880,17 @@ function onAiSuggestion(kind) {
   color: #475467;
 }
 
+.banner--blue {
+  background: #e8eefc;
+  color: #1e3a8a;
+}
+
+.banner--blue a {
+  color: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+}
+
 .chat-empty {
   flex: 1;
   min-height: 0;
@@ -2060,6 +2125,19 @@ function onAiSuggestion(kind) {
 .composer-dock {
   flex-shrink: 0;
   padding: 0.6rem max(1.25rem, calc(50% - 25rem)) 0.9rem;
+}
+
+.composer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.composer-actions__hint {
+  font-size: 0.74rem;
+  color: #6e6e73;
 }
 
 .composer {

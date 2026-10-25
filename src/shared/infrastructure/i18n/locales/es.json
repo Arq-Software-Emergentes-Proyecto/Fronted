@@ -423,7 +423,8 @@
       "detailTime": "Horario",
       "timeRange": "{start} – {end}",
       "monthGridAria": "Días de {month}"
-    }
+    },
+    "errDelinquent": "Tienes una cuota vencida hace más de 30 días. El reglamento del edificio no permite reservar áreas comunes hasta regularizar el pago."
   },
   "app": {
     "residentAccountDeactivated": "Cuenta desactivada",
@@ -862,7 +863,11 @@
     "openMenu": "Abrir menú",
     "closeMenu": "Cerrar menú",
     "demoMode": "Modo demo",
-    "demoModeHint": "Cuenta de prueba: los datos son de ejemplo y solo viven en este navegador."
+    "demoModeHint": "Cuenta de prueba: los datos son de ejemplo y solo viven en este navegador.",
+    "editResidentAction": "Editar residente",
+    "editResidentModalTitle": "Editar residente",
+    "editResidentError": "No se pudieron guardar los cambios del residente.",
+    "saveChangesAction": "Guardar cambios"
   },
   "incidentStatusOpen": "Abierta",
   "incidentStatusInProgress": "En progreso",
@@ -1239,7 +1244,9 @@
     "historyDialogTitle": "Historial de pagos",
     "admissionOn": "Ingreso: {date}",
     "extraAdded": "Monto agregado a {name}.",
-    "dismissNotice": "Cerrar aviso"
+    "dismissNotice": "Cerrar aviso",
+    "restrictReservations": "Restringir reservas a residentes morosos",
+    "restrictReservationsHint": "Si el reglamento lo exige: quien tenga una cuota vencida hace más de 30 días no podrá reservar áreas comunes hasta pagar. La administración sí puede reservar a su nombre."
   },
   "teamMgmt": {
     "positionLabel": "Puesto",
@@ -1624,7 +1631,14 @@
     "closedBannerHint": "Puedes iniciar un chat nuevo cuando lo necesites.",
     "composerLabel": "Escribe tu pregunta para el asistente",
     "composerHint": "Enter para enviar · Shift + Enter para una nueva línea",
-    "justNow": "Ahora"
+    "justNow": "Ahora",
+    "reportIncident": "Reportar como incidencia",
+    "reportIncidentHint": "La administración la verá en su bandeja de incidencias.",
+    "incidentLinkedBanner": "Incidencia registrada",
+    "incidentLinkedHint": "Te avisaremos en esta conversación cuando se resuelva.",
+    "incidentLinkedLink": "Ver en Incidencias",
+    "incidentAlreadyReported": "Esta conversación ya tiene una incidencia registrada.",
+    "incidentReportError": "No se pudo registrar la incidencia. Intenta de nuevo o repórtala desde Incidencias."
   },
   "supportAdmin": {
     "title": "Soporte",
@@ -2251,7 +2265,8 @@
     "providerAdded": "Proveedor agregado",
     "lateFeeSaved": "Mora guardada",
     "rulesSaved": "Reglas guardadas",
-    "planUpdated": "Plan actualizado"
+    "planUpdated": "Plan actualizado",
+    "residentUpdated": "Residente actualizado"
   },
   "kpiShort": {
     "activeAccounts": "Activas",

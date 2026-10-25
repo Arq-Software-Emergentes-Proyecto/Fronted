@@ -144,6 +144,7 @@ function publicSupportChat(row) {
     kind: row.kind ?? '',
     source: row.source ?? 'resident',
     linkedChatId: row.linkedChatId ?? row.escalatedChatId ?? '',
+    incidentId: row.incidentId ?? '',
     escalatedChatId: row.escalatedChatId ?? row.linkedChatId ?? '',
     aiChatId: row.aiChatId ?? row.linkedChatId ?? '',
     messages: Array.isArray(row.messages) ? row.messages : [],
@@ -800,6 +801,33 @@ function handleV1(config, method, parts) {
       return ok(config, publicSupportChat(created), 201)
     }
 
+    // ReportarIncidente: la consulta del residente pasa a Incidents (como SupportController.ReportIncident).
+    const incidentMatch = rest.match(/^([^/]+)\/incident$/)
+    if (incidentMatch && method === 'POST') {
+      const chat = findById('supportChats', incidentMatch[1])
+      if (!chat) fail(config, 404, 'CHAT_NOT_FOUND', 'Chat not found')
+      if (chat.incidentId) {
+        fail(config, 409, 'INCIDENT_ALREADY_REPORTED', 'Esta conversación ya tiene una incidencia registrada.')
+      }
+      const said = (chat.messages || []).filter((m) => m.role === 'user').map((m) => String(m.body ?? '').trim())
+      const description = String(body.description ?? '').trim() || said.slice(-3).join('\n')
+      if (!description) fail(config, 400, 'DESCRIPTION_REQUIRED', 'Describe el problema antes de reportarlo.')
+      let title = String(body.title ?? '').trim() || String(chat.topic ?? '').trim() || description.split('\n')[0]
+      if (title.length > 80) title = `${title.slice(0, 80).trimEnd()}…`
+      const incident = createMockIncidentFromChat(chat, title, description, actor)
+      const messages = [
+        ...(chat.messages || []),
+        {
+          id: `msg-${Date.now()}`,
+          role: 'ai',
+          authorRole: 'assistant',
+          body: `Registré tu reporte como la incidencia «${incident.title}». La administración ya la ve en su bandeja; te avisaré aquí cuando se resuelva y puedes seguirla en Incidencias.`,
+          createdAt: now(),
+        },
+      ]
+      return ok(config, publicSupportChat(patchRow('supportChats', chat.id, { incidentId: incident.id, messages, updatedAt: now() })))
+    }
+
     const messageMatch = rest.match(/^([^/]+)\/messages$/)
     if (messageMatch && method === 'POST') {
       const chatId = messageMatch[1]
@@ -1172,6 +1200,69 @@ function withTriageSuggestion(row, events) {
   return { ...s, suggestedAt: new Date().toISOString() }
 }
 
+function createMockIncidentFromChat(chat, title, description, actor) {
+  const events = [mockIncidentEvent('reported', 'open', null, actor)]
+  const row = {
+    id: `incident-${Date.now()}`,
+    title,
+    description,
+    status: 'open',
+    residentId: chat.residentId || actor.id,
+    residentName: chat.residentName || '',
+    ownerAdminId: chat.ownerAdminId || MOCK_OWNER_ID,
+    provider: '',
+    providerId: null,
+    sourceChatId: chat.id,
+    createdAt: new Date().toISOString(),
+    events,
+  }
+  row.aiSuggestion = withTriageSuggestion(row, events)
+  return insertRow('incidents', { ...row, ...derivedIncidentFields(row) })
+}
+
+/** IncidenteResuelto → Resident Care: aviso en el chat de origen y cierre de la solicitud. */
+export function notifyMockIncidentResolved(incident) {
+  if (!incident?.sourceChatId) return
+  const chat = findById('supportChats', incident.sourceChatId)
+  if (!chat) return
+  const detail = incident.resolutionComment ? ` Detalle: ${incident.resolutionComment}` : ''
+  const at = new Date().toISOString()
+  patchRow('supportChats', chat.id, {
+    messages: [
+      ...(chat.messages || []),
+      {
+        id: `msg-${Date.now()}`,
+        role: chat.kind === 'ai' ? 'ai' : 'admin',
+        authorRole: chat.kind === 'ai' ? 'assistant' : 'admin',
+        authorName: chat.kind === 'ai' ? undefined : 'Administración',
+        body: `Tu incidencia «${incident.title}» fue resuelta.${detail} Si el problema continúa, escríbenos aquí.`,
+        createdAt: at,
+      },
+    ],
+    status: 'closed',
+    closedAt: at,
+    updatedAt: at,
+  })
+}
+
+/** Resuelve una incidencia desde Team (TareaCompletada) con el comentario de la tarea. */
+export function resolveMockIncidentFromTask(incidentId, comment) {
+  const current = findById('incidents', incidentId)
+  if (!current || current.status === 'resolved') return
+  const events = [
+    ...(Array.isArray(current.events) ? current.events : []),
+    { ...mockIncidentEvent('resolved', 'resolved', comment, { id: null, role: 'system' }), authorName: 'Equipo de mantenimiento' },
+  ]
+  const resolved = patchRow('incidents', incidentId, {
+    status: 'resolved',
+    resolutionComment: comment,
+    resolvedAt: new Date().toISOString(),
+    escalated: false,
+    events,
+  })
+  notifyMockIncidentResolved(resolved)
+}
+
 /** Campos derivados que calcula el backend (escalated, aiSuggestion.pending). */
 function derivedIncidentFields(row) {
   const unassigned = !row.providerId && !row.provider
@@ -1337,7 +1428,9 @@ function handleIncidentsAndAnnouncements(config, method, parts) {
       }
       events.push(mockIncidentEvent('status_changed', body.status, null, actor))
     }
-    return ok(config, replaceRow('incidents', id, { ...next, ...derivedIncidentFields(next) }))
+    const saved = replaceRow('incidents', id, { ...next, ...derivedIncidentFields(next) })
+    if (saved?.status === 'resolved' && current.status !== 'resolved') notifyMockIncidentResolved(saved)
+    return ok(config, saved)
   }
 
   if (action === 'assign' && method === 'PATCH') {
@@ -1368,16 +1461,15 @@ function handleIncidentsAndAnnouncements(config, method, parts) {
       fail(config, 400, 'RESOLUTION_COMMENT_REQUIRED', 'Documenta la solución antes de resolver.')
     }
     events.push(mockIncidentEvent('resolved', 'resolved', comment, actor))
-    return ok(
-      config,
-      patchRow('incidents', id, {
-        status: 'resolved',
-        resolutionComment: comment,
-        resolvedAt: new Date().toISOString(),
-        events,
-        escalated: false,
-      }),
-    )
+    const resolved = patchRow('incidents', id, {
+      status: 'resolved',
+      resolutionComment: comment,
+      resolvedAt: new Date().toISOString(),
+      events,
+      escalated: false,
+    })
+    notifyMockIncidentResolved(resolved)
+    return ok(config, resolved)
   }
 
   if (action === 'triage-suggestion' && method === 'POST') {

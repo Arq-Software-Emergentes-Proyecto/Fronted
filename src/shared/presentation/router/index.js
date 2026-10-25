@@ -12,6 +12,7 @@ import {
 } from '@/iam/application/localPreviewAuth.js'
 import { freshSessionToken } from '@/iam/infrastructure/firebaseSession.js'
 import { AppPaths, AppRouteNames } from '@/shared/domain/appRoutes.js'
+import { applyPageMeta } from '@/shared/presentation/router/pageMeta.js'
 import AuthView from '@/iam/presentation/views/AuthView.vue'
 import AppShellView from '@/shared/presentation/views/AppShellView.vue'
 import AppDashboardView from '@/shared/presentation/views/AppDashboardView.vue'
@@ -222,5 +223,7 @@ router.beforeEach(async (to) => {
 
   return true
 })
+
+router.afterEach((to) => applyPageMeta(to))
 
 export default router
