@@ -185,12 +185,51 @@ const displayMessages = computed(() => {
 
 const hasAiMessages = computed(() => displayMessages.value.length > 0 || Boolean(sendFailure.value))
 
+/** Conversación cerrada (duda resuelta o incidencia registrada): solo lectura. */
+const isChatClosed = computed(() => activeAiChat.value?.status === 'closed')
+
+/** "¿Se resolvió tu duda?" tras la última respuesta del asistente; "No" la oculta hasta la siguiente respuesta. */
+const dismissedResolvePrompt = ref('')
+const closingChat = ref(false)
+const lastAiMessageId = computed(() => {
+  const last = (activeAiChat.value?.messages || []).at(-1)
+  return last && last.role === 'ai' ? last.id : ''
+})
+const showResolvePrompt = computed(
+  () =>
+    Boolean(lastAiMessageId.value) &&
+    !isChatClosed.value &&
+    activeAiChat.value?.status !== 'derived' &&
+    !activeAiChat.value?.incidentId &&
+    !aiSending.value &&
+    dismissedResolvePrompt.value !== lastAiMessageId.value,
+)
+
+async function confirmResolved() {
+  const chat = activeAiChat.value
+  if (!chat?.id || closingChat.value) return
+  closingChat.value = true
+  try {
+    upsertLocalChat(await supportApi.closeChat(chat.id))
+  } catch {
+    aiNotice.value = t('supportResident.closeChatError')
+  } finally {
+    closingChat.value = false
+  }
+}
+
+function notResolved() {
+  dismissedResolvePrompt.value = lastAiMessageId.value
+  focusComposer()
+}
+
 /** ReportarIncidente: solo cuando el residente ya contó algo en esta conversación y aún no se registró. */
 const reportingIncident = ref(false)
 const canReportIncident = computed(
   () =>
     Boolean(activeAiChat.value?.id) &&
     !activeAiChat.value?.incidentId &&
+    !isChatClosed.value &&
     (activeAiChat.value?.messages || []).some((m) => m.role === 'user'),
 )
 
@@ -436,6 +475,9 @@ function describeSendError(error) {
   if (code === 'AI_UNAVAILABLE' || error?.status === 503) {
     return { message: t('supportResident.aiUnavailable'), retryable: true, offerAdmin: true }
   }
+  if (code === 'CHAT_CLOSED') {
+    return { message: t('supportResident.chatClosedSend'), retryable: false, offerAdmin: false }
+  }
   if (code === 'GEMINI_RATE_LIMITED') {
     return { message: t('supportResident.aiBusy'), retryable: true, offerAdmin: false }
   }
@@ -449,7 +491,8 @@ async function sendAiMessage(preset) {
   const text = String(preset ?? aiInput.value).trim()
   if (!text || aiSending.value) return
   if (!residentId.value) return
-  if (!activeAiChat.value) await startAiChat()
+  // Una conversación cerrada es de solo lectura: la nueva pregunta abre otra.
+  if (!activeAiChat.value || activeAiChat.value.status === 'closed') await startAiChat()
   const chatId = activeAiChatId.value
   if (!chatId) return
 
@@ -810,6 +853,10 @@ function onAiSuggestion(kind) {
               <strong>{{ t('supportResident.statusClosed') }}</strong>
               <span>{{ t('supportResident.closedBannerHint') }}</span>
             </div>
+            <button type="button" class="pill-btn banner__action" @click="newChatFromList">
+              <i class="pi pi-plus" aria-hidden="true" />
+              {{ t('supportResident.aiNewChat') }}
+            </button>
           </div>
 
           <div v-if="activeAiChat?.incidentId" class="banner banner--blue" role="status">
@@ -935,6 +982,16 @@ function onAiSuggestion(kind) {
           </div>
 
           <div class="composer-dock">
+            <div v-if="showResolvePrompt" class="resolve-prompt" role="group" :aria-label="t('supportResident.resolvePrompt')">
+              <span>{{ t('supportResident.resolvePrompt') }}</span>
+              <button type="button" class="pill-btn pill-btn--primary" :disabled="closingChat" @click="confirmResolved">
+                <i class="pi" :class="closingChat ? 'pi-spin pi-spinner' : 'pi-check'" aria-hidden="true" />
+                {{ t('supportResident.resolveYes') }}
+              </button>
+              <button type="button" class="pill-btn" :disabled="closingChat" @click="notResolved">
+                {{ t('supportResident.resolveNo') }}
+              </button>
+            </div>
             <div v-if="canReportIncident" class="composer-actions">
               <button
                 type="button"
@@ -954,8 +1011,8 @@ function onAiSuggestion(kind) {
                 ref="composerEl"
                 v-model="aiInput"
                 rows="1"
-                :placeholder="t('supportResident.aiAskPlaceholder')"
-                :disabled="aiSending"
+                :placeholder="isChatClosed ? t('supportResident.closedComposerPlaceholder') : t('supportResident.aiAskPlaceholder')"
+                :disabled="aiSending || isChatClosed"
                 aria-describedby="resident-composer-hint"
                 @input="onComposerInput"
                 @keydown="onComposerKeydown"
@@ -963,7 +1020,7 @@ function onAiSuggestion(kind) {
               <button
                 type="button"
                 class="composer__send"
-                :disabled="aiSending || !aiInput.trim()"
+                :disabled="aiSending || isChatClosed || !aiInput.trim()"
                 :aria-label="t('supportResident.send')"
                 @click="sendAiMessage()"
               >
@@ -1165,6 +1222,17 @@ function onAiSuggestion(kind) {
 .pill-btn:hover {
   background: var(--tint-blue);
   color: var(--navy);
+}
+
+.pill-btn--primary {
+  background: #1e3a8a;
+  border-color: #1e3a8a;
+  color: #fff;
+}
+
+.pill-btn--primary:hover {
+  background: #172e6e;
+  color: #fff;
 }
 
 .link-btn {
@@ -2125,6 +2193,22 @@ function onAiSuggestion(kind) {
 .composer-dock {
   flex-shrink: 0;
   padding: 0.6rem max(1.25rem, calc(50% - 25rem)) 0.9rem;
+}
+
+.resolve-prompt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.banner__action {
+  margin-left: auto;
+  flex: none;
 }
 
 .composer-actions {

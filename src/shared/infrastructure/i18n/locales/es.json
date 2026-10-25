@@ -1628,7 +1628,7 @@
     "threadAria": "Mensajes de la conversación",
     "derivedBanner": "Tu consulta fue derivada a la administración",
     "derivedBannerHint": "Te responderán por este mismo chat.",
-    "closedBannerHint": "Puedes iniciar un chat nuevo cuando lo necesites.",
+    "closedBannerHint": "Ya no se pueden enviar mensajes aquí. Inicia un chat nuevo cuando lo necesites.",
     "composerLabel": "Escribe tu pregunta para el asistente",
     "composerHint": "Enter para enviar · Shift + Enter para una nueva línea",
     "justNow": "Ahora",
@@ -1638,7 +1638,13 @@
     "incidentLinkedHint": "Te avisaremos en esta conversación cuando se resuelva.",
     "incidentLinkedLink": "Ver en Incidencias",
     "incidentAlreadyReported": "Esta conversación ya tiene una incidencia registrada.",
-    "incidentReportError": "No se pudo registrar la incidencia. Intenta de nuevo o repórtala desde Incidencias."
+    "incidentReportError": "No se pudo registrar la incidencia. Intenta de nuevo o repórtala desde Incidencias.",
+    "resolvePrompt": "¿Se resolvió tu duda?",
+    "resolveYes": "Sí, gracias",
+    "resolveNo": "No",
+    "closeChatError": "No se pudo cerrar la conversación. Intenta de nuevo.",
+    "chatClosedSend": "Esta conversación está cerrada. Inicia una nueva para otra consulta.",
+    "closedComposerPlaceholder": "Conversación cerrada: inicia una nueva para otra consulta"
   },
   "supportAdmin": {
     "title": "Soporte",
@@ -1699,8 +1705,9 @@
     "threadAria": "Mensajes de la conversación con {name}",
     "actionsAria": "Acciones de la conversación",
     "composerHint": "Enter para enviar · Shift + Enter para una nueva línea",
-    "closedNotice": "Conversación cerrada. Si respondes, el residente verá tu mensaje.",
-    "openedOn": "Abierta el {date}"
+    "closedNotice": "El residente confirmó que se resolvió su consulta. La conversación es de solo lectura.",
+    "openedOn": "Abierta el {date}",
+    "closedComposerPlaceholder": "El residente cerró esta conversación"
   },
   "dashboard": {
     "title": "Panel de control",

@@ -821,11 +821,17 @@ function handleV1(config, method, parts) {
           id: `msg-${Date.now()}`,
           role: 'ai',
           authorRole: 'assistant',
-          body: `Registré tu reporte como la incidencia «${incident.title}». La administración ya la ve en su bandeja; te avisaré aquí cuando se resuelva y puedes seguirla en Incidencias.`,
+          body: `Registré tu reporte como la incidencia «${incident.title}». La administración ya la ve en su bandeja; el seguimiento continúa en Incidencias y aquí te avisaré cuando se resuelva.`,
           createdAt: now(),
         },
       ]
-      return ok(config, publicSupportChat(patchRow('supportChats', chat.id, { incidentId: incident.id, messages, updatedAt: now() })))
+      // Registrada la incidencia, la conversación queda cerrada (solo lectura).
+      return ok(
+        config,
+        publicSupportChat(
+          patchRow('supportChats', chat.id, { incidentId: incident.id, messages, status: 'closed', closedAt: now(), updatedAt: now() }),
+        ),
+      )
     }
 
     const messageMatch = rest.match(/^([^/]+)\/messages$/)
@@ -836,6 +842,9 @@ function handleV1(config, method, parts) {
 
       const text = String(body.body ?? '').trim()
       if (!text) fail(config, 400, 'MESSAGE_REQUIRED', 'Message is required')
+      if (chat.status === 'closed') {
+        fail(config, 409, 'CHAT_CLOSED', 'Esta conversación está cerrada. Inicia una nueva para otra consulta.')
+      }
 
       const messages = Array.isArray(chat.messages) ? [...chat.messages] : []
       const isAdminActor = actor.role === SessionRoles.ADMIN && chat.kind !== 'ai'
@@ -936,14 +945,25 @@ function handleV1(config, method, parts) {
     if (statusMatch && method === 'PATCH') {
       const chat = findById('supportChats', statusMatch[1])
       if (!chat) fail(config, 404, 'CHAT_NOT_FOUND', 'Chat not found')
-      const raw = statusMatch[2] === 'close' ? 'closed' : String(body.status ?? '').trim().toLowerCase()
+      const closing = statusMatch[2] === 'close'
+      // Solo el residente cierra su conversación (al confirmar que se resolvió su duda); cerrada = solo lectura.
+      if (closing && actor.role === SessionRoles.ADMIN) {
+        fail(config, 403, 'RESIDENT_CLOSES_CHAT', 'La conversación la cierra el residente.')
+      }
+      if (!closing && chat.status === 'closed') fail(config, 409, 'CHAT_CLOSED', 'El residente cerró esta conversación.')
+      const raw = closing ? 'closed' : String(body.status ?? '').trim().toLowerCase()
       const status = { pending: 'open', attended: 'answered' }[raw] || raw
-      if (!['open', 'answered', 'closed'].includes(status)) fail(config, 400, 'INVALID_STATUS', 'Invalid status')
+      const allowed = closing ? ['closed'] : ['open', 'answered']
+      if (!allowed.includes(status)) fail(config, 400, 'INVALID_STATUS', 'Invalid status')
       const updated = patchRow('supportChats', chat.id, {
         status,
         closedAt: status === 'closed' ? now() : '',
         updatedAt: now(),
       })
+      const linkedId = chat.linkedChatId || chat.escalatedChatId
+      if (closing && linkedId && findById('supportChats', linkedId)) {
+        patchRow('supportChats', linkedId, { status: 'closed', closedAt: now(), updatedAt: now() })
+      }
       return ok(config, publicSupportChat(updated))
     }
 
@@ -1235,7 +1255,7 @@ export function notifyMockIncidentResolved(incident) {
         role: chat.kind === 'ai' ? 'ai' : 'admin',
         authorRole: chat.kind === 'ai' ? 'assistant' : 'admin',
         authorName: chat.kind === 'ai' ? undefined : 'Administración',
-        body: `Tu incidencia «${incident.title}» fue resuelta.${detail} Si el problema continúa, escríbenos aquí.`,
+        body: `Tu incidencia «${incident.title}» fue resuelta.${detail} Si el problema continúa, inicia una nueva consulta.`,
         createdAt: at,
       },
     ],

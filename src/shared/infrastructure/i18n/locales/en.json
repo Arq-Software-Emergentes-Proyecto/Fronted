@@ -1628,7 +1628,7 @@
     "threadAria": "Conversation messages",
     "derivedBanner": "Your question was handed off to building management",
     "derivedBannerHint": "They'll reply in this same chat.",
-    "closedBannerHint": "You can start a new chat whenever you need.",
+    "closedBannerHint": "Messages can no longer be sent here. Start a new chat whenever you need.",
     "composerLabel": "Write your question for the assistant",
     "composerHint": "Enter to send · Shift + Enter for a new line",
     "justNow": "Now",
@@ -1638,7 +1638,13 @@
     "incidentLinkedHint": "We will let you know in this conversation when it is resolved.",
     "incidentLinkedLink": "View in Incidents",
     "incidentAlreadyReported": "This conversation already has an incident.",
-    "incidentReportError": "The incident could not be reported. Try again or report it from Incidents."
+    "incidentReportError": "The incident could not be reported. Try again or report it from Incidents.",
+    "resolvePrompt": "Did this answer your question?",
+    "resolveYes": "Yes, thanks",
+    "resolveNo": "No",
+    "closeChatError": "The conversation could not be closed. Try again.",
+    "chatClosedSend": "This conversation is closed. Start a new one for another question.",
+    "closedComposerPlaceholder": "Conversation closed: start a new one for another question"
   },
   "supportAdmin": {
     "title": "Support",
@@ -1699,8 +1705,9 @@
     "threadAria": "Messages in the conversation with {name}",
     "actionsAria": "Conversation actions",
     "composerHint": "Enter to send · Shift + Enter for a new line",
-    "closedNotice": "Conversation closed. If you reply, the resident will see your message.",
-    "openedOn": "Opened {date}"
+    "closedNotice": "The resident confirmed the question was resolved. This conversation is read-only.",
+    "openedOn": "Opened {date}",
+    "closedComposerPlaceholder": "The resident closed this conversation"
   },
   "dashboard": {
     "title": "Dashboard",
