@@ -1,28 +1,21 @@
 /**
  * Mercado Pago Checkout Pro for resident maintenance fees.
- * Preferences are created by the local /mp/checkout server (token never reaches the browser).
- * Confirmation still goes through the BuildingFex API / local preview store.
+ * Only BuildingFex.Api creates the preference (server-side amount and reference) and confirms it;
+ * the browser never builds a payment on its own.
  */
 
 import { apiClient } from '@/shared/infrastructure/api/apiClient.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
-import {
-  checkoutReturnUrl,
-  startMercadoPagoCheckout,
-} from '@/shared/infrastructure/mercadoPagoCheckoutClient.js'
+import { checkoutReturnUrl } from '@/shared/infrastructure/mercadoPagoCheckoutClient.js'
 import { AppPaths } from '@/shared/domain/appRoutes.js'
 import { isDemoSession } from '@/iam/application/localPreviewAuth.js'
 
 /**
  * Start Checkout Pro for pending maintenance fees (resident).
- * @param {{ residentId: string, payerEmail?: string, amount: number, title?: string }} params
+ * The amount comes from the API (pending fees), never from the browser.
+ * @param {{ residentId: string, payerEmail?: string }} params
  */
-export async function checkoutMaintenanceFees({
-  residentId,
-  payerEmail,
-  amount,
-  title,
-} = {}) {
+export async function checkoutMaintenanceFees({ residentId, payerEmail } = {}) {
   // Demo account: no real Mercado Pago. Comes back as an approved payment and the mock confirms it.
   if (isDemoSession()) {
     return {
@@ -38,48 +31,24 @@ export async function checkoutMaintenanceFees({
   const ownerId = getActiveDataOwnerId()
   const frontendBaseUrl = typeof window !== 'undefined' ? window.location.origin : undefined
 
-  // The API snapshots the pending items + total (checkoutId). Reconciliation only pays
-  // those items and requires the approved amount to match, so the fallback below must
-  // reuse the server amount and reference instead of the client-side total.
-  let serverCheckout = null
-  try {
-    const { data } = await apiClient.post('/api/v1/payments/checkout', {
-      residentId: String(residentId),
-      ...(ownerId ? { ownerAdminId: ownerId } : {}),
-      ...(payerEmail ? { payerEmail } : {}),
-      ...(frontendBaseUrl ? { frontendBaseUrl } : {}),
-    })
-    if (data?.initPoint && !data?.demo) {
-      return {
-        preferenceId: data.preferenceId,
-        initPoint: data.initPoint,
-        demo: false,
-      }
-    }
-    if (data?.checkoutId) serverCheckout = data
-  } catch (error) {
-    // Nothing pending / forbidden: do not open a payment the server cannot reconcile.
-    if (error?.status === 400 || error?.status === 403) throw error
-    /* network error: fall through to Checkout Pro on this app */
-  }
-
-  const fallbackAmount =
-    serverCheckout?.amount != null ? Number(serverCheckout.amount) : amount
-  const externalReference =
-    serverCheckout?.externalReference ||
-    `maintenance:${residentId}:${ownerId || ''}`
-
-  return startMercadoPagoCheckout({
-    kind: 'maintenance',
+  // The API snapshots the pending items + total and builds the reference; 400/403 (nothing pending,
+  // forbidden) reach the UI as they are.
+  const { data } = await apiClient.post('/api/v1/payments/checkout', {
     residentId: String(residentId),
-    amount: fallbackAmount,
-    title: title || 'Cuotas BuildingFex',
-    payerEmail,
-    externalReference,
-    successUrl: checkoutReturnUrl(AppPaths.APP_RESIDENT_FINANCE),
-    failureUrl: checkoutReturnUrl(AppPaths.APP_RESIDENT_FINANCE, { payment: 'failure' }),
-    pendingUrl: checkoutReturnUrl(AppPaths.APP_RESIDENT_FINANCE, { payment: 'pending' }),
+    ...(ownerId ? { ownerAdminId: ownerId } : {}),
+    ...(payerEmail ? { payerEmail } : {}),
+    ...(frontendBaseUrl ? { frontendBaseUrl } : {}),
   })
+  if (!data?.initPoint || data?.demo) {
+    const error = new Error('No se pudo iniciar el pago con Mercado Pago. Intenta de nuevo en unos minutos.')
+    error.code = 'CHECKOUT_UNAVAILABLE'
+    throw error
+  }
+  return {
+    preferenceId: data.preferenceId,
+    initPoint: data.initPoint,
+    demo: false,
+  }
 }
 
 /**

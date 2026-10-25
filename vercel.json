@@ -4,14 +4,6 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
-      "source": "/mp/checkout",
-      "destination": "/api/mp"
-    },
-    {
-      "source": "/mp/payment",
-      "destination": "/api/mp"
-    },
-    {
       "source": "/api/v1/:path*",
       "destination": "https://xafqa6wdb2.execute-api.us-east-2.amazonaws.com/api/v1/:path*"
     },
