@@ -1671,6 +1671,8 @@
     "usageAria": "Uso del asistente IA este mes: {used} de {cap} consultas",
     "usageNear": "Cerca del tope del plan",
     "usageReachedShort": "Tope alcanzado: las consultas llegan a esta bandeja",
+    "usageFiltered": "{count} mensajes fuera de tema respondidos sin usar el cupo",
+    "usageResidentDaily": "Máx. {limit} consultas por residente al día",
     "usageOk": "Dentro del tope del plan",
     "filterAria": "Filtrar conversaciones por estado",
     "filterCountAria": "ninguna conversación | {n} conversación | {n} conversaciones",

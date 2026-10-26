@@ -133,7 +133,7 @@ export const supportApi = {
     }
   },
 
-  /** Admin: consumo del tope mensual de consultas IA del plan { period, used, cap, remaining }. */
+  /** Admin: consumo del tope mensual de consultas IA del plan { period, used, cap, remaining, filtered, residentDailyLimit }. */
   async getAiUsage() {
     const { data } = await apiClient.get('/api/v1/support/ai-usage')
     return {
@@ -142,6 +142,9 @@ export const supportApi = {
       cap: Number(data?.cap ?? 0),
       remaining: Number(data?.remaining ?? 0),
       capReached: Boolean(data?.capReached),
+      /** Mensajes respondidos sin IA por el filtro de relevancia (no consumen el tope). */
+      filtered: Number(data?.filtered ?? 0),
+      residentDailyLimit: Number(data?.residentDailyLimit ?? 0),
     }
   },
 }

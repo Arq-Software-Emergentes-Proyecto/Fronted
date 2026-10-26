@@ -18,6 +18,13 @@ import {
   upsertSubscription,
 } from './mockDb.js'
 import { MOCK_OWNER_ID } from './seed.js'
+import {
+  QuestionScope,
+  RESIDENT_DAILY_AI_QUERIES,
+  classifyQuestion,
+  filteredReply,
+  residentDailyLimitReply,
+} from '@/residentCare/domain/questionRelevance.js'
 import { isExtraReceipt, ReceiptKinds, resolveReceiptKind } from '@/finances/domain/receipt.js'
 import { demoFileDataUrl, handleOperations, uploadResource } from './mockOperations.js'
 
@@ -121,6 +128,15 @@ function hardcodedAiReply(userText, locale = 'es') {
       ? 'Soy el asistente demo de BuildingFex. Puedo orientarte sobre pagos, reservas, incidencias y contacto con administración. ¿En qué te ayudo?'
       : 'I am the BuildingFex demo assistant. I can help with payments, reservations, incidents, and reaching management. How can I help?',
   }
+}
+
+/** Respuestas con IA que recibió hoy este residente en la demo (límite diario por residente). */
+function residentAiQueriesToday(residentId) {
+  const today = new Date().toISOString().slice(0, 10)
+  return listCollection('supportChats')
+    .filter((c) => String(c.kind ?? '') === 'ai' && String(c.residentId ?? '') === String(residentId ?? ''))
+    .flatMap((c) => (Array.isArray(c.messages) ? c.messages : []))
+    .filter((m) => m.aiUsed && String(m.createdAt ?? '').startsWith(today)).length
 }
 
 function shouldEscalateToAdmin(userText) {
@@ -864,7 +880,16 @@ function handleV1(config, method, parts) {
       let title = chat.title || chat.topic
 
       if (chat.kind === 'ai') {
-        const answer = hardcodedAiReply(text, body.locale)
+        // Igual que la API: saludos, temas ajenos y mensajes sin contenido no usan la IA ni el tope del plan,
+        // y cada residente tiene un límite diario de consultas con IA.
+        const escalating = shouldEscalateToAdmin(text)
+        const scope = escalating ? QuestionScope.BUILDING : classifyQuestion(text)
+        const dailyLimitReached =
+          scope === QuestionScope.BUILDING && !escalating && residentAiQueriesToday(chat.residentId) >= RESIDENT_DAILY_AI_QUERIES
+        let answer
+        if (scope !== QuestionScope.BUILDING) answer = { body: filteredReply(scope, text, body.locale), filtered: true }
+        else if (dailyLimitReached) answer = { body: residentDailyLimitReply(body.locale), limitReached: true }
+        else answer = { ...hardcodedAiReply(text, body.locale), aiUsed: !escalating }
         const reply = {
           id: `msg-${Date.now() + 1}`,
           role: 'ai',
@@ -872,6 +897,9 @@ function handleV1(config, method, parts) {
           authorName: 'Asistente BuildingFlex',
           body: answer.body,
           ...(answer.citedSource ? { citedSource: answer.citedSource } : {}),
+          ...(answer.filtered ? { filtered: true } : {}),
+          ...(answer.limitReached ? { limitReached: true } : {}),
+          ...(answer.aiUsed ? { aiUsed: true } : {}),
           createdAt: now(),
         }
         messages.push(reply)
