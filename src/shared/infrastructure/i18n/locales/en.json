@@ -1574,7 +1574,7 @@
     "faq8Question": "How do I register my guests?",
     "faq8Answer": "In My guests create a QR code for your guest and share it; building staff validate it at the entrance.",
     "faq9Question": "What can the AI assistant answer?",
-    "faq9Answer": "It answers only from your building's current rules and meeting minutes and the BuildingFex user guide, and it cites the source. If it finds no documentary basis, if you ask for a person, or if the building reached its plan's monthly query limit, it hands your question to the board or building administration.",
+    "faq9Answer": "It answers only from your building's current rules and meeting minutes and the BuildingFex user guide, and it cites the source. If it finds no documentary basis, if you ask for a person, or if the building reached its plan's monthly query limit, it hands your question to the board or building administration. Greetings and questions unrelated to the building are answered without using queries, and each resident can make up to 15 AI queries per day.",
     "faq10Question": "How do I change the language or check my account?",
     "faq10Answer": "In Settings you can switch between Spanish and English and review your profile. You sign in with your administration's invite link; if it expired, ask for a new one.",
     "faqSearchLabel": "Search frequently asked questions",

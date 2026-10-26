@@ -10,9 +10,9 @@ export const SubscriptionPlanId = /** @type {const} */ ({
 /** Free plan = 30-day trial with Essential features (TP1 report, 1.2). */
 export const FREE_TRIAL_DAYS = 30
 
-/** Portafolio: S/ 3 per department, minimum S/ 450, from 150 departments. */
-export const PORTAFOLIO_PRICE_PER_DEPARTMENT_PEN = 3
-export const PORTAFOLIO_MINIMUM_PEN = 450
+/** Portafolio: S/ 4 per department, minimum S/ 600, from 150 departments. */
+export const PORTAFOLIO_PRICE_PER_DEPARTMENT_PEN = 4
+export const PORTAFOLIO_MINIMUM_PEN = 600
 export const PORTAFOLIO_MINIMUM_DEPARTMENTS = 150
 
 /** Max resident accounts allowed per plan (must match backend SubscriptionPlans). */
@@ -27,19 +27,19 @@ export const SUBSCRIPTION_PLAN_RESIDENT_LIMITS = /** @type {Record<string, numbe
 /** Monthly price in PEN (must match backend SubscriptionPlans). Portafolio = minimum. */
 export const SUBSCRIPTION_PLAN_PRICES_PEN = /** @type {Record<string, number>} */ ({
   [SubscriptionPlanId.FREE]: 0,
-  [SubscriptionPlanId.ESSENTIAL]: 60,
-  [SubscriptionPlanId.STANDARD]: 120,
-  [SubscriptionPlanId.SCALE]: 200,
+  [SubscriptionPlanId.ESSENTIAL]: 79,
+  [SubscriptionPlanId.STANDARD]: 159,
+  [SubscriptionPlanId.SCALE]: 289,
   [SubscriptionPlanId.PORTAFOLIO]: PORTAFOLIO_MINIMUM_PEN,
 })
 
 /** Monthly AI assistant query cap per building (must match backend SubscriptionPlans). */
 export const SUBSCRIPTION_PLAN_AI_QUERY_CAPS = /** @type {Record<string, number>} */ ({
   [SubscriptionPlanId.FREE]: 150,
-  [SubscriptionPlanId.ESSENTIAL]: 150,
-  [SubscriptionPlanId.STANDARD]: 400,
-  [SubscriptionPlanId.SCALE]: 800,
-  [SubscriptionPlanId.PORTAFOLIO]: 2000,
+  [SubscriptionPlanId.ESSENTIAL]: 750,
+  [SubscriptionPlanId.STANDARD]: 2000,
+  [SubscriptionPlanId.SCALE]: 4000,
+  [SubscriptionPlanId.PORTAFOLIO]: 10000,
 })
 
 function planKey(planId) {
@@ -48,7 +48,7 @@ function planKey(planId) {
 
 /**
  * @param {string | null | undefined} planId
- * @param {number} [departmentCount] used by Portafolio (S/ 3 per department, min S/ 450)
+ * @param {number} [departmentCount] used by Portafolio (S/ 4 per department, min S/ 600)
  */
 export function monthlyPriceForSubscriptionPlan(planId, departmentCount) {
   const key = planKey(planId)

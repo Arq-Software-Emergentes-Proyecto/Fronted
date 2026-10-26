@@ -1574,7 +1574,7 @@
     "faq8Question": "¿Cómo registro a mis invitados?",
     "faq8Answer": "En Mis invitados crea un código QR para tu invitado y compártelo; el personal del edificio lo valida al ingresar.",
     "faq9Question": "¿Qué puede responder el asistente de IA?",
-    "faq9Answer": "Responde solo con el reglamento y las actas vigentes de tu edificio y la guía de uso de BuildingFex, y cita la fuente. Si no encuentra base documental, si pides hablar con una persona o si el edificio alcanzó el tope mensual de consultas de su plan, deriva tu consulta a la junta o a la administración.",
+    "faq9Answer": "Responde solo con el reglamento y las actas vigentes de tu edificio y la guía de uso de BuildingFex, y cita la fuente. Si no encuentra base documental, si pides hablar con una persona o si el edificio alcanzó el tope mensual de consultas de su plan, deriva tu consulta a la junta o a la administración. Los saludos y las preguntas ajenas al edificio se responden sin usar consultas, y cada residente puede hacer hasta 15 consultas con IA al día.",
     "faq10Question": "¿Cómo cambio el idioma o reviso mi cuenta?",
     "faq10Answer": "En Settings puedes cambiar entre español e inglés y revisar tu perfil. Ingresas con el enlace de invitación de tu administración; si venció, pide uno nuevo.",
     "faqSearchLabel": "Buscar en preguntas frecuentes",
