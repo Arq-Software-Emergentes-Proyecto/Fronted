@@ -35,7 +35,7 @@ export const SUBSCRIPTION_PLAN_PRICES_PEN = /** @type {Record<string, number>} *
 
 /** Monthly AI assistant query cap per building (must match backend SubscriptionPlans). */
 export const SUBSCRIPTION_PLAN_AI_QUERY_CAPS = /** @type {Record<string, number>} */ ({
-  [SubscriptionPlanId.FREE]: 300,
+  [SubscriptionPlanId.FREE]: 150,
   [SubscriptionPlanId.ESSENTIAL]: 750,
   [SubscriptionPlanId.STANDARD]: 2000,
   [SubscriptionPlanId.SCALE]: 4000,
