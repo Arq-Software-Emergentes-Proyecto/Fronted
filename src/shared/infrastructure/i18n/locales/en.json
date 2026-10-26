@@ -1671,6 +1671,8 @@
     "usageAria": "AI assistant usage this month: {used} of {cap} queries",
     "usageNear": "Close to the plan limit",
     "usageReachedShort": "Limit reached: questions arrive in this inbox",
+    "usageFiltered": "{count} off-topic messages answered without using the quota",
+    "usageResidentDaily": "Up to {limit} queries per resident per day",
     "usageOk": "Within the plan limit",
     "filterAria": "Filter conversations by status",
     "filterCountAria": "no conversations | {n} conversation | {n} conversations",

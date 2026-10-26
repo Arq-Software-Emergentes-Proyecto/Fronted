@@ -423,6 +423,11 @@ async function sendReply() {
                 >
                   <span :style="{ width: `${usagePercent}%` }" />
                 </div>
+                <span v-if="aiUsage.filtered || aiUsage.residentDailyLimit" class="usage-card__note">
+                  <template v-if="aiUsage.filtered">{{ t('supportAdmin.usageFiltered', { count: aiUsage.filtered }) }}</template>
+                  <template v-if="aiUsage.filtered && aiUsage.residentDailyLimit"> · </template>
+                  <template v-if="aiUsage.residentDailyLimit">{{ t('supportAdmin.usageResidentDaily', { limit: aiUsage.residentDailyLimit }) }}</template>
+                </span>
                 <span class="bf-sr-only">{{ usageHint }}</span>
               </div>
             </div>
@@ -777,6 +782,14 @@ async function sendReply() {
   font-weight: 700;
   color: var(--ink);
   white-space: nowrap;
+}
+
+.usage-card__note {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--apple-text-tertiary, #6e6e73);
 }
 
 .usage-bar {
