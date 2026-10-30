@@ -29,9 +29,16 @@ export const LOCAL_PREVIEW_ENABLED = OPEN_WIREFRAME_ACCESS
  */
 export const DEMO_USERNAME = 'test'
 export const DEMO_PASSWORD = '123456'
+/** Mismo edificio de ejemplo, visto por un miembro de la junta directiva (solo lectura). */
+export const DEMO_BOARD_USERNAME = 'junta'
 
 export function isDemoUsername(value) {
-  return String(value ?? '').trim().toLowerCase() === DEMO_USERNAME
+  const name = String(value ?? '').trim().toLowerCase()
+  return name === DEMO_USERNAME || name === DEMO_BOARD_USERNAME
+}
+
+export function isBoardDemoUsername(value) {
+  return String(value ?? '').trim().toLowerCase() === DEMO_BOARD_USERNAME
 }
 
 export function isDemoCredentials(username, password) {
@@ -118,6 +125,20 @@ export function previewResidentAuthResult({ email, name } = {}) {
       email: profile.email,
       sub: profile.id,
     }),
+  }
+}
+
+/** Junta directiva de ejemplo: miembro del edificio demo (preview-admin-1), solo lectura. */
+export function previewBoardAuthResult() {
+  const user = {
+    id: 'preview-board-1',
+    name: 'Lucía Paredes',
+    email: 'junta@demo.test',
+    role: SessionRoles.BOARD,
+  }
+  return {
+    user,
+    token: createPreviewAccessToken({ role: SessionRoles.BOARD, email: user.email, sub: user.id }),
   }
 }
 

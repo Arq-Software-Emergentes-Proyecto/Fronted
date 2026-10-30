@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useSession } from '@/iam/application/sessionStore.js'
+import { getActiveBuildingRole, useSession } from '@/iam/application/sessionStore.js'
 import { authApi } from '@/iam/infrastructure/authApi.js'
 import { setPasswordForCurrentUser } from '@/iam/infrastructure/firebaseAuth.js'
 import { isDemoSession } from '@/iam/application/localPreviewAuth.js'
@@ -35,7 +35,7 @@ const route = useRoute()
 const router = useRouter()
 
 const { t, locale } = useI18n()
-const { state, isAdmin, isResident } = useSession()
+const { state, isAdmin, isResident, isBoard } = useSession()
 const financesStore = useFinancesStore()
 
 const sessionProfile = computed(() => state.profile ?? {})
@@ -193,7 +193,10 @@ const settingsTabs = computed(() => {
     return [
       profile,
       { id: 'building', label: t('app.settingsTabBuilding'), icon: 'pi pi-building' },
-      { id: 'plans', label: t('app.settingsTabPlanBilling'), icon: 'pi pi-credit-card' },
+      // El plan lo cambia y lo paga solo el dueño de la cuenta (no un administrador asignado).
+      ...(getActiveBuildingRole() === 'owner'
+        ? [{ id: 'plans', label: t('app.settingsTabPlanBilling'), icon: 'pi pi-credit-card' }]
+        : []),
       { id: 'finance', label: t('app.settingsTabFinance'), icon: 'pi pi-wallet' },
       { id: 'admission', label: t('app.settingsTabAdmission'), icon: 'pi pi-calendar' },
       { id: 'providers', label: t('app.settingsTabProviders'), icon: 'pi pi-wrench' },
@@ -268,7 +271,13 @@ function initialsOf(name) {
 
 const accountInitials = computed(() => initialsOf(display.value.name || display.value.email))
 const roleLabel = computed(() =>
-  isAdmin.value ? t('app.settingsRoleAdmin') : isResident.value ? t('app.settingsRoleResident') : '',
+  isAdmin.value
+    ? t('app.settingsRoleAdmin')
+    : isResident.value
+      ? t('app.settingsRoleResident')
+      : isBoard.value
+        ? t('app.roleBoard')
+        : '',
 )
 const residentUnitLabel = computed(() => {
   const { floor, code } = display.value

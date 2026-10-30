@@ -7,7 +7,8 @@ import { useToast } from 'primevue/usetoast'
 import SkipLink from '../components/SkipLink.vue'
 import BfConfirmDialog from '../components/BfConfirmDialog.vue'
 import { AppRouteNames } from '@/shared/domain/appRoutes.js'
-import { useSession } from '@/iam/application/sessionStore.js'
+import { getActiveBuildingRole, useSession } from '@/iam/application/sessionStore.js'
+import { loadAccessibleBuildings, switchBuilding } from '@/iam/application/buildingWorkspace.js'
 import { signOutFirebase } from '@/iam/infrastructure/firebaseSession.js'
 import { isPreviewAccessToken } from '@/iam/application/localPreviewAuth.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
@@ -24,7 +25,34 @@ import { IncidentRealtimeEvent } from '@/incidents/domain/model/incidentConstant
 const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const { isResident, clearSession, state: sessionState } = useSession()
+const { isResident, isReadOnly, clearSession, state: sessionState } = useSession()
+
+/** Junta directiva (o un administrador invitado como junta en el edificio activo): solo lectura. */
+const isBoardView = computed(() => !isResident.value && isReadOnly.value)
+const homeRoute = computed(() =>
+  isResident.value
+    ? AppRouteNames.APP_RESIDENT_DASHBOARD
+    : isBoardView.value
+      ? AppRouteNames.APP_BOARD
+      : AppRouteNames.APP_DASHBOARD,
+)
+
+// La plataforma se divide por edificios: cada uno es un condominio aparte y el activo decide qué
+// datos se ven. Dueño de Portafolio, administrador asignado o junta pueden tener varios.
+const buildings = computed(() => sessionState.buildings ?? [])
+const activeBuilding = computed(
+  () => buildings.value.find((b) => String(b.ownerAdminId) === String(sessionState.activeBuildingId)) ?? null,
+)
+const showBuildingSwitcher = computed(() => !isResident.value && buildings.value.length > 0)
+
+function onBuildingChange(event) {
+  const next = event.target.value
+  if (!next || next === String(sessionState.activeBuildingId)) return
+  const target = buildings.value.find((b) => String(b.ownerAdminId) === next)
+  // Cada edificio abre en su inicio: la junta en su resumen, la gestión en el panel.
+  const name = target?.role === 'board_member' ? AppRouteNames.APP_BOARD : AppRouteNames.APP_DASHBOARD
+  switchBuilding(next, { reloadTo: router.resolve({ name }).href })
+}
 
 // Tarjeta de usuario al pie del menú: iniciales, nombre y rol de la sesión.
 const sessionName = computed(() => String(sessionState.profile?.name ?? '').trim())
@@ -32,7 +60,13 @@ const sessionInitials = computed(() => {
   const words = sessionName.value.split(/\s+/).filter(Boolean)
   return words.length ? words.slice(0, 2).map((w) => w[0]).join('').toUpperCase() : '?'
 })
-const sessionRoleLabel = computed(() => (isResident.value ? t('app.roleResident') : t('app.roleAdmin')))
+const sessionRoleLabel = computed(() => {
+  if (isResident.value) return t('app.roleResident')
+  const role = getActiveBuildingRole()
+  if (role === 'board_member' || sessionState.role === 'board_member') return t('app.roleBoard')
+  if (role === 'admin') return t('app.roleAssignedAdmin')
+  return t('app.roleAdmin')
+})
 /** Cuenta demo ("test"): los datos son de ejemplo y viven solo en este navegador. */
 const isDemoSession = computed(() => isPreviewAccessToken(sessionState.token))
 const toast = useToast()
@@ -104,6 +138,45 @@ const adminNavAdministrative = computed(() => [
     icon: 'pi pi-chart-line',
     routeName: AppRouteNames.APP_COLLECTIONS_MANAGEMENT_EXPENSES,
   },
+  {
+    key: 'access',
+    label: t('app.access'),
+    icon: 'pi pi-id-card',
+    routeName: AppRouteNames.APP_ACCESS,
+  },
+  {
+    key: 'buildings',
+    label: t('app.buildings'),
+    icon: 'pi pi-building',
+    routeName: AppRouteNames.APP_BUILDINGS,
+  },
+  {
+    key: 'boardView',
+    label: t('app.boardView'),
+    icon: 'pi pi-eye',
+    routeName: AppRouteNames.APP_BOARD,
+  },
+])
+
+const boardNavItems = computed(() => [
+  {
+    key: 'board',
+    label: t('app.boardSummary'),
+    icon: 'pi pi-th-large',
+    routeName: AppRouteNames.APP_BOARD,
+  },
+  {
+    key: 'access',
+    label: t('app.boardTeam'),
+    icon: 'pi pi-id-card',
+    routeName: AppRouteNames.APP_ACCESS,
+  },
+  {
+    key: 'buildings',
+    label: t('app.buildings'),
+    icon: 'pi pi-building',
+    routeName: AppRouteNames.APP_BUILDINGS,
+  },
 ])
 
 const residentNavItems = computed(() => [
@@ -152,11 +225,11 @@ const lockChatPageScroll = computed(
 )
 
 const appNavPrimaryItems = computed(() =>
-  isResident.value ? residentNavItems.value : adminNavPrimary.value,
+  isResident.value ? residentNavItems.value : isBoardView.value ? boardNavItems.value : adminNavPrimary.value,
 )
 
 const appNavAdministrativeItems = computed(() =>
-  isResident.value ? [] : adminNavAdministrative.value,
+  isResident.value || isBoardView.value ? [] : adminNavAdministrative.value,
 )
 
 const activeAppNavPrimaryIndex = computed(() =>
@@ -169,7 +242,7 @@ const isAppNavPrimaryPillVisible = computed(() => activeAppNavPrimaryIndex.value
 let stopIncidentToasts = () => {}
 
 async function connectIncidentRealtime() {
-  if (isResident.value) return
+  if (isResident.value || isBoardView.value) return
   const ownerId = getActiveDataOwnerId()
   if (!ownerId) return
   await startIncidentRealtime(ownerId, { countUnseen: true })
@@ -189,6 +262,8 @@ onMounted(() => {
     })
   })
   connectIncidentRealtime()
+  // Refresca la lista de edificios (un acceso nuevo o retirado, un edificio agregado al Portafolio).
+  if (!isResident.value) void loadAccessibleBuildings()
 })
 
 onBeforeUnmount(() => stopIncidentToasts())
@@ -351,7 +426,7 @@ onBeforeUnmount(() => {
       </button>
       <RouterLink
         class="app-shell__mobilebar-brand"
-        :to="{ name: isResident ? AppRouteNames.APP_RESIDENT_DASHBOARD : AppRouteNames.APP_DASHBOARD }"
+        :to="{ name: homeRoute }"
       >
         <img src="/logo-buildingfex.png" :alt="t('brand')" width="120" height="29" decoding="async" />
       </RouterLink>
@@ -389,7 +464,7 @@ onBeforeUnmount(() => {
       <header class="app-shell__top">
         <RouterLink 
           class="app-shell__brand" 
-          :to="{ name: isResident ? AppRouteNames.APP_RESIDENT_DASHBOARD : AppRouteNames.APP_DASHBOARD }"
+          :to="{ name: homeRoute }"
         >
           <img
             src="/logo-buildingfex.png"
@@ -430,6 +505,28 @@ onBeforeUnmount(() => {
       </header>
 
       <div class="app-shell__divider" role="presentation" />
+
+      <div v-if="showBuildingSwitcher" class="app-shell__building">
+        <label class="app-shell__nav-group-label" :for="buildings.length > 1 ? 'app-building-select' : undefined">{{ t('app.activeBuilding') }}</label>
+        <div v-if="buildings.length > 1" class="app-shell__building-select-wrap">
+          <i class="pi pi-building" aria-hidden="true" />
+          <select
+            id="app-building-select"
+            class="app-shell__building-select"
+            :value="sessionState.activeBuildingId ?? ''"
+            @change="onBuildingChange"
+          >
+            <option v-for="b in buildings" :key="b.ownerAdminId" :value="String(b.ownerAdminId)">
+              {{ b.name }}{{ b.role === 'board_member' ? ` · ${t('app.roleBoard')}` : '' }}
+            </option>
+          </select>
+          <i class="pi pi-chevron-down app-shell__building-caret" aria-hidden="true" />
+        </div>
+        <p v-else class="app-shell__building-name">
+          <i class="pi pi-building" aria-hidden="true" />
+          <span>{{ activeBuilding?.name ?? buildings[0]?.name }}</span>
+        </p>
+      </div>
 
       <nav class="app-shell__nav" :aria-label="t('app.sidebarNav')">
         <div class="app-shell__nav-cluster">
@@ -850,6 +947,70 @@ onBeforeUnmount(() => {
   max-width: 11.25rem;
   margin: 0.15rem 0 0;
   flex-shrink: 0;
+}
+
+.app-shell__building {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+  max-width: 11.25rem;
+  margin-bottom: 0.875rem;
+}
+
+.app-shell__building-select-wrap,
+.app-shell__building-name {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  min-height: 2.25rem;
+  padding: 0 0.6rem;
+  box-sizing: border-box;
+  border: 1px solid var(--shell-border);
+  border-radius: 10px;
+  background: var(--shell-nav-active);
+  color: var(--shell-text);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.app-shell__building-name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-shell__building-select {
+  flex: 1;
+  min-width: 0;
+  height: 2.2rem;
+  padding: 0 1.1rem 0 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  appearance: none;
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+
+.app-shell__building-select:focus-visible {
+  outline: none;
+}
+
+.app-shell__building-select-wrap:focus-within {
+  outline: 2px solid #1e3a8a;
+  outline-offset: 2px;
+}
+
+.app-shell__building-caret {
+  position: absolute;
+  right: 0.6rem;
+  font-size: 0.65rem;
+  pointer-events: none;
+  color: var(--shell-muted);
 }
 
 .app-shell__nav-group-label {
@@ -1306,6 +1467,7 @@ onBeforeUnmount(() => {
   }
 
   .app-shell__divider,
+  .app-shell__building,
   .app-shell__nav-cluster,
   .app-shell__nav-track,
   .app-shell__footer {
