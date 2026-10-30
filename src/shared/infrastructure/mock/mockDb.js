@@ -33,6 +33,8 @@ const COLLECTIONS = [
   'subscriptions',
   'buildings',
   'profiles',
+  'buildingMembers',
+  'memberInvitations',
 ]
 
 function ensureCollections(db) {
@@ -265,7 +267,23 @@ function pad(n) {
   return String(n).padStart(2, '0')
 }
 
-export function getOrCreateSubscription(ownerId) {
+/** Cuenta que paga: la matriz de Portafolio para sus edificios adicionales. */
+export function billingOwnerOf(ownerId) {
+  const tenant = load().users?.find((u) => String(u.id) === String(ownerId))
+  return tenant?.parentAdminId ? String(tenant.parentAdminId) : ownerId
+}
+
+/** Edificios (cuentas de condominio) que se cobran en la suscripción de `billingOwnerId`. */
+export function tenantsBilledTo(billingOwnerId) {
+  const ids = [String(billingOwnerId)]
+  for (const u of load().users ?? []) {
+    if (String(u.parentAdminId ?? '') === String(billingOwnerId)) ids.push(String(u.id))
+  }
+  return ids
+}
+
+export function getOrCreateSubscription(tenantId) {
+  const ownerId = billingOwnerOf(tenantId)
   const db = load()
   if (!Array.isArray(db.subscriptions)) db.subscriptions = []
   let row = db.subscriptions.find((item) => String(item.ownerAdminId) === String(ownerId))
@@ -282,9 +300,14 @@ export function getOrCreateSubscription(ownerId) {
   return row
 }
 
-export function subscriptionSnapshot(ownerId) {
-  const row = getOrCreateSubscription(ownerId)
-  const residentsCount = queryCollection('users', { role: 'resident', ownerAdminId: ownerId }).length
+export function subscriptionSnapshot(tenantId) {
+  const row = getOrCreateSubscription(tenantId)
+  const ownerId = billingOwnerOf(tenantId)
+  // Portafolio: residentes y departamentos se suman en todos los edificios de la cuenta.
+  const residentsCount = tenantsBilledTo(ownerId).reduce(
+    (sum, id) => sum + queryCollection('users', { role: 'resident', ownerAdminId: id }).length,
+    0,
+  )
   const planId = String(row.planId ?? 'free')
   const residentLimit = SUBSCRIPTION_PLAN_RESIDENT_LIMITS[planId] ?? 15
   const isPaid = Boolean(row.isPaid)
@@ -316,10 +339,10 @@ export function subscriptionSnapshot(ownerId) {
   }
 }
 
-export function upsertSubscription(ownerId, patch) {
-  const row = getOrCreateSubscription(ownerId)
+export function upsertSubscription(tenantId, patch) {
+  const row = getOrCreateSubscription(tenantId)
   Object.assign(row, patch)
   persist()
-  return subscriptionSnapshot(ownerId)
+  return subscriptionSnapshot(tenantId)
 }
 

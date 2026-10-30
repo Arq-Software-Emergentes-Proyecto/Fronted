@@ -65,6 +65,11 @@ function applySession(role, profile, token) {
   state.role = role
   state.profile = profile
   state.token = token
+  if (identityKeyOf(role, profile) !== before) {
+    // Otra persona (o cierre de sesión): el edificio elegido no se hereda.
+    state.activeBuildingId = null
+    state.buildings = []
+  }
   persist()
   const after = getSessionIdentityKey()
   if (before !== null && before !== after) {
@@ -85,6 +90,8 @@ export function clearSession() {
 /** Renewed token for the SAME signed-in user (no identity change, listeners are not fired). */
 export function updateSessionToken(token) {
   if (!state.role || !token) return
+  // Una sesión demo nunca adopta el token de una cuenta real de Firebase (y al revés).
+  if (isDemoProfile(state.profile) !== isPreviewToken(token)) return
   state.token = token
   persist()
 }
@@ -98,12 +105,55 @@ export function setResidentSession(profile = {}, token = null) {
   applySession(SessionRoles.RESIDENT, profile, token)
 }
 
+/** Miembro de la junta directiva (solo lectura). */
+export function setBoardSession(profile = {}, token = null) {
+  applySession(SessionRoles.BOARD, profile, token)
+}
+
+/**
+ * Edificios a los que tiene acceso la sesión (GET /api/v1/me/buildings) y el edificio activo.
+ * El edificio activo viaja en la cabecera X-Building-Id y define el ownerAdminId de las consultas.
+ */
+export function setAccessibleBuildings(buildings = [], { canAddBuildings = false, accountKind = null } = {}) {
+  state.buildings = Array.isArray(buildings) ? buildings : []
+  state.canAddBuildings = Boolean(canAddBuildings)
+  state.accountKind = accountKind ?? null
+  const ids = state.buildings.map((b) => String(b.ownerAdminId))
+  if (!state.activeBuildingId || !ids.includes(String(state.activeBuildingId))) {
+    const active = state.buildings.find((b) => b.isActive) ?? state.buildings[0] ?? null
+    state.activeBuildingId = active ? String(active.ownerAdminId) : null
+  }
+  persist()
+}
+
+export function setActiveBuilding(ownerAdminId) {
+  state.activeBuildingId = ownerAdminId ? String(ownerAdminId) : null
+  persist()
+}
+
+/** Edificio activo para la cabecera X-Building-Id (solo gestión: admin o junta). */
+export function getActiveBuildingId() {
+  if (state.role !== SessionRoles.ADMIN && state.role !== SessionRoles.BOARD) return null
+  return state.activeBuildingId ? String(state.activeBuildingId) : null
+}
+
+/** Rol de la sesión en el edificio activo: owner | admin | board_member | resident. */
+export function getActiveBuildingRole() {
+  if (state.role === SessionRoles.RESIDENT) return 'resident'
+  const active = (state.buildings ?? []).find((b) => String(b.ownerAdminId) === String(state.activeBuildingId))
+  if (active?.role) return active.role
+  return state.role === SessionRoles.BOARD ? SessionRoles.BOARD : 'owner'
+}
+
 /**
  * Active data owner for multi-tenant API queries (admin account id).
  * Always derived from session state so it cannot drift from persisted profile.
  */
 export function getActiveDataOwnerId() {
-  if (state.role === SessionRoles.ADMIN) {
+  if (state.role === SessionRoles.ADMIN || state.role === SessionRoles.BOARD) {
+    // Edificio activo (Portafolio, administrador asignado o junta); si no hay, la propia cuenta del admin.
+    if (state.activeBuildingId) return String(state.activeBuildingId)
+    if (state.role === SessionRoles.BOARD) return null
     const id = state.profile?.id
     return id != null && String(id).length ? String(id) : null
   }
@@ -118,24 +168,51 @@ export function getSessionToken() {
   return state.token
 }
 
-function loadInitialSession() {
-  if (typeof window === 'undefined') {
-    return { role: null, profile: null, token: null }
+/** Perfil de la cuenta demo / wireframes (ids "preview-…", datos de ejemplo del navegador). */
+function isDemoProfile(profile) {
+  return String(profile?.id ?? '').startsWith('preview-')
+}
+
+function isPreviewToken(token) {
+  try {
+    const segment = String(token ?? '').split('.')[1]
+    if (!segment) return false
+    const base64 = segment.replace(/-/g, '+').replace(/_/g, '/')
+    return JSON.parse(atob(base64 + '='.repeat((4 - (base64.length % 4)) % 4)))?.preview === true
+  } catch {
+    return false
   }
+}
+
+function emptySession() {
+  return { role: null, profile: null, token: null, activeBuildingId: null, buildings: [], canAddBuildings: false, accountKind: null }
+}
+
+function loadInitialSession() {
+  if (typeof window === 'undefined') return emptySession()
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { role: null, profile: null, token: null }
+    if (!raw) return emptySession()
     const parsed = JSON.parse(raw)
+    // Sesión mezclada (perfil demo con token real de Firebase): sus consultas irían a la API real con
+    // ownerAdminId=preview-admin-1 y fallarían con 403. Se descarta y la persona vuelve a entrar.
+    if (parsed?.token && isDemoProfile(parsed.profile) !== isPreviewToken(parsed.token)) return emptySession()
     if (parsed && typeof parsed === 'object') {
-      const role = parsed.role ?? null
-      const profile = parsed.profile ?? null
-      const token = parsed.token ?? null
-      return { role, profile, token }
+      return {
+        ...emptySession(),
+        role: parsed.role ?? null,
+        profile: parsed.profile ?? null,
+        token: parsed.token ?? null,
+        activeBuildingId: parsed.activeBuildingId ?? null,
+        buildings: Array.isArray(parsed.buildings) ? parsed.buildings : [],
+        canAddBuildings: Boolean(parsed.canAddBuildings),
+        accountKind: parsed.accountKind ?? null,
+      }
     }
   } catch {
     // ignore parse errors
   }
-  return { role: null, profile: null, token: null }
+  return emptySession()
 }
 
 function persist() {
@@ -143,7 +220,15 @@ function persist() {
   try {
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ role: state.role, profile: state.profile, token: state.token }),
+      JSON.stringify({
+        role: state.role,
+        profile: state.profile,
+        token: state.token,
+        activeBuildingId: state.activeBuildingId,
+        buildings: state.buildings,
+        canAddBuildings: state.canAddBuildings,
+        accountKind: state.accountKind,
+      }),
     )
   } catch {
     // ignore storage errors
@@ -153,6 +238,9 @@ function persist() {
 export function useSession() {
   const isAdmin = computed(() => state.role === SessionRoles.ADMIN)
   const isResident = computed(() => state.role === SessionRoles.RESIDENT)
+  const isBoard = computed(() => state.role === SessionRoles.BOARD)
+  /** Solo lectura en el edificio activo: usuario de junta o administrador invitado como junta. */
+  const isReadOnly = computed(() => isBoard.value || getActiveBuildingRole() === SessionRoles.BOARD)
 
   function clearSessionFromHook() {
     clearSession()
@@ -162,8 +250,11 @@ export function useSession() {
     state: readonly(state),
     isAdmin,
     isResident,
+    isBoard,
+    isReadOnly,
     setAdminSession,
     setResidentSession,
+    setBoardSession,
     clearSession: clearSessionFromHook,
   }
 }

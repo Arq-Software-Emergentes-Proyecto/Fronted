@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import {
   clearSession,
   getAccessToken,
+  getActiveBuildingRole,
   getSessionRole,
   isAccessTokenValid,
   SessionRoles,
@@ -34,6 +35,10 @@ import AppResidentGenerationView from '@/shared/presentation/views/AppResidentGe
 import AppResidentIncidentsView from '@/shared/presentation/views/AppResidentIncidentsView.vue'
 import AppResidentSupportView from '@/shared/presentation/views/AppResidentSupportView.vue'
 import GuestInviteView from '@/socialSpaces/presentation/views/GuestInviteView.vue'
+import AppBoardView from '@/shared/presentation/views/AppBoardView.vue'
+import AppAccessView from '@/shared/presentation/views/AppAccessView.vue'
+import AppBuildingsView from '@/shared/presentation/views/AppBuildingsView.vue'
+import MemberInviteView from '@/iam/presentation/views/MemberInviteView.vue'
 
 /** Routes a resident may open (admin shell URLs are blocked for this role). */
 const RESIDENT_APP_ROUTE_NAMES = new Set([
@@ -46,6 +51,14 @@ const RESIDENT_APP_ROUTE_NAMES = new Set([
   AppRouteNames.APP_SETTINGS,
 ])
 
+/** Junta directiva: su resumen de solo lectura, los accesos del equipo y sus edificios. */
+const BOARD_APP_ROUTE_NAMES = new Set([
+  AppRouteNames.APP_BOARD,
+  AppRouteNames.APP_ACCESS,
+  AppRouteNames.APP_BUILDINGS,
+  AppRouteNames.APP_SETTINGS,
+])
+
 const RESIDENT_SURFACE = 'resident'
 
 const PUBLIC_ROUTE_NAMES = new Set([
@@ -53,6 +66,7 @@ const PUBLIC_ROUTE_NAMES = new Set([
   AppRouteNames.REGISTER,
   AppRouteNames.RESIDENT_LOGIN,
   AppRouteNames.GUEST_INVITE,
+  AppRouteNames.MEMBER_INVITE,
 ])
 
 const router = createRouter({
@@ -66,6 +80,11 @@ const router = createRouter({
       path: AppPaths.GUEST_INVITE,
       name: AppRouteNames.GUEST_INVITE,
       component: GuestInviteView,
+    },
+    {
+      path: AppPaths.MEMBER_INVITE,
+      name: AppRouteNames.MEMBER_INVITE,
+      component: MemberInviteView,
     },
     {
       path: AppPaths.APP,
@@ -98,6 +117,9 @@ const router = createRouter({
         },
         { path: 'projects', name: AppRouteNames.APP_PROJECTS, component: AppProjectsView },
         { path: 'settings', name: AppRouteNames.APP_SETTINGS, component: AppSettingsView },
+        { path: 'board', name: AppRouteNames.APP_BOARD, component: AppBoardView },
+        { path: 'access', name: AppRouteNames.APP_ACCESS, component: AppAccessView },
+        { path: 'buildings', name: AppRouteNames.APP_BUILDINGS, component: AppBuildingsView },
         {
           path: 'resident/dashboard',
           name: AppRouteNames.APP_RESIDENT_DASHBOARD,
@@ -179,6 +201,12 @@ router.beforeEach(async (to) => {
     ) {
       ensureOpenAccessSession(SessionRoles.ADMIN)
     }
+    if (
+      getSessionRole() === SessionRoles.BOARD &&
+      (to.name == null || !BOARD_APP_ROUTE_NAMES.has(to.name))
+    ) {
+      return { name: AppRouteNames.APP_BOARD }
+    }
     return true
   }
 
@@ -214,6 +242,12 @@ router.beforeEach(async (to) => {
     (to.name == null || !RESIDENT_APP_ROUTE_NAMES.has(to.name))
   ) {
     return { name: AppRouteNames.APP_RESIDENT_DASHBOARD }
+  }
+
+  // Junta (o un administrador invitado como junta en el edificio activo): solo su vista de lectura.
+  const readOnly = role === SessionRoles.BOARD || (role === SessionRoles.ADMIN && getActiveBuildingRole() === SessionRoles.BOARD)
+  if (readOnly && (to.name == null || !BOARD_APP_ROUTE_NAMES.has(to.name))) {
+    return { name: AppRouteNames.APP_BOARD }
   }
 
   // Reverse guard: an admin session never renders the resident surface (/app/resident/*).

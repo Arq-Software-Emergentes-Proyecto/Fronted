@@ -10,12 +10,15 @@ import { authApi } from '@/iam/infrastructure/authApi.js'
 import { residentsApi } from '@/residents/infrastructure/residentsApi.js'
 import { useSession } from '@/iam/application/sessionStore.js'
 import {
+  isBoardDemoUsername,
   isDemoCredentials,
   isDemoUsername,
   OPEN_WIREFRAME_ACCESS,
   previewAdminAuthResult,
+  previewBoardAuthResult,
   previewResidentAuthResult,
 } from '@/iam/application/localPreviewAuth.js'
+import { loadAccessibleBuildings } from '@/iam/application/buildingWorkspace.js'
 import { signInWithGoogle, refreshFirebaseIdToken } from '@/iam/infrastructure/googleIdentity.js'
 import {
   createResidentPasswordAccount,
@@ -30,7 +33,7 @@ import DashboardHeroArt from '@/shared/presentation/components/dashboard/Dashboa
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
-const { setAdminSession, setResidentSession } = useSession()
+const { setAdminSession, setResidentSession, setBoardSession } = useSession()
 
 /** Internal app path from ?redirect= (rejects protocol-relative URLs). */
 function navigateAfterAuth(fallback) {
@@ -340,6 +343,8 @@ const regDni = ref('')
 const regAddress = ref('')
 const regCompany = ref('')
 const regRuc = ref('')
+/** Quién registra la cuenta del condominio: la junta directiva o la empresa administradora. */
+const regAccountKind = ref('administrator')
 const registerError = ref('')
 const registerLoading = ref(false)
 
@@ -422,7 +427,7 @@ function onOnboardingSkip() {
   navigateAfterAuth({ name: AppRouteNames.APP_DASHBOARD })
 }
 
-function finishAdminSession(user, token, { onboarding = false } = {}) {
+async function finishAdminSession(user, token, { onboarding = false } = {}) {
   setAdminSession(
     {
       id: user.id,
@@ -441,7 +446,18 @@ function finishAdminSession(user, token, { onboarding = false } = {}) {
     onboardingStep.value = 'building'
     return
   }
+  // Edificios de la cuenta (Portafolio) y los que le asignaron: el panel abre en el edificio activo.
+  await loadAccessibleBuildings(token)
   navigateAfterAuth({ name: AppRouteNames.APP_DASHBOARD })
+}
+
+/** Junta directiva: vista de solo lectura del edificio (o de los edificios) que la invitó. */
+async function finishBoardSession(user, token) {
+  setBoardSession({ id: user.id, name: user.name, email: user.email }, token)
+  completeProfileMode.value = false
+  pendingAuthToken.value = null
+  await loadAccessibleBuildings(token)
+  navigateAfterAuth({ name: AppRouteNames.APP_BOARD })
 }
 
 async function onLoginContinue() {
@@ -545,9 +561,12 @@ async function startDemoSession(role) {
     if (role === 'resident') {
       const { user, token } = previewResidentAuthResult()
       await applyResidentSession(user, token)
+    } else if (role === 'board') {
+      const { user, token } = previewBoardAuthResult()
+      await finishBoardSession(user, token)
     } else {
       const { user, token } = previewAdminAuthResult()
-      finishAdminSession(user, token)
+      await finishAdminSession(user, token)
     }
   } catch {
     loginEmailError.value = t('auth.genericError')
@@ -558,7 +577,8 @@ async function startDemoSession(role) {
 
 async function onLoginSubmit() {
   if (isDemoUsername(loginEmail.value)) {
-    await startDemoSession(isResidentLogin.value ? 'resident' : 'admin')
+    const demoRole = isBoardDemoUsername(loginEmail.value) ? 'board' : isResidentLogin.value ? 'resident' : 'admin'
+    await startDemoSession(demoRole)
     return
   }
   loginLoading.value = true
@@ -572,6 +592,11 @@ async function onLoginSubmit() {
     // US014: one form, routed by the role the API reports.
     if (user.role === 'resident') {
       await applyResidentSession(user, token)
+      return
+    }
+
+    if (user.role === 'board_member') {
+      await finishBoardSession(user, token)
       return
     }
 
@@ -591,7 +616,7 @@ async function onLoginSubmit() {
       return
     }
 
-    finishAdminSession(user, token)
+    await finishAdminSession(user, token)
   } catch (error) {
     // Signed into Firebase but rejected by the API: do not leave that Firebase session behind.
     void signOutFirebase()
@@ -699,6 +724,7 @@ async function onRegisterSubmit() {
       address: regAddress.value,
       company: regCompany.value,
       ruc: regRuc.value,
+      accountKind: regAccountKind.value,
     })
     finishAdminSession(user, token, { onboarding: true })
   } catch (error) {
@@ -1347,6 +1373,21 @@ watch(loginEmail, () => {
             <p class="auth-subtitle">{{ t('auth.registerFirebaseHint') }}</p>
 
             <form class="auth-form" :aria-label="t('auth.ariaRegister')" novalidate @submit.prevent="onRegisterSubmit">
+              <fieldset class="auth-kind">
+                <legend class="auth-label">{{ t('auth.accountKindLabel') }}</legend>
+                <div class="auth-kind__options">
+                  <label
+                    v-for="kind in ['administrator', 'board']"
+                    :key="kind"
+                    class="auth-kind__option"
+                    :class="{ 'is-selected': regAccountKind === kind }"
+                  >
+                    <input v-model="regAccountKind" type="radio" name="reg-account-kind" :value="kind" />
+                    <span class="auth-kind__title">{{ t(`auth.accountKind.${kind}.title`) }}</span>
+                    <span class="auth-kind__hint">{{ t(`auth.accountKind.${kind}.hint`) }}</span>
+                  </label>
+                </div>
+              </fieldset>
               <div class="auth-grid">
                 <div class="auth-field">
                   <label class="auth-label" for="reg-name">{{ t('auth.fullName') }}</label>
@@ -1725,6 +1766,65 @@ watch(loginEmail, () => {
   font-size: 0.8125rem;
   font-weight: 600;
   color: #334155;
+}
+
+.auth-kind {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.auth-kind .auth-label {
+  display: block;
+  margin-bottom: 0.4rem;
+}
+
+.auth-kind__options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.6rem;
+}
+
+.auth-kind__option {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.75rem 0.9rem;
+  background: #fff;
+  border: 1px solid var(--auth-field-line);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.auth-kind__option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.auth-kind__option.is-selected {
+  border-color: var(--auth-navy);
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.12);
+}
+
+.auth-kind__option:has(input:focus-visible) {
+  outline: 2px solid var(--auth-navy);
+  outline-offset: 2px;
+}
+
+.auth-kind__title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--auth-ink);
+}
+
+.auth-kind__hint {
+  font-size: 0.78rem;
+  color: var(--auth-muted);
+  line-height: 1.35;
 }
 
 .auth-label__opt {

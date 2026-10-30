@@ -84,6 +84,8 @@ async function upsertProfile(token, draft) {
       address: draft.address,
       company: draft.company,
       ruc: draft.ruc,
+      // administrator | board: quién registra la cuenta del condominio (solo al crearla).
+      accountKind: draft.accountKind,
     },
     { headers: authHeaders(token) },
   )
@@ -221,6 +223,11 @@ export const authApi = {
         return { user: account, token: residentToken, profileIncomplete: false }
       }
 
+      // Junta directiva: entra a su vista de solo lectura (no tiene perfil de administrador).
+      if (account?.role === 'board_member') {
+        return { user: { ...account, role: 'board_member' }, token, profileIncomplete: false }
+      }
+
       try {
         const profile = await fetchMyProfile(token)
         if (!profile) {
@@ -300,7 +307,9 @@ export const authApi = {
         profileIncomplete: false,
       }
     }
-    const { identity, token, profileDraft } = await registerAdminWithFirebase(payload)
+    const registered = await registerAdminWithFirebase(payload)
+    const { identity, token } = registered
+    const profileDraft = { ...registered.profileDraft, accountKind: payload?.accountKind }
     try {
       const profile = await upsertProfile(token, profileDraft)
       if (!profile?.id) {

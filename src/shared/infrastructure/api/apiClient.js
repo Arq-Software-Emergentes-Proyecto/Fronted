@@ -4,7 +4,7 @@ import {
   isDemoSession,
   isPreviewAccessToken,
 } from '@/iam/application/localPreviewAuth.js'
-import { clearSession, getAccessToken } from '@/iam/application/sessionStore.js'
+import { clearSession, getAccessToken, getActiveBuildingId } from '@/iam/application/sessionStore.js'
 import { freshSessionToken, signOutFirebase } from '@/iam/infrastructure/firebaseSession.js'
 
 /**
@@ -35,6 +35,10 @@ apiClient.defaults.adapter = async (config) => {
 }
 
 apiClient.interceptors.request.use(async (config) => {
+  // Edificio activo (Portafolio, administrador asignado o junta): el servidor solo lo acepta si la
+  // sesión tiene acceso a él.
+  const building = getActiveBuildingId()
+  if (building && !config.headers?.['X-Building-Id']) config.headers['X-Building-Id'] = building
   // Sign-in flows pass the new user's token explicitly: never replace it with the stored session.
   if (config.headers?.Authorization) return config
   const token = await freshSessionToken()

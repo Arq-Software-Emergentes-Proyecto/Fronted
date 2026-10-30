@@ -1,6 +1,10 @@
 /** Demo tenant used by local preview login (`preview-admin-1` / `preview-resident-1`). */
 export const MOCK_OWNER_ID = 'preview-admin-1'
-export const MOCK_DB_VERSION = 7
+/** Segundo edificio de la cuenta demo (Portafolio): un condominio aparte con sus propios datos. */
+export const MOCK_SECOND_BUILDING_ID = 'preview-bldg-2'
+/** Miembro de la junta directiva del edificio demo (usuario "junta", solo lectura). */
+export const MOCK_BOARD_USER_ID = 'preview-board-1'
+export const MOCK_DB_VERSION = 8
 
 function pad(n) {
   return String(n).padStart(2, '0')
@@ -121,6 +125,84 @@ export function createSeedDb() {
         // Ingresó este mes: así la demo muestra la tendencia de residentes/unidades en el panel.
         admissionDate: monthStart(0),
         ownerAdminId: owner,
+      },
+      {
+        id: MOCK_BOARD_USER_ID,
+        name: 'Lucía Paredes',
+        email: 'junta@demo.test',
+        role: 'board_member',
+      },
+      {
+        // Cuenta del segundo edificio: la administra la cuenta demo y se cobra en su suscripción.
+        id: MOCK_SECOND_BUILDING_ID,
+        name: 'Residencial Los Olivos',
+        email: '',
+        role: 'admin',
+        authProvider: 'managed',
+        parentAdminId: owner,
+      },
+      {
+        id: 'preview-resident-21',
+        name: 'Marco Salas',
+        floor: '1',
+        code: '101',
+        email: 'marco.salas@demo.test',
+        password: 'demo',
+        role: 'resident',
+        admissionDate: '2025-01-15',
+        ownerAdminId: MOCK_SECOND_BUILDING_ID,
+      },
+      {
+        id: 'preview-resident-22',
+        name: 'Rosa Huamán',
+        floor: '2',
+        code: '203',
+        email: 'rosa.huaman@demo.test',
+        password: 'demo',
+        role: 'resident',
+        admissionDate: '2025-04-02',
+        ownerAdminId: MOCK_SECOND_BUILDING_ID,
+      },
+    ],
+    buildings: [
+      {
+        id: 1,
+        name: 'Edificio Las Palmeras',
+        address: 'Av. Principal 123, Miraflores',
+        departmentCount: 12,
+        ownerAdminId: owner,
+        createdAt: isoHoursAgo(24 * 200),
+      },
+      {
+        id: 2,
+        name: 'Residencial Los Olivos',
+        address: 'Jr. Los Olivos 456, San Isidro',
+        departmentCount: 24,
+        ownerAdminId: MOCK_SECOND_BUILDING_ID,
+        createdAt: isoHoursAgo(24 * 40),
+      },
+    ],
+    buildingMembers: [
+      {
+        id: 'member-1',
+        ownerAdminId: owner,
+        userId: MOCK_BOARD_USER_ID,
+        role: 'board_member',
+        createdAt: isoHoursAgo(24 * 30),
+      },
+    ],
+    memberInvitations: [
+      {
+        id: 'minv-demo-1',
+        ownerAdminId: owner,
+        email: 'tesoreria@demo.test',
+        name: 'Jorge Medina',
+        role: 'board_member',
+        token: 'demo0invitation0token0000000000000000000000000000000000000000001',
+        expiresAt: new Date(Date.now() + 5 * 86400000).toISOString(),
+        acceptedAt: null,
+        revokedAt: null,
+        createdAt: isoHoursAgo(48),
       },
     ],
     socialSpaces: [
@@ -260,6 +342,21 @@ export function createSeedDb() {
           { id: 9031, type: 'reported', status: 'open', comment: null, authorId: 'preview-resident-3', authorName: 'Carla Ríos', authorRole: 'resident', createdAt: isoHoursAgo(60) },
         ],
         ownerAdminId: owner,
+      },
+      {
+        id: 'inc-21',
+        residentId: 'preview-resident-21',
+        residentName: 'Marco Salas',
+        title: 'Bomba de agua hace ruido',
+        description: 'La bomba de agua del sótano hace un ruido fuerte por las noches.',
+        status: 'open',
+        provider: '',
+        providerId: null,
+        createdAt: isoHoursAgo(10),
+        events: [
+          { id: 9101, type: 'reported', status: 'open', comment: null, authorId: 'preview-resident-21', authorName: 'Marco Salas', authorRole: 'resident', createdAt: isoHoursAgo(10) },
+        ],
+        ownerAdminId: MOCK_SECOND_BUILDING_ID,
       },
     ],
     announcements: [
@@ -828,8 +925,9 @@ export function createSeedDb() {
     residentExtraCharges: [],
     subscriptions: [
       {
+        // Portafolio: la cuenta demo administra dos edificios con una sola suscripción.
         ownerAdminId: owner,
-        planId: 'standard',
+        planId: 'portafolio',
         paidUntil: ymd(25),
         isPaid: true,
       },

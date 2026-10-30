@@ -66,14 +66,29 @@ export function resolveActor(config) {
   const role =
     claims?.role === SessionRoles.RESIDENT ? SessionRoles.RESIDENT : SessionRoles.ADMIN
   if (sub) {
+    if (role === SessionRoles.RESIDENT) {
+      return {
+        id: sub,
+        role,
+        email: claims?.email != null ? String(claims.email) : '',
+        ownerAdminId: findById('users', sub)?.ownerAdminId ?? MOCK_OWNER_ID,
+      }
+    }
+    // Gestión (dueño, administrador asignado o junta): el condominio activo llega en X-Building-Id y
+    // solo vale si el usuario tiene acceso a él (como CallerContextAccessor en la API).
+    const sessionRole = claims?.role === SessionRoles.BOARD ? SessionRoles.BOARD : SessionRoles.ADMIN
+    const tenants = mockAccessibleTenants(sub, sessionRole)
+    const requested = headerValue(config.headers, 'x-building-id').trim()
+    const active = requested ? tenants.find((t) => t.tenantId === requested) : tenants[0]
+    if (requested && !active) fail(config, 403, 'TENANT_REQUIRED', 'El usuario autenticado no tiene acceso a ese condominio.')
     return {
       id: sub,
       role,
+      sessionRole,
+      tenantRole: active?.role ?? 'owner',
+      tenants,
       email: claims?.email != null ? String(claims.email) : '',
-      ownerAdminId:
-        role === SessionRoles.RESIDENT
-          ? MOCK_OWNER_ID
-          : sub,
+      ownerAdminId: active?.tenantId ?? sub,
     }
   }
   const ownerId = getActiveDataOwnerId() || MOCK_OWNER_ID
@@ -349,10 +364,307 @@ function handleCollection(config, method, collection, id) {
   fail(config, 405, 'HTTP_405', 'Method not allowed')
 }
 
+
+/* ------------------------------------------------- Equipo de gestión y edificios (Portafolio) */
+
+const BOARD_ROLE = 'board_member'
+
+function parseMemberRole(raw) {
+  const value = String(raw ?? '').trim().toLowerCase()
+  if (['admin', 'administrator', 'administrador'].includes(value)) return 'admin'
+  if (['board', 'board_member', 'junta'].includes(value)) return BOARD_ROLE
+  return null
+}
+
+/**
+ * Condominios a los que tiene acceso un usuario, el predeterminado primero (mismo orden que
+ * CallerContextAccessor): dueño → el propio y los edificios de su Portafolio; luego sus membresías.
+ */
+export function mockAccessibleTenants(userId, sessionRole) {
+  const id = String(userId ?? '')
+  const users = listCollection('users')
+  const memberships = listCollection('buildingMembers').filter((m) => String(m.userId) === id)
+  const result = []
+  const push = (tenantId, role) => {
+    if (!result.some((t) => t.tenantId === String(tenantId))) result.push({ tenantId: String(tenantId), role })
+  }
+  if (sessionRole !== BOARD_ROLE) {
+    const ownsBuilding = queryCollection('buildings', { ownerAdminId: id }).length > 0
+    if (ownsBuilding || memberships.length === 0) push(id, 'owner')
+    users.filter((u) => String(u.parentAdminId ?? '') === id).forEach((u) => push(u.id, 'owner'))
+  }
+  for (const m of memberships) {
+    push(m.ownerAdminId, sessionRole === BOARD_ROLE || m.role !== 'admin' ? BOARD_ROLE : 'admin')
+  }
+  return result
+}
+
+function tenantBuilding(tenantId) {
+  return queryCollection('buildings', { ownerAdminId: tenantId })
+    .slice()
+    .sort((a, b) => Number(a.id) - Number(b.id))[0] ?? null
+}
+
+function tenantResource(tenant, activeId) {
+  const account = findById('users', tenant.tenantId)
+  const building = tenantBuilding(tenant.tenantId)
+  return {
+    ownerAdminId: tenant.tenantId,
+    buildingId: building?.id ?? null,
+    name: building?.name ?? account?.name ?? 'Condominio',
+    address: building?.address ?? null,
+    departmentCount: building?.departmentCount ?? null,
+    role: tenant.role,
+    isPortfolioBuilding: Boolean(account?.parentAdminId),
+    isActive: tenant.tenantId === String(activeId),
+  }
+}
+
+function invitationResource(row, includeToken) {
+  const expired = new Date(row.expiresAt).getTime() <= Date.now()
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name ?? null,
+    role: row.role,
+    expiresAt: row.expiresAt,
+    status: expired ? 'expired' : 'pending',
+    token: includeToken && !expired ? row.token : null,
+  }
+}
+
+function randomHex(bytes) {
+  const values = new Uint8Array(bytes)
+  if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(values)
+  else for (let i = 0; i < bytes; i += 1) values[i] = Math.floor(Math.random() * 256)
+  return [...values].map((v) => v.toString(16).padStart(2, '0')).join('')
+}
+
+function handleTeamAndBuildings(config, method, route, body) {
+  const isTeamRoute =
+    route === 'me/buildings' ||
+    route === 'members' ||
+    route.startsWith('members/') ||
+    route.startsWith('member-invitations/') ||
+    route === 'portfolio/buildings'
+  if (!isTeamRoute) return null
+
+  // Enlace público de invitación (sin sesión).
+  const inviteMatch = route.match(/^member-invitations\/([^/]+)(\/accept)?$/)
+  if (inviteMatch) {
+    const row = listCollection('memberInvitations').find((i) => i.token === inviteMatch[1])
+    if (!row) fail(config, 404, 'INVITATION_NOT_FOUND', 'El enlace no es válido.')
+    const status = row.acceptedAt
+      ? 'accepted'
+      : row.revokedAt
+        ? 'revoked'
+        : new Date(row.expiresAt).getTime() <= Date.now()
+          ? 'expired'
+          : 'pending'
+    if (!inviteMatch[2] && method === 'GET') {
+      const building = tenantBuilding(row.ownerAdminId)
+      return ok(config, {
+        buildingName: building?.name ?? 'Condominio',
+        buildingAddress: building?.address ?? null,
+        role: row.role,
+        email: row.email,
+        name: row.name ?? null,
+        expiresAt: row.expiresAt,
+        status,
+      })
+    }
+    if (inviteMatch[2] && method === 'POST') {
+      if (status === 'accepted') fail(config, 409, 'INVITATION_ALREADY_USED', 'Esta invitación ya se usó.')
+      if (status !== 'pending') fail(config, 400, 'INVITATION_EXPIRED', 'La invitación venció. Pide una nueva.')
+      let user = listCollection('users').find(
+        (u) => String(u.email ?? '').toLowerCase() === String(row.email).toLowerCase() && u.role !== 'resident',
+      )
+      if (!user) {
+        user = insertRow('users', {
+          id: `preview-member-${Date.now()}`,
+          name: String(body.name ?? '').trim() || row.name || row.email.split('@')[0],
+          email: row.email,
+          role: row.role === 'admin' ? 'admin' : BOARD_ROLE,
+        })
+      }
+      const role = user.role === BOARD_ROLE ? BOARD_ROLE : row.role
+      const existing = listCollection('buildingMembers').find(
+        (m) => String(m.ownerAdminId) === String(row.ownerAdminId) && String(m.userId) === String(user.id),
+      )
+      if (existing) patchRow('buildingMembers', existing.id, { role })
+      else insertRow('buildingMembers', { id: `member-${Date.now()}`, ownerAdminId: row.ownerAdminId, userId: user.id, role, createdAt: new Date().toISOString() })
+      patchRow('memberInvitations', row.id, { acceptedAt: new Date().toISOString() })
+      return ok(config, {
+        ownerAdminId: row.ownerAdminId,
+        role,
+        user: { id: user.id, name: user.name, email: user.email, role: user.role },
+        token: createPreviewAccessToken({ role: user.role, email: user.email, sub: user.id }),
+      })
+    }
+  }
+
+  const actor = resolveActor(config)
+  const tenantId = String(actor.ownerAdminId)
+  const tenantRole = actor.tenantRole ?? 'owner'
+  const canManage = tenantRole === 'owner' || tenantRole === 'admin'
+  const manageRequired = () =>
+    fail(config, 403, 'MANAGE_REQUIRED', 'Solo el dueño de la cuenta o un administrador asignado puede gestionar los accesos.')
+
+  if (route === 'me/buildings' && method === 'GET') {
+    const tenants = actor.tenants ?? []
+    const isAccountOwner = actor.sessionRole !== BOARD_ROLE
+    const plan = isAccountOwner ? subscriptionSnapshot(actor.id).planId : null
+    return ok(config, {
+      activeOwnerAdminId: tenantId,
+      accountKind: isAccountOwner ? (findById('users', actor.id)?.accountKind ?? 'administrator') : null,
+      canAddBuildings: plan === SubscriptionPlanId.PORTAFOLIO && Boolean(tenantBuilding(actor.id)),
+      planId: plan,
+      buildings: tenants.map((t) => tenantResource(t, tenantId)),
+    })
+  }
+
+  if (route === 'portfolio/buildings' && method === 'GET') {
+    return ok(
+      config,
+      (actor.tenants ?? []).map((t) => ({
+        ...tenantResource(t, tenantId),
+        departmentCount: tenantBuilding(t.tenantId)?.departmentCount ?? 0,
+        residents: queryCollection('users', { role: 'resident', ownerAdminId: t.tenantId }).length,
+        openIncidents: queryCollection('incidents', { ownerAdminId: t.tenantId }).filter((i) => i.status !== 'resolved').length,
+      })),
+    )
+  }
+
+  if (route === 'portfolio/buildings' && method === 'POST') {
+    if (actor.sessionRole === BOARD_ROLE) fail(config, 403, 'ACCOUNT_OWNER_REQUIRED', 'Solo el dueño de la cuenta puede agregar edificios.')
+    if (subscriptionSnapshot(actor.id).planId !== SubscriptionPlanId.PORTAFOLIO) {
+      fail(config, 403, 'PORTFOLIO_PLAN_REQUIRED', 'Para administrar varios edificios en la misma cuenta contrata el plan Portafolio.')
+    }
+    if (!tenantBuilding(actor.id)) fail(config, 409, 'FIRST_BUILDING_REQUIRED', 'Registra primero el edificio principal de la cuenta.')
+    const errors = {}
+    if (!String(body.name ?? '').trim()) errors.name = ['El nombre del edificio es obligatorio.']
+    if (!String(body.address ?? '').trim()) errors.address = ['La dirección es obligatoria.']
+    const count = Number(body.departmentCount)
+    if (!Number.isInteger(count) || count < 1 || count > 5000) errors.departmentCount = ['La cantidad de departamentos debe estar entre 1 y 5000.']
+    if (Object.keys(errors).length) fail(config, 400, 'BUILDING_VALIDATION_FAILED', 'Datos del edificio inválidos.', { errors })
+    const account = insertRow('users', {
+      id: `preview-bldg-${Date.now()}`,
+      name: String(body.name).trim(),
+      email: '',
+      role: 'admin',
+      authProvider: 'managed',
+      parentAdminId: actor.id,
+    })
+    const building = insertRow('buildings', {
+      id: Date.now(),
+      name: String(body.name).trim(),
+      address: String(body.address).trim(),
+      departmentCount: count,
+      ownerAdminId: account.id,
+      createdAt: new Date().toISOString(),
+    })
+    return ok(
+      config,
+      {
+        ownerAdminId: account.id,
+        buildingId: building.id,
+        name: building.name,
+        address: building.address,
+        departmentCount: building.departmentCount,
+        role: 'owner',
+        isPortfolioBuilding: true,
+      },
+      201,
+    )
+  }
+
+  if (route === 'members' && method === 'GET') {
+    const tenant = findById('users', tenantId)
+    const owner = (tenant?.parentAdminId ? findById('users', tenant.parentAdminId) : tenant) ?? {}
+    const members = listCollection('buildingMembers')
+      .filter((m) => String(m.ownerAdminId) === tenantId)
+      .map((m) => ({ m, user: findById('users', m.userId) }))
+      .filter((x) => x.user)
+    const invitations = listCollection('memberInvitations').filter(
+      (i) => String(i.ownerAdminId) === tenantId && !i.acceptedAt && !i.revokedAt,
+    )
+    return ok(config, {
+      ownerAdminId: tenantId,
+      myRole: tenantRole,
+      canManage,
+      owner: { id: owner.id, name: owner.name, email: owner.email, accountKind: owner.accountKind ?? 'administrator' },
+      members: members.map(({ m, user }) => ({ id: user.id, name: user.name, email: user.email, role: m.role, since: m.createdAt })),
+      invitations: invitations.map((i) => invitationResource(i, canManage)),
+    })
+  }
+
+  if (route === 'members/invitations' && method === 'POST') {
+    if (!canManage) manageRequired()
+    const role = parseMemberRole(body.role)
+    if (!role) fail(config, 400, 'INVALID_MEMBER_ROLE', 'El rol debe ser administrador o junta directiva.')
+    const email = String(body.email ?? '').trim().toLowerCase()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(config, 400, 'INVALID_EMAIL', 'Ingresa un correo válido.')
+    const tenant = findById('users', tenantId)
+    const owner = tenant?.parentAdminId ? findById('users', tenant.parentAdminId) : tenant
+    if (String(owner?.email ?? '').toLowerCase() === email) fail(config, 409, 'ALREADY_MEMBER', 'Ese correo es del dueño de la cuenta.')
+    const alreadyMember = listCollection('buildingMembers').some(
+      (m) => String(m.ownerAdminId) === tenantId && String(findById('users', m.userId)?.email ?? '').toLowerCase() === email,
+    )
+    if (alreadyMember) fail(config, 409, 'ALREADY_MEMBER', 'Esa persona ya tiene acceso a este condominio.')
+    if (listCollection('users').some((u) => u.role === 'resident' && String(u.email ?? '').toLowerCase() === email)) {
+      fail(config, 409, 'EMAIL_USED_BY_RESIDENT', 'Ese correo pertenece a una cuenta de residente. Usa otro correo para el acceso de gestión.')
+    }
+    listCollection('memberInvitations')
+      .filter((i) => String(i.ownerAdminId) === tenantId && i.email === email && !i.acceptedAt && !i.revokedAt)
+      .forEach((i) => patchRow('memberInvitations', i.id, { revokedAt: new Date().toISOString() }))
+    const created = insertRow('memberInvitations', {
+      id: `minv-${randomHex(8)}`,
+      ownerAdminId: tenantId,
+      email,
+      name: String(body.name ?? '').trim() || null,
+      role,
+      token: randomHex(32),
+      expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
+      acceptedAt: null,
+      revokedAt: null,
+      createdAt: new Date().toISOString(),
+    })
+    return ok(config, invitationResource(created, true), 201)
+  }
+
+  const revokeMatch = route.match(/^members\/invitations\/([^/]+)$/)
+  if (revokeMatch && method === 'DELETE') {
+    if (!canManage) manageRequired()
+    const row = listCollection('memberInvitations').find((i) => i.id === revokeMatch[1] && String(i.ownerAdminId) === tenantId)
+    if (!row) fail(config, 404, 'INVITATION_NOT_FOUND', 'Invitación no encontrada.')
+    patchRow('memberInvitations', row.id, { revokedAt: new Date().toISOString() })
+    return ok(config, '', 204)
+  }
+
+  const removeMatch = route.match(/^members\/([^/]+)$/)
+  if (removeMatch && method === 'DELETE') {
+    if (!canManage) manageRequired()
+    const row = listCollection('buildingMembers').find(
+      (m) => String(m.ownerAdminId) === tenantId && String(m.userId) === removeMatch[1],
+    )
+    if (!row) fail(config, 404, 'MEMBER_NOT_FOUND', 'Esa persona no es miembro de este condominio.')
+    if (String(row.userId) === String(actor.id) && tenantRole !== 'owner') {
+      fail(config, 409, 'CANNOT_REMOVE_SELF', 'Pide al dueño de la cuenta que retire tu acceso.')
+    }
+    removeRow('buildingMembers', row.id)
+    return ok(config, '', 204)
+  }
+
+  return null
+}
+
 function handleV1(config, method, parts) {
   const route = parts.slice(2).join('/')
   const params = readParams(config)
   const body = readBody(config)
+
+  const team = handleTeamAndBuildings(config, method, route, body)
+  if (team) return team
 
   if (route === 'authentication/sign-in' && method === 'POST') {
     const email = String(body.email ?? '').trim().toLowerCase()
@@ -1553,6 +1865,13 @@ function handleIncidentsAndAnnouncements(config, method, parts) {
   return null
 }
 
+function isReadOnlyRequest(config, parts) {
+  if (parts[0] === 'api' && parts[1] === 'v1' && ['member-invitations', 'authentication'].includes(parts[2])) return false
+  if (!authClaimsFromConfig(config)?.sub) return false
+  const actor = resolveActor(config)
+  return actor.role !== SessionRoles.RESIDENT && actor.tenantRole === SessionRoles.BOARD
+}
+
 export async function localMockAdapter(config) {
   const method = String(config.method ?? 'get').toUpperCase()
   const parts = pathParts(config)
@@ -1561,6 +1880,10 @@ export async function localMockAdapter(config) {
     // Demo realism: the assistant takes a moment to answer (shows the typing indicator).
     if (method === 'POST' && /\/support\/chats\/[^/]+\/messages$/.test(String(config.url ?? ''))) {
       await new Promise((resolve) => setTimeout(resolve, 900))
+    }
+    // La junta directiva solo lee (BoardReadOnlyMiddleware en la API).
+    if (method !== 'GET' && isReadOnlyRequest(config, parts)) {
+      fail(config, 403, 'BOARD_READ_ONLY', 'La junta directiva puede ver la información del condominio, pero no modificarla.')
     }
     const operation = await handleOperations(config, method, parts)
     if (operation) return operation
