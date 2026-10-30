@@ -1,0 +1,46 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz para administradores y residentes.")
+Component(h, "XXXXXXXX", "", "")
+Component_Ext(rc, "Módulo Resident Care", "Módulo de BuildingFex.Api", "Aplica el tope de consultas de IA.")
+Component_Ext(profiles, "Módulo Profiles", "Módulo de BuildingFex.Api", "Aplica el límite de departamentos.")
+
+
+Container_Boundary(api, "BuildingFex.Api - bounded context Billing") {
+  Component(subCtrl, "SubscriptionsController", "REST Controller", "POST /api/v1/subscription (contratar) y PATCH /api/v1/subscription (volver a Free).")
+  Component(whCtrl, "SubscriptionController", "REST Controller", "POST /api/v1/subscription/checkout y /confirm: pago de cada periodo con Checkout Pro; Mercado Pago lo confirma en POST /api/v1/payments/webhook (firma x-signature).")
+  Component(pqCtrl, "PlanQuotaQueryController", "REST Controller (interno)", "GET /api/v1/subscription/limits: topes del plan para Resident Care y Profiles.")
+  Component(ch, "Command Handlers", "Application Layer", "ContractPlanCommandHandler, ChangePlanCommandHandler, ProcessChargeResultCommandHandler")
+  Component(qh, "Query Handlers", "Application Layer", "GetPlanLimitsQueryHandler")
+  Component(mpa, "MercadoPagoPaymentAdapter", "Anticorruption Layer", "Adaptador compartido con Finances para el pago de cada periodo del plan (Checkout Pro).")
+  Component(dm, "Domain Model", "Domain Layer", "Subscription (la cuenta matriz paga por todos los edificios de su Portafolio)")
+  Component(repo, "SubscriptionRepository", "Repository (EF Core)", "Implementa ISubscriptionRepository sobre TiDB Cloud (compatible con MySQL).")
+}
+
+System_Ext(mp, "Mercado Pago", "Checkout Pro: pago de cada periodo.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Billing: subscriptions, subscription_payments.")
+
+Rel(profiles, pqCtrl, "Consulta límite de departamentos")
+Rel(rc, pqCtrl, "Consulta tope")
+Rel(spa, subCtrl, "Usa", "JSON/HTTPS")
+Rel(whCtrl, ch, "Envía comando")
+Rel(pqCtrl, ch, "Envía comando")
+Rel(pqCtrl, qh, "Consulta")
+Rel(subCtrl, ch, "Envía comando")
+Rel(subCtrl, qh, "Consulta")
+Rel(ch, mpa, "Usa")
+Rel(ch, dm, "Aplica reglas del dominio")
+Rel(ch, repo, "Persiste")
+Rel(qh, repo, "Lee")
+Rel(mpa, mp, "Checkout del periodo y webhook", "HTTPS")
+Rel(repo, db, "Lee y escribe", "EF Core")
+' orden: SPA a la izquierda, módulos a la derecha y, entre ambos, un nodo invisible (oculto) sobre el webhook; así ninguna flecha cruza el título del límite
+Lay_R(spa, h)
+Lay_R(h, rc)
+Lay_R(rc, profiles)
+Lay_D(h, whCtrl)
+hide h
+@enduml

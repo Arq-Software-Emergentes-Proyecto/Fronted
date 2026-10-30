@@ -1,0 +1,307 @@
+@startuml
+' Figura 99. Diagrama de base de datos global (base: Fronted/docs/architecture/figura98-diagrama-bd.puml)
+set separator none
+skinparam dpi 200
+skinparam defaultFontName "DejaVu Sans"
+skinparam shadowing false
+skinparam nodesep 40
+skinparam ranksep 60
+skinparam packageStyle rectangle
+hide circle
+hide methods
+hide stereotype
+skinparam class {
+  BackgroundColor white
+  FontColor white
+  FontStyle bold
+  AttributeFontSize 11
+  FontSize 12
+  BorderColor #3E64B4
+  HeaderBackgroundColor #3E64B4
+  ArrowColor #333333
+}
+skinparam package {
+  FontSize 13
+  FontStyle bold
+  BackgroundColor<<sup>> #EEF2FA
+  BorderColor<<sup>> #23408E
+  FontColor<<sup>> #23408E
+  BackgroundColor<<core>> #E3F2F0
+  BorderColor<<core>> #0F6E64
+  FontColor<<core>> #0F6E64
+  BackgroundColor<<gen>> #F2F2F2
+  BorderColor<<gen>> #5F6368
+  FontColor<<gen>> #5F6368
+}
+
+!$G = "#back:white;header:8E8E8E;line:8E8E8E"
+!$C = "#back:white;header:1E8C82;line:1E8C82"
+
+package "2. Profiles" <<sup>> {
+  entity "AdminProfile" as AdminProfile {
+    **id : UUID**
+    --
+    <i>◇ userId : UUID</i>
+    fullName : VARCHAR
+    phone : VARCHAR
+    address : VARCHAR
+  }
+}
+
+package "1. IAM" <<gen>> {
+  entity "User" as User $G {
+    **id : UUID**
+    --
+    ownerAdminId : UUID
+    email : VARCHAR
+    passwordHash : VARCHAR
+    role : VARCHAR
+    status : VARCHAR
+    createdAt : DATETIME
+    parentAdminId : UUID
+    accountKind : VARCHAR
+  }
+  entity "BuildingMember" as BuildingMember $G {
+    **id : UUID**
+    --
+    ownerAdminId : UUID
+    userId : UUID
+    role : VARCHAR
+    createdAt : DATETIME
+  }
+  entity "MemberInvitation" as MemberInvitation $G {
+    **id : UUID**
+    --
+    ownerAdminId : UUID
+    email : VARCHAR
+    role : VARCHAR
+    token : CHAR(64)
+    expiresAt : DATETIME
+    acceptedAt : DATETIME
+  }
+}
+
+package "4. Billing" <<gen>> {
+  entity "Subscription" as Subscription $G {
+    **id : UUID**
+    --
+    <i>◇ ownerAdminId : UUID</i>
+    plan : VARCHAR
+    status : VARCHAR
+    startDate : DATE
+    paidUntil : DATE
+  }
+}
+
+package "8. Resident Care" <<core>> {
+  entity "Conversation" as Conversation $C {
+    **id : UUID**
+    --
+    <i>◇ residentId : UUID</i>
+    <i>◇ incidentExternalId : VARCHAR</i>
+    status : VARCHAR
+  }
+  entity "Message" as Message $C {
+    **id : UUID**
+    --
+    <i>◆ conversationId : UUID</i>
+    content : TEXT
+    createdAt : DATETIME
+    sender : VARCHAR
+  }
+}
+
+package "6. Incidents" <<core>> {
+  entity "ServiceProvider" as ServiceProvider $C {
+    **id : UUID**
+    --
+    <i>◇ ownerAdminId : UUID</i>
+    name : VARCHAR
+    serviceType : VARCHAR
+    phone : VARCHAR
+    email : VARCHAR
+  }
+  entity "Incident" as Incident $C {
+    **id : UUID**
+    --
+    <i>◇ residentId : UUID</i>
+    <i>◆ providerId : UUID</i>
+    <i>◇ sourceChatId : VARCHAR</i>
+    title : VARCHAR
+    description : TEXT
+    priority : VARCHAR
+    status : VARCHAR
+    aiSuggestedCategory : VARCHAR
+    aiSuggestedPriority : VARCHAR
+    escalatedAt : DATETIME
+    createdAt : DATETIME
+  }
+}
+
+package "3. Finances" <<sup>> {
+  entity "Fee" as Fee {
+    **id : UUID**
+    --
+    <i>◇ residentId : UUID</i>
+    amount : DECIMAL
+    dueDate : DATE
+    status : VARCHAR
+    concept : VARCHAR
+  }
+  entity "Payment" as Payment {
+    **id : UUID**
+    --
+    <i>◆ feeId : UUID</i>
+    <i>◇ residentId : UUID</i>
+    amount : DECIMAL
+    paymentMethod : VARCHAR
+    status : VARCHAR
+    paidAt : DATETIME
+  }
+  entity "Expense" as Expense {
+    **id : UUID**
+    --
+    <i>◇ ownerAdminId : UUID</i>
+    description : VARCHAR
+    category : VARCHAR
+    amount : DECIMAL
+    date : DATE
+  }
+  entity "Utility" as Utility {
+    **id : UUID**
+    --
+    <i>◇ ownerAdminId : UUID</i>
+    type : VARCHAR
+    amount : DECIMAL
+    period : VARCHAR
+    status : VARCHAR
+  }
+  entity "Payout" as Payout {
+    **id : UUID**
+    --
+    <i>◇ ownerAdminId : UUID</i>
+    amount : DECIMAL
+    status : VARCHAR
+    processedAt : DATETIME
+  }
+  entity "ExtraCharge" as ExtraCharge {
+    **id : UUID**
+    --
+    <i>◇ residentId : UUID</i>
+    description : VARCHAR
+    amount : DECIMAL
+    status : VARCHAR
+  }
+}
+
+package "5. Social Spaces" <<sup>> {
+  entity "CommonSpace" as CommonSpace {
+    **id : UUID**
+    --
+    <i>◇ ownerAdminId : UUID</i>
+    name : VARCHAR
+    description : TEXT
+    capacity : INT
+    status : VARCHAR
+  }
+  entity "Reservation" as Reservation {
+    **id : UUID**
+    --
+    <i>◆ spaceId : UUID</i>
+    <i>◇ residentId : UUID</i>
+    reservationDate : DATE
+    startTime : TIME
+    endTime : TIME
+    guestPassToken : VARCHAR
+    status : VARCHAR
+  }
+  entity "Guest" as Guest {
+    **id : UUID**
+    --
+    <i>◆ reservationId : UUID</i>
+    name : VARCHAR
+    status : VARCHAR
+  }
+}
+
+package "7. Communications" <<sup>> {
+  entity "Announcement" as Announcement {
+    **id : UUID**
+    --
+    <i>◇ ownerAdminId : UUID</i>
+    title : VARCHAR
+    content : TEXT
+    publishedAt : DATETIME
+    status : VARCHAR
+  }
+  entity "Folder" as Folder {
+    **id : UUID**
+    --
+    <i>◇ ownerAdminId : UUID</i>
+    name : VARCHAR
+    createdAt : DATETIME
+  }
+  entity "Document" as Document {
+    **id : UUID**
+    --
+    <i>◆ folderId : UUID</i>
+    fileName : VARCHAR
+    fileUrl : VARCHAR
+    fileType : VARCHAR
+    uploadedAt : DATETIME
+  }
+}
+
+package "9. Team" <<sup>> {
+  entity "Employee" as Employee {
+    **id : UUID**
+    --
+    <i>◇ ownerAdminId : UUID</i>
+    fullName : VARCHAR
+    position : VARCHAR
+    phone : VARCHAR
+    email : VARCHAR
+    status : VARCHAR
+  }
+  entity "MaintenanceTask" as MaintenanceTask {
+    **id : UUID**
+    --
+    <i>◆ employeeId : UUID</i>
+    <i>◇ incidentId : UUID</i>
+    description : TEXT
+    status : VARCHAR
+    completedAt : DATETIME
+  }
+}
+
+' --- relaciones ---
+AdminProfile |o.right.|| User : posee
+User ||.right.o| Subscription : tiene
+User ||--o{ BuildingMember : es miembro
+User ||--o{ MemberInvitation : invita
+Conversation ||-right-o{ Message : contiene
+ServiceProvider |o-right-o{ Incident : atiende
+Fee ||--o{ Payment : genera
+CommonSpace ||-right-o{ Reservation : recibe
+Reservation ||--o{ Guest : registra
+Folder ||--o{ Document : contiene
+Employee ||--o{ MaintenanceTask : "asignada a"
+
+' --- posición: fila superior (Profiles, IAM, Billing, Resident Care, Incidents) y fila inferior ---
+Subscription -[hidden]right- Conversation
+Message -[hidden]right- ServiceProvider
+Expense -[hidden]down- Utility
+Payout -[hidden]down- ExtraCharge
+AdminProfile -[hidden]down- Payout
+Announcement -[hidden]right- Folder
+Folder -[hidden]right- Employee
+Fee -[hidden]right- CommonSpace
+Reservation -[hidden]right- Announcement
+
+skinparam legendBackgroundColor white
+skinparam legendBorderColor white
+legend bottom
+  <color:#0F6E64>■</color> Core domain    <color:#23408E>■</color> Supporting subdomain    <color:#5F6368>■</color> Generic subdomain
+  ◇ referencia a otro contexto por id (la única FK entre contextos es ownerAdminId, hacia User de IAM) · ◆ clave foránea dentro del contexto · negrita: clave primaria
+endlegend
+@enduml

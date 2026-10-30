@@ -1,0 +1,323 @@
+@startuml
+scale 1.55
+set separator none
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam packageStyle rectangle
+skinparam roundCorner 8
+skinparam nodesep 40
+skinparam ranksep 50
+hide circle
+hide stereotype
+hide methods
+skinparam class {
+  BackgroundColor #FFFFFF
+  FontColor #FFFFFF
+  FontStyle bold
+  FontSize 14
+  AttributeFontSize 13
+  AttributeFontColor #222222
+  ArrowColor #222222
+}
+skinparam class<<sup>> {
+  FontColor #FFFFFF
+  StereotypeFontColor #FFFFFF
+  HeaderBackgroundColor #3B5BA5
+  BorderColor #1F3864
+}
+skinparam class<<core>> {
+  FontColor #FFFFFF
+  StereotypeFontColor #FFFFFF
+  HeaderBackgroundColor #1F8A80
+  BorderColor #0F5E57
+}
+skinparam class<<gen>> {
+  FontColor #FFFFFF
+  StereotypeFontColor #FFFFFF
+  HeaderBackgroundColor #6B7280
+  BorderColor #4B5563
+}
+skinparam package {
+  FontSize 15
+  FontStyle bold
+}
+skinparam package<<sup>> {
+  BackgroundColor #E8EDF7
+  BorderColor #1F3864
+  FontColor #1F3864
+}
+skinparam package<<core>> {
+  BackgroundColor #E3F2EF
+  BorderColor #0F5E57
+  FontColor #0F5E57
+}
+skinparam package<<gen>> {
+  BackgroundColor #F1F2F4
+  BorderColor #4B5563
+  FontColor #374151
+}
+skinparam legend {
+  BackgroundColor #F7F8FA
+  BorderColor #374151
+  FontSize 13
+}
+
+' ===== Fila 1 =====
+package "2. Profiles" <<sup>> {
+  class AdminProfile <<sup>> {
+    **id**
+    --
+    <U+25C7> //userId//
+    fullName
+    phone
+    address
+  }
+}
+
+package "1. IAM" <<gen>> {
+  class User <<gen>> {
+    **id**
+    --
+    email
+    passwordHash
+    role
+    accountKind
+    ◆ //parentAdminId//
+    isActive
+    createdAt
+  }
+  class BuildingMember <<gen>> {
+    **id**
+    --
+    ◆ //ownerAdminId//
+    ◆ //userId//
+    role
+  }
+  class MemberInvitation <<gen>> {
+    **id**
+    --
+    ◆ //ownerAdminId//
+    email
+    role
+    token
+    expiresAt
+  }
+}
+
+package "4. Billing" <<gen>> {
+  class Subscription <<gen>> {
+    **id**
+    --
+    <U+25C7> //ownerAdminId//
+    plan
+    status
+    startDate
+    paidUntil
+  }
+}
+
+package "8. Resident Care" <<core>> {
+  class Conversation <<core>> {
+    **id**
+    --
+    <U+25C7> //residentId//
+    status
+  }
+  class Message <<core>> {
+    **id**
+    --
+    <U+25C6> //conversationId//
+    content
+    createdAt
+    sender
+  }
+}
+
+package "6. Incidents" <<core>> {
+  class ServiceProvider <<core>> {
+    **id**
+    --
+    <U+25C7> //ownerAdminId//
+    name
+    serviceType
+    phone
+  }
+  class Incident <<core>> {
+    **id**
+    --
+    <U+25C7> //residentId//
+    <U+25C6> //providerId//
+    title
+    description
+    priority
+    status
+    createdAt
+  }
+}
+
+' ===== Fila 2 =====
+package "3. Finances" <<sup>> {
+  class Fee <<sup>> {
+    **id**
+    --
+    <U+25C7> //residentId//
+    amount
+    dueDate
+    status
+    concept
+  }
+  class Payment <<sup>> {
+    **id**
+    --
+    <U+25C6> //feeId//
+    <U+25C7> //residentId//
+    amount
+    method
+    status
+    paidAt
+  }
+  class Expense <<sup>> {
+    **id**
+    --
+    <U+25C7> //ownerAdminId//
+    description
+    category
+    amount
+    createdAt
+  }
+  class Utility <<sup>> {
+    **id**
+    --
+    <U+25C7> //residentId//
+    type
+    amount
+    period
+  }
+  class Payout <<sup>> {
+    **id**
+    --
+    <U+25C7> //ownerAdminId//
+    amount
+    status
+    processedAt
+  }
+  class ExtraCharge <<sup>> {
+    **id**
+    --
+    <U+25C7> //residentId//
+    description
+    amount
+    status
+  }
+}
+
+package "5. Social Spaces" <<sup>> {
+  class CommonSpace <<sup>> {
+    **id**
+    --
+    <U+25C7> //ownerAdminId//
+    name
+    description
+    capacity
+    status
+  }
+  class Reservation <<sup>> {
+    **id**
+    --
+    <U+25C6> //spaceId//
+    <U+25C7> //residentId//
+    reservationDate
+    startTime
+    endTime
+    status
+    qrToken
+  }
+  class Guest <<sup>> {
+    **id**
+    --
+    <U+25C6> //reservationId//
+    fullName
+    status
+  }
+}
+
+package "7. Communications" <<sup>> {
+  class Announcement <<sup>> {
+    **id**
+    --
+    <U+25C7> //ownerAdminId//
+    title
+    content
+    publishDate
+    status
+  }
+  class Folder <<sup>> {
+    **id**
+    --
+    <U+25C7> //ownerAdminId//
+    name
+    createdAt
+  }
+  class Document <<sup>> {
+    **id**
+    --
+    <U+25C6> //folderId//
+    fileName
+    fileUrl
+    fileType
+    uploadedAt
+  }
+}
+
+package "9. Team" <<sup>> {
+  class Employee <<sup>> {
+    **id**
+    --
+    <U+25C7> //ownerAdminId//
+    fullName
+    position
+    phone
+    email
+    status
+  }
+}
+
+' ===== Relaciones =====
+AdminProfile |o.right.|| User : posee
+User ||.right.o| Subscription : tiene
+User ||--o{ BuildingMember : accede
+User ||--o{ MemberInvitation : invita
+Conversation ||-right-o{ Message
+ServiceProvider |o-right-o{ Incident
+Fee ||--o{ Payment
+CommonSpace ||-right-o{ Reservation
+Reservation ||--o{ Guest
+Folder ||--o{ Document
+
+' ===== Disposición =====
+Subscription -[hidden]right- Conversation
+Message -[hidden]right- ServiceProvider
+Expense -[hidden]right- Payout
+Fee -[hidden]right- Expense
+Expense -[hidden]down- Utility
+Payout -[hidden]down- ExtraCharge
+Payout -[hidden]right- CommonSpace
+Reservation -[hidden]right- Announcement
+Announcement -[hidden]right- Folder
+Folder -[hidden]right- Employee
+AdminProfile -[hidden]down- Fee
+Conversation -[hidden]down- Reservation
+Incident -[hidden]down- Folder
+
+legend bottom
+  <b><size:15>Enumeraciones y objeto de valor compartidos</size></b>
+  <#F7F8FA,#F7F8FA>|<b>Money «VO»</b>: amount · currency (Finances)<U+2003><U+2003>|<b>PaymentStatus</b>: PENDING · COMPLETED · FAILED<U+2003><U+2003>|<b>ReservationStatus</b>: PENDING · CONFIRMED · CANCELLED|
+  <#F7F8FA,#F7F8FA>|<b>Role</b>: ADMIN · RESIDENT · BOARD_MEMBER<U+2003><U+2003>|<b>PayoutStatus</b>: PENDING · PROCESSED<U+2003><U+2003>|<b>Priority</b>: LOW · MEDIUM · HIGH · CRITICAL|
+  <#F7F8FA,#F7F8FA>|<b>Plan</b>: FREE · ESSENTIAL · STANDARD · SCALE · PORTAFOLIO<U+2003><U+2003>|<b>EmployeeStatus</b>: ACTIVE · INACTIVE<U+2003><U+2003>|<b>IncidentStatus</b>: REPORTED · ASSIGNED · IN_PROGRESS · RESOLVED|
+  <#F7F8FA,#F7F8FA>|<b>SubscriptionStatus</b>: TRIAL · ACTIVE · PAYMENT_FAILED · SUSPENDED<U+2003><U+2003>|<b>ConversationStatus</b>: OPEN · ANSWERED · DERIVED · CLOSED<U+2003><U+2003>||
+  <#F7F8FA,#F7F8FA>|<b>FeeStatus</b>: PENDING · PAID · OVERDUE<U+2003><U+2003>|<b>AnnouncementStatus</b>: PUBLISHED · EXPIRED<U+2003><U+2003>||
+  <#F7F8FA,#F7F8FA>|<b>PaymentMethod</b>: MERCADO_PAGO (Checkout Pro)<U+2003><U+2003>|<b>SpaceStatus</b>: AVAILABLE · MAINTENANCE<U+2003><U+2003>||
+  
+  <back:#E3F2EF><color:#0F5E57> ■ </color></back> Core domain     <back:#E8EDF7><color:#1F3864> ■ </color></back> Supporting subdomain     <back:#F1F2F4><color:#4B5563> ■ </color></back> Generic subdomain          <size:12><U+25C7> referencia por id a otro contexto (sin asociación entre contextos) · <U+25C6> referencia dentro del contexto · negrita: identificador</size>
+endlegend
+@enduml
