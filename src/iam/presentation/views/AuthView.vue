@@ -710,7 +710,11 @@ async function onCompleteProfileSubmit() {
 async function onRegisterSubmit() {
   if (registerLoading.value) return
   registerError.value = ''
-  if (!validateRegFields(['name', 'email', 'password', 'dni', 'address', 'company', 'ruc'], { password: true })) {
+  // Una junta de propietarios puede no tener RUC: para ella es opcional.
+  const required = ['name', 'email', 'password', 'dni', 'address', 'company', 'ruc'].filter(
+    (field) => !(field === 'ruc' && regAccountKind.value === 'board'),
+  )
+  if (!validateRegFields(required, { password: true })) {
     registerError.value = t('common.fieldsHighlighted')
     return
   }
@@ -1457,7 +1461,7 @@ watch(loginEmail, () => {
                   <p v-if="regErrors.password" id="reg-password-error" class="bf-field-error">{{ t(regErrors.password) }}</p>
                 </div>
                 <div class="auth-field">
-                  <label class="auth-label" for="reg-company">{{ t('auth.companyPlaceholder') }}</label>
+                  <label class="auth-label" for="reg-company">{{ regAccountKind === 'board' ? t('auth.boardNameLabel') : t('auth.companyPlaceholder') }}</label>
                   <input
                     id="reg-company"
                     v-model="regCompany"
@@ -1473,7 +1477,10 @@ watch(loginEmail, () => {
                   <p v-if="regErrors.company" id="reg-company-error" class="bf-field-error">{{ t(regErrors.company) }}</p>
                 </div>
                 <div class="auth-field">
-                  <label class="auth-label" for="reg-ruc">{{ t('auth.rucPlaceholder') }}</label>
+                  <label class="auth-label" for="reg-ruc">
+                    {{ t('auth.rucPlaceholder') }}
+                    <span v-if="regAccountKind === 'board'" class="auth-label__opt">({{ t('auth.optional') }})</span>
+                  </label>
                   <input
                     id="reg-ruc"
                     v-model="regRuc"
@@ -1483,7 +1490,7 @@ watch(loginEmail, () => {
                     autocomplete="off"
                     inputmode="numeric"
                     :disabled="registerLoading"
-                    required
+                    :required="regAccountKind !== 'board'"
                     v-bind="regFieldAttrs('ruc')"
                     @input="clearRegError('ruc')"
                   />
