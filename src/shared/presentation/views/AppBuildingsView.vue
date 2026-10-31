@@ -1,6 +1,8 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink, useRouter } from 'vue-router'
+import Dialog from 'primevue/dialog'
 import { membersApi } from '@/iam/infrastructure/membersApi.js'
 import { loadAccessibleBuildings, switchBuilding } from '@/iam/application/buildingWorkspace.js'
 import { useSession } from '@/iam/application/sessionStore.js'
@@ -11,8 +13,10 @@ import {
   PORTAFOLIO_PRICE_PER_DEPARTMENT_PEN,
   SubscriptionPlanId,
 } from '@/billing/domain/subscriptionPlans.js'
-import { RouterLink, useRouter } from 'vue-router'
+import KpiPills from '@/shared/presentation/components/KpiPills.vue'
+import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
+import '@/shared/presentation/assets/bf-workspace.css'
 
 /**
  * Mis edificios (consola Portafolio). La plataforma se divide por edificios: cada uno es un condominio
@@ -27,8 +31,9 @@ const isLoading = ref(true)
 const loadFailed = ref(false)
 const rows = ref([])
 const workspace = ref({ canAddBuildings: false, planId: null, accountKind: null })
+const search = ref('')
 
-const showForm = ref(false)
+const addOpen = ref(false)
 const form = ref({ name: '', address: '', departmentCount: '' })
 const formErrors = ref({})
 const formError = ref('')
@@ -36,20 +41,54 @@ const saving = ref(false)
 
 const isAccountOwner = computed(() => !isBoard.value && rows.value.some((r) => r.role === 'owner'))
 const onPortfolio = computed(() => workspace.value.planId === SubscriptionPlanId.PORTAFOLIO)
-const ownedRows = computed(() => rows.value.filter((r) => r.role === 'owner'))
+const plansRoute = { name: AppRouteNames.APP_SETTINGS, query: { tab: 'plans', suggestedPlan: SubscriptionPlanId.PORTAFOLIO } }
+
 const totals = computed(() => {
-  const list = rows.value
+  const sum = (field) => rows.value.reduce((acc, r) => acc + (Number(r[field]) || 0), 0)
   return {
-    buildings: list.length,
-    departments: list.reduce((sum, r) => sum + (Number(r.departmentCount) || 0), 0),
-    residents: list.reduce((sum, r) => sum + (Number(r.residents) || 0), 0),
-    openIncidents: list.reduce((sum, r) => sum + (Number(r.openIncidents) || 0), 0),
+    buildings: rows.value.length,
+    departments: sum('departmentCount'),
+    residents: sum('residents'),
+    openIncidents: sum('openIncidents'),
   }
 })
-const ownedDepartments = computed(() => ownedRows.value.reduce((sum, r) => sum + (Number(r.departmentCount) || 0), 0))
+const ownedDepartments = computed(() =>
+  rows.value.filter((r) => r.role === 'owner').reduce((acc, r) => acc + (Number(r.departmentCount) || 0), 0),
+)
 const portfolioMonthly = computed(() =>
   Math.max(PORTAFOLIO_MINIMUM_PEN, PORTAFOLIO_PRICE_PER_DEPARTMENT_PEN * ownedDepartments.value),
 )
+
+/** Con pocos edificios el buscador sobra. */
+const showSearch = computed(() => rows.value.length > 3)
+const visibleRows = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  const list = q ? rows.value.filter((r) => `${r.name ?? ''} ${r.address ?? ''}`.toLowerCase().includes(q)) : rows.value
+  // El edificio abierto va primero.
+  return [...list].sort((a, b) => Number(isActive(b)) - Number(isActive(a)))
+})
+
+const kpiPills = computed(() => [
+  { key: 'buildings', tone: 'blue', icon: 'pi-building', label: t('portfolio.totalBuildings'), value: totals.value.buildings },
+  {
+    key: 'departments',
+    tone: 'green',
+    icon: 'pi-th-large',
+    label: t('portfolio.totalDepartments'),
+    short: t('portfolio.statDepartments'),
+    value: totals.value.departments,
+  },
+  { key: 'residents', tone: 'amber', icon: 'pi-users', label: t('portfolio.totalResidents'), value: totals.value.residents },
+  {
+    key: 'incidents',
+    tone: totals.value.openIncidents ? 'orange' : 'green',
+    icon: 'pi-flag',
+    label: t('portfolio.totalIncidents'),
+    short: t('portfolio.statIncidents'),
+    value: totals.value.openIncidents,
+    alert: totals.value.openIncidents > 0,
+  },
+])
 
 function pen(value) {
   return new Intl.NumberFormat(locale.value === 'es' ? 'es-PE' : 'en-US', {
@@ -65,16 +104,22 @@ function roleLabel(role) {
   return t('portfolio.roleBoard')
 }
 
+function roleTone(role) {
+  if (role === 'owner') return 'ws-pill--blue'
+  if (role === 'admin') return 'ws-pill--green'
+  return 'ws-pill--amber'
+}
+
 function isActive(row) {
   return String(row.ownerAdminId) === String(session.activeBuildingId)
 }
 
 function open(row) {
+  const name = row.role === 'board_member' ? AppRouteNames.APP_BOARD : AppRouteNames.APP_DASHBOARD
   if (isActive(row)) {
-    router.push({ name: row.role === 'board_member' ? AppRouteNames.APP_BOARD : AppRouteNames.APP_DASHBOARD })
+    router.push({ name })
     return
   }
-  const name = row.role === 'board_member' ? AppRouteNames.APP_BOARD : AppRouteNames.APP_DASHBOARD
   switchBuilding(row.ownerAdminId, { reloadTo: router.resolve({ name }).href })
 }
 
@@ -90,6 +135,17 @@ async function load() {
   } finally {
     isLoading.value = false
   }
+}
+
+function openAdd() {
+  form.value = { name: '', address: '', departmentCount: '' }
+  formErrors.value = {}
+  formError.value = ''
+  addOpen.value = true
+}
+
+function closeAdd() {
+  if (!saving.value) addOpen.value = false
 }
 
 /** Cuotas por defecto del edificio nuevo (como al registrar la cuenta), en su propio condominio. */
@@ -131,8 +187,7 @@ async function onAdd() {
       departmentCount: count,
     })
     if (created?.ownerAdminId) await seedBuildingDefaults(created.ownerAdminId)
-    form.value = { name: '', address: '', departmentCount: '' }
-    showForm.value = false
+    addOpen.value = false
     await load()
   } catch (error) {
     const keys = {
@@ -151,566 +206,285 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="app-view portfolio">
-    <header class="pf-head">
-      <div>
-        <h1 class="pf-title">{{ t('portfolio.title') }}</h1>
-        <p class="pf-lead">{{ t('portfolio.lead') }}</p>
+  <div class="ws-view pf">
+    <header class="ws-head">
+      <h1 class="bf-sr-only">{{ t('portfolio.title') }}</h1>
+      <KpiPills v-if="!loadFailed" inline :items="kpiPills" :aria-label="t('portfolio.totalsLabel')" :busy="isLoading" />
+      <div class="ws-head__actions">
+        <button
+          type="button"
+          class="ws-icon-btn"
+          :aria-label="t('access.refresh')"
+          :title="t('access.refresh')"
+          :disabled="isLoading"
+          @click="load"
+        >
+          <i class="pi" :class="isLoading ? 'pi-spin pi-spinner' : 'pi-refresh'" aria-hidden="true" />
+        </button>
+        <button
+          v-if="isAccountOwner && workspace.canAddBuildings"
+          type="button"
+          class="ws-btn ws-btn--primary"
+          @click="openAdd"
+        >
+          <i class="pi pi-plus" aria-hidden="true" />
+          {{ t('portfolio.add') }}
+        </button>
+        <RouterLink v-else-if="isAccountOwner && !onPortfolio" class="ws-btn ws-btn--primary" :to="plansRoute">
+          <i class="pi pi-star" aria-hidden="true" />
+          {{ t('portfolio.upsellCta') }}
+        </RouterLink>
       </div>
-      <button
-        v-if="isAccountOwner && workspace.canAddBuildings"
-        type="button"
-        class="pf-primary"
-        :aria-expanded="showForm ? 'true' : 'false'"
-        aria-controls="pf-add-form"
-        @click="showForm = !showForm"
-      >
-        <i class="pi pi-plus" aria-hidden="true" />
-        <span>{{ t('portfolio.add') }}</span>
-      </button>
     </header>
 
-    <LoadErrorRetry v-if="!isLoading && loadFailed" :loading="isLoading" @retry="load" />
+    <LoadErrorRetry v-if="loadFailed" :loading="isLoading" @retry="load" />
 
-    <section class="pf-totals" :aria-label="t('portfolio.totalsLabel')">
-      <div class="pf-total"><strong>{{ totals.buildings }}</strong><span>{{ t('portfolio.totalBuildings') }}</span></div>
-      <div class="pf-total"><strong>{{ totals.departments }}</strong><span>{{ t('portfolio.totalDepartments') }}</span></div>
-      <div class="pf-total"><strong>{{ totals.residents }}</strong><span>{{ t('portfolio.totalResidents') }}</span></div>
-      <div class="pf-total"><strong>{{ totals.openIncidents }}</strong><span>{{ t('portfolio.totalIncidents') }}</span></div>
+    <section v-else class="ws-card" :aria-label="t('portfolio.title')">
+      <div v-if="showSearch || isAccountOwner" class="ws-toolbar pf-toolbar">
+        <label v-if="showSearch" class="ws-search" for="pf-search">
+          <i class="pi pi-search" aria-hidden="true" />
+          <input
+            id="pf-search"
+            v-model="search"
+            type="search"
+            :placeholder="t('portfolio.searchPlaceholder')"
+            :aria-label="t('portfolio.searchPlaceholder')"
+          />
+        </label>
+        <div v-if="isAccountOwner" class="pf-plan" :class="{ 'is-active': onPortfolio }">
+          <span class="pf-plan__badge"><i class="pi pi-star-fill" aria-hidden="true" />{{ t('portfolio.portfolioChip') }}</span>
+          <template v-if="onPortfolio">
+            <span class="pf-plan__calc">
+              {{ t('portfolio.planCalc', { departments: ownedDepartments, price: pen(PORTAFOLIO_PRICE_PER_DEPARTMENT_PEN) }) }}
+            </span>
+            <strong class="pf-plan__total">{{ pen(portfolioMonthly) }}<small>/{{ t('portfolio.monthShort') }}</small></strong>
+          </template>
+          <span v-else class="pf-plan__calc">
+            {{ pen(PORTAFOLIO_PRICE_PER_DEPARTMENT_PEN) }} {{ t('portfolio.perDepartmentShort') }} ·
+            {{ t('portfolio.minimum', { minimum: pen(PORTAFOLIO_MINIMUM_PEN) }) }}
+          </span>
+        </div>
+      </div>
+
+      <p v-if="isLoading && !rows.length" class="ws-status" role="status">
+        <i class="pi pi-spin pi-spinner" aria-hidden="true" />
+        {{ t('board.loading') }}
+      </p>
+
+      <div v-else-if="!visibleRows.length" class="ws-empty">
+        <span class="ws-empty__icon"><i class="pi pi-filter-slash" aria-hidden="true" /></span>
+        <span>{{ t('portfolio.emptyFiltered') }}</span>
+      </div>
+
+      <div v-else class="ws-table-wrap">
+        <table class="ws-table">
+          <thead>
+            <tr>
+              <th scope="col">{{ t('portfolio.colBuilding') }}</th>
+              <th scope="col">{{ t('portfolio.colRole') }}</th>
+              <th scope="col" class="is-num">{{ t('portfolio.statDepartments') }}</th>
+              <th scope="col" class="is-num">{{ t('portfolio.statResidents') }}</th>
+              <th scope="col">{{ t('portfolio.statIncidents') }}</th>
+              <th scope="col" class="c-actions"><span class="bf-sr-only">{{ t('access.colActions') }}</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in visibleRows" :key="row.ownerAdminId" :class="{ 'pf-row--active': isActive(row) }">
+              <td class="c-main">
+                <div class="ws-who">
+                  <span class="ws-avatar ws-avatar--square" :class="{ 'ws-avatar--slate': !isActive(row) }" aria-hidden="true">
+                    <i class="pi pi-building" />
+                  </span>
+                  <div class="ws-who__text">
+                    <strong>{{ row.name }}</strong>
+                    <small>{{ row.address || t('portfolio.noAddress') }}</small>
+                  </div>
+                </div>
+              </td>
+              <td :data-label="t('portfolio.colRole')">
+                <span class="ws-pill" :class="roleTone(row.role)">{{ roleLabel(row.role) }}</span>
+              </td>
+              <td class="is-num pf-num" :data-label="t('portfolio.statDepartments')">{{ row.departmentCount }}</td>
+              <td class="is-num pf-num" :data-label="t('portfolio.statResidents')">{{ row.residents }}</td>
+              <td :data-label="t('portfolio.statIncidents')">
+                <span class="ws-pill" :class="row.openIncidents > 0 ? 'ws-pill--orange' : 'ws-pill--green'">
+                  <i class="pi" :class="row.openIncidents > 0 ? 'pi-flag' : 'pi-check'" aria-hidden="true" />
+                  {{ row.openIncidents > 0 ? t('portfolio.openCount', row.openIncidents) : t('portfolio.noOpen') }}
+                </span>
+              </td>
+              <td class="c-actions">
+                <div class="ws-row-actions">
+                  <button
+                    type="button"
+                    class="ws-chip"
+                    :class="{ 'is-current': isActive(row) }"
+                    :aria-label="isActive(row) ? t('portfolio.current') : t('portfolio.openFor', { name: row.name })"
+                    @click="open(row)"
+                  >
+                    <i class="pi" :class="isActive(row) ? 'pi-check' : 'pi-arrow-right'" aria-hidden="true" />
+                    {{ isActive(row) ? t('portfolio.current') : t('portfolio.open') }}
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
-    <form
-      v-if="showForm"
-      id="pf-add-form"
-      class="pf-card pf-form"
-      novalidate
-      :aria-label="t('portfolio.addTitle')"
-      @submit.prevent="onAdd"
+    <Dialog
+      :visible="addOpen"
+      modal
+      dismissable-mask
+      :header="t('portfolio.addTitle')"
+      class="ws-dialog"
+      :style="{ width: 'min(28rem, 94vw)' }"
+      :draggable="false"
+      :closable="!saving"
+      :close-on-escape="!saving"
+      @update:visible="(visible) => !visible && closeAdd()"
     >
-      <h2 class="pf-card__title">{{ t('portfolio.addTitle') }}</h2>
-      <p class="pf-card__hint">{{ t('portfolio.addHint') }}</p>
-      <div class="pf-form__grid">
-        <div class="pf-field">
+      <form class="ws-form" novalidate @submit.prevent="onAdd">
+        <div class="ws-field">
           <label for="pf-name">{{ t('portfolio.name') }}</label>
-          <input id="pf-name" v-model="form.name" class="pf-input" type="text" :aria-invalid="formErrors.name ? 'true' : 'false'" />
-          <small v-if="formErrors.name" class="pf-error">{{ formErrors.name }}</small>
+          <input
+            id="pf-name"
+            v-model="form.name"
+            type="text"
+            :aria-invalid="formErrors.name ? 'true' : 'false'"
+            @input="formErrors.name = ''"
+          />
+          <small v-if="formErrors.name" class="ws-field__error">{{ formErrors.name }}</small>
         </div>
-        <div class="pf-field">
+        <div class="ws-field">
           <label for="pf-address">{{ t('portfolio.address') }}</label>
-          <input id="pf-address" v-model="form.address" class="pf-input" type="text" :aria-invalid="formErrors.address ? 'true' : 'false'" />
-          <small v-if="formErrors.address" class="pf-error">{{ formErrors.address }}</small>
+          <input
+            id="pf-address"
+            v-model="form.address"
+            type="text"
+            :aria-invalid="formErrors.address ? 'true' : 'false'"
+            @input="formErrors.address = ''"
+          />
+          <small v-if="formErrors.address" class="ws-field__error">{{ formErrors.address }}</small>
         </div>
-        <div class="pf-field">
+        <div class="ws-field">
           <label for="pf-departments">{{ t('portfolio.departments') }}</label>
           <input
             id="pf-departments"
             v-model="form.departmentCount"
-            class="pf-input"
             type="number"
             min="1"
             max="5000"
             inputmode="numeric"
             :aria-invalid="formErrors.departmentCount ? 'true' : 'false'"
+            @input="formErrors.departmentCount = ''"
           />
-          <small v-if="formErrors.departmentCount" class="pf-error">{{ formErrors.departmentCount }}</small>
+          <small v-if="formErrors.departmentCount" class="ws-field__error">{{ formErrors.departmentCount }}</small>
         </div>
-      </div>
-      <p v-if="formError" class="pf-error" role="alert">{{ formError }}</p>
-      <div class="pf-form__actions">
-        <button type="submit" class="pf-primary" :disabled="saving">
-          {{ saving ? t('portfolio.saving') : t('portfolio.save') }}
-        </button>
-        <button type="button" class="pf-secondary" @click="showForm = false">{{ t('portfolio.cancel') }}</button>
-      </div>
-    </form>
-
-    <ul class="pf-grid" role="list">
-      <li v-for="row in rows" :key="row.ownerAdminId" class="pf-card pf-building" :class="{ 'is-active': isActive(row) }">
-        <div class="pf-building__top">
-          <span class="pf-building__icon" aria-hidden="true"><i class="pi pi-building" /></span>
-          <div class="pf-building__name">
-            <h2>{{ row.name }}</h2>
-            <p>{{ row.address || t('portfolio.noAddress') }}</p>
-          </div>
-        </div>
-        <dl class="pf-stats">
-          <div><dt>{{ t('portfolio.statDepartments') }}</dt><dd>{{ row.departmentCount }}</dd></div>
-          <div><dt>{{ t('portfolio.statResidents') }}</dt><dd>{{ row.residents }}</dd></div>
-          <div>
-            <dt>{{ t('portfolio.statIncidents') }}</dt>
-            <dd :class="{ 'is-alert': row.openIncidents > 0 }">{{ row.openIncidents }}</dd>
-          </div>
-        </dl>
-        <div class="pf-building__foot">
-          <span class="pf-chip" :class="`pf-chip--${row.role}`">{{ roleLabel(row.role) }}</span>
-          <span v-if="row.isPortfolioBuilding" class="pf-chip pf-chip--soft">{{ t('portfolio.portfolioChip') }}</span>
-          <button type="button" class="pf-open" @click="open(row)">
-            <span>{{ isActive(row) ? t('portfolio.current') : t('portfolio.open') }}</span>
-            <i class="pi pi-arrow-right" aria-hidden="true" />
-          </button>
-        </div>
-      </li>
-    </ul>
-
-    <section v-if="isAccountOwner && onPortfolio" class="pf-card pf-plan" aria-labelledby="pf-plan-title">
-      <div>
-        <h2 id="pf-plan-title" class="pf-card__title">{{ t('portfolio.planActiveTitle') }}</h2>
-        <p class="pf-card__hint">
-          {{ t('portfolio.planActiveHint', { departments: ownedDepartments, price: pen(PORTAFOLIO_PRICE_PER_DEPARTMENT_PEN), minimum: pen(PORTAFOLIO_MINIMUM_PEN) }) }}
-        </p>
-      </div>
-      <p class="pf-plan__price">
-        <strong>{{ pen(portfolioMonthly) }}</strong>
-        <span>{{ t('portfolio.perMonth') }}</span>
-      </p>
-    </section>
-
-    <section v-else-if="isAccountOwner" class="pf-card pf-upsell" aria-labelledby="pf-upsell-title">
-      <div class="pf-upsell__text">
-        <p class="pf-upsell__eyebrow">{{ t('portfolio.upsellEyebrow') }}</p>
-        <h2 id="pf-upsell-title" class="pf-card__title">{{ t('portfolio.upsellTitle') }}</h2>
-        <p class="pf-card__hint">{{ t('portfolio.upsellLead') }}</p>
-        <ul class="pf-upsell__list">
-          <li v-for="key in ['oneAccount', 'separateData', 'switcher', 'team', 'ai', 'support']" :key="key">
-            <i class="pi pi-check" aria-hidden="true" />
-            <span>{{ t(`portfolio.upsellPoints.${key}`) }}</span>
-          </li>
-        </ul>
-      </div>
-      <div class="pf-upsell__price">
-        <strong>{{ pen(PORTAFOLIO_PRICE_PER_DEPARTMENT_PEN) }}</strong>
-        <span>{{ t('portfolio.perDepartment') }}</span>
-        <small>{{ t('portfolio.minimum', { minimum: pen(PORTAFOLIO_MINIMUM_PEN) }) }}</small>
-        <RouterLink
-          class="pf-primary"
-          :to="{ name: AppRouteNames.APP_SETTINGS, query: { tab: 'plans', suggestedPlan: SubscriptionPlanId.PORTAFOLIO } }"
-        >
-          {{ t('portfolio.upsellCta') }}
-        </RouterLink>
-      </div>
-    </section>
+        <p v-if="formError" class="ws-form__error" role="alert">{{ formError }}</p>
+        <ConfirmActions
+          :cancel-label="t('portfolio.cancel')"
+          :confirm-label="saving ? t('portfolio.saving') : t('portfolio.save')"
+          confirm-type="submit"
+          :loading="saving"
+          :cancel-disabled="saving"
+          :stagger="false"
+          @cancel="closeAdd"
+        />
+      </form>
+    </Dialog>
   </div>
 </template>
 
 <style scoped>
-.app-view {
-  padding: 1.5rem 1.5rem 2.5rem;
-  max-width: 80rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+.pf-toolbar {
+  justify-content: flex-end;
 }
 
-.pf-head {
-  display: flex;
-  align-items: flex-start;
+.pf-toolbar:has(.ws-search) {
   justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
 }
 
-.pf-title {
-  margin: 0;
-  font-size: 1.5rem;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-  color: #0f172a;
-}
-
-.pf-lead {
-  margin: 0.35rem 0 0;
-  max-width: 46rem;
-  font-size: 0.9rem;
-  color: #475569;
-}
-
-.pf-totals {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-
-.pf-total {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.85rem 1rem;
-  border-radius: 14px;
-  background: #eef2fb;
-}
-
-.pf-total strong {
-  font-size: 1.35rem;
-  font-weight: 700;
-  color: #1e3a8a;
-}
-
-.pf-total span {
-  font-size: 0.76rem;
-  color: #475569;
-}
-
-.pf-card {
-  padding: 1.15rem 1.2rem;
-  border-radius: 18px;
-  background: #fff;
-  border: 1px solid rgba(15, 23, 42, 0.07);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  min-width: 0;
-}
-
-.pf-card__title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 650;
-  color: #0f172a;
-}
-
-.pf-card__hint {
-  margin: 0.25rem 0 0;
-  font-size: 0.8rem;
-  color: #64748b;
-}
-
-.pf-grid {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
-  gap: 0.9rem;
-}
-
-.pf-building {
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-}
-
-.pf-building.is-active {
-  border-color: #1e3a8a;
-  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.1);
-}
-
-.pf-building__top {
-  display: flex;
-  gap: 0.75rem;
-  align-items: flex-start;
-}
-
-.pf-building__icon {
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  width: 2.4rem;
-  height: 2.4rem;
-  border-radius: 12px;
-  background: #e8eefc;
-  color: #1e3a8a;
-}
-
-.pf-building__name {
-  min-width: 0;
-}
-
-.pf-building__name h2 {
-  margin: 0;
-  font-size: 0.98rem;
-  font-weight: 650;
-  color: #0f172a;
-}
-
-.pf-building__name p {
-  margin: 0.15rem 0 0;
-  font-size: 0.78rem;
-  color: #64748b;
-}
-
-.pf-stats {
-  margin: 0;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.5rem;
-}
-
-.pf-stats div {
-  padding: 0.5rem 0.6rem;
-  border-radius: 10px;
-  background: #f8fafc;
-}
-
-.pf-stats dt {
-  font-size: 0.68rem;
-  color: #64748b;
-}
-
-.pf-stats dd {
-  margin: 0.1rem 0 0;
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.pf-stats dd.is-alert {
-  color: #c2410c;
-}
-
-.pf-building__foot {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex-wrap: wrap;
-  margin-top: auto;
-}
-
-.pf-chip {
-  padding: 0.18rem 0.55rem;
-  border-radius: 999px;
-  background: #f1f5f9;
-  color: #334155;
-  font-size: 0.72rem;
+.pf-num {
+  font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
 
-.pf-chip--owner {
-  background: #e8eefc;
-  color: #1e3a8a;
+.ws-table tbody tr.pf-row--active td {
+  background: #f5f8ff;
 }
 
-.pf-chip--admin {
-  background: #e3f4e8;
-  color: #15803d;
-}
-
-.pf-chip--soft {
-  background: #fdf3dc;
-  color: #92400e;
-}
-
-.pf-open {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.35rem 0.8rem;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 999px;
-  background: #fff;
-  color: #1e3a8a;
-  font: inherit;
-  font-size: 0.78rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.pf-open:hover {
-  background: #eef2ff;
-}
-
-.pf-primary {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.45rem;
-  min-height: 2.5rem;
-  padding: 0.45rem 1.1rem;
-  border: 0;
-  border-radius: 999px;
-  background: #1e3a8a;
-  color: #fff;
-  font: inherit;
-  font-size: 0.86rem;
-  font-weight: 600;
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.pf-primary:hover {
-  background: #172554;
-}
-
-.pf-primary:disabled {
-  opacity: 0.6;
-}
-
-.pf-secondary {
-  min-height: 2.5rem;
-  padding: 0.45rem 1.1rem;
-  border: 1px solid rgba(15, 23, 42, 0.14);
-  border-radius: 999px;
-  background: #fff;
-  color: #334155;
-  font: inherit;
-  font-size: 0.86rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.pf-open:focus-visible,
-.pf-primary:focus-visible,
-.pf-secondary:focus-visible {
-  outline: 2px solid #1e3a8a;
-  outline-offset: 2px;
-}
-
-.pf-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-}
-
-.pf-form__grid {
-  display: grid;
-  grid-template-columns: 1.2fr 1.5fr 0.8fr;
-  gap: 0.75rem;
-}
-
-.pf-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-
-.pf-field label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #334155;
-}
-
-.pf-input {
-  min-height: 2.6rem;
-  padding: 0.55rem 0.8rem;
-  box-sizing: border-box;
-  border: 1px solid rgba(15, 23, 42, 0.16);
-  border-radius: 12px;
-  font: inherit;
-  font-size: 0.9rem;
-}
-
-.pf-input:focus {
-  outline: none;
-  border-color: #1e3a8a;
-  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.14);
-}
-
-.pf-error {
-  margin: 0;
-  font-size: 0.76rem;
-  color: #b42318;
-}
-
-.pf-form__actions {
-  display: flex;
-  gap: 0.5rem;
+.ws-table tbody tr.pf-row--active td:first-child {
+  box-shadow: inset 3px 0 0 #1e3a8a;
 }
 
 .pf-plan {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
+  gap: 0.6rem;
+  min-height: 2.4rem;
+  padding: 0 0.95rem 0 0.4rem;
+  border-radius: 999px;
   background: #f8fafc;
-}
-
-.pf-plan__price {
-  margin: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 0.35rem;
-}
-
-.pf-plan__price strong {
-  font-size: 1.6rem;
-  font-weight: 700;
-  color: #1e3a8a;
-}
-
-.pf-plan__price span {
+  border: 1px solid rgba(15, 23, 42, 0.08);
   font-size: 0.8rem;
-  color: #64748b;
+  color: #475569;
+  white-space: nowrap;
 }
 
-.pf-upsell {
-  display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
-  gap: 1.25rem;
+.pf-plan.is-active {
+  background: #e8eefc;
+  border-color: transparent;
+  color: #1e3a8a;
+}
+
+.pf-plan__badge {
+  display: inline-flex;
   align-items: center;
+  gap: 0.35rem;
+  padding: 0.22rem 0.6rem;
+  border-radius: 999px;
+  background: #fff;
+  color: #1e3a8a;
+  font-size: 0.74rem;
+  font-weight: 700;
 }
 
-.pf-upsell__eyebrow {
-  margin: 0 0 0.3rem;
+.pf-plan__badge .pi {
+  font-size: 0.62rem;
+  color: #d97706;
+}
+
+.pf-plan__total {
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.pf-plan__total small {
   font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #1e3a8a;
-}
-
-.pf-upsell__list {
-  list-style: none;
-  margin: 0.8rem 0 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.45rem 1rem;
-}
-
-.pf-upsell__list li {
-  display: flex;
-  gap: 0.45rem;
-  font-size: 0.82rem;
-  color: #334155;
-}
-
-.pf-upsell__list i {
-  margin-top: 0.15rem;
-  font-size: 0.75rem;
-  color: #15803d;
-}
-
-.pf-upsell__price {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.2rem;
-  padding: 1rem 1.1rem;
-  border-radius: 14px;
-  background: #eef2fb;
-}
-
-.pf-upsell__price strong {
-  font-size: 1.8rem;
-  font-weight: 700;
-  color: #1e3a8a;
-}
-
-.pf-upsell__price span {
-  font-size: 0.82rem;
-  color: #334155;
-}
-
-.pf-upsell__price small {
-  margin-bottom: 0.6rem;
-  font-size: 0.76rem;
-  color: #64748b;
+  font-weight: 600;
+  color: #475569;
 }
 
 @media (max-width: 900px) {
-  .pf-totals {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .ws-table tbody tr.pf-row--active {
+    border-color: #1e3a8a;
   }
 
-  .pf-form__grid,
-  .pf-upsell,
-  .pf-upsell__list {
-    grid-template-columns: minmax(0, 1fr);
+  .ws-table tbody tr.pf-row--active td,
+  .ws-table tbody tr.pf-row--active td:first-child {
+    background: transparent;
+    box-shadow: none;
   }
-}
 
-@media (max-width: 760px) {
-  .app-view {
-    padding: 1rem 1rem 2rem;
+  .pf-plan {
+    width: 100%;
+    flex-wrap: wrap;
+    white-space: normal;
+    padding: 0.4rem 0.9rem 0.4rem 0.4rem;
+    border-radius: 16px;
   }
 }
 </style>

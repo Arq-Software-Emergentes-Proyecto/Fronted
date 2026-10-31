@@ -148,9 +148,6 @@ async function onGoogle() {
           <span class="minv__badge">{{ roleLabel }}</span>
           <h1 class="minv__title">{{ t('memberInvite.title', { building: invitation.buildingName }) }}</h1>
           <p v-if="invitation.buildingAddress" class="minv__muted">{{ invitation.buildingAddress }}</p>
-          <p class="minv__lead">
-            {{ invitation.role === 'admin' ? t('memberInvite.leadAdmin') : t('memberInvite.leadBoard') }}
-          </p>
 
           <form class="minv__form" novalidate @submit.prevent="onPasswordSubmit">
             <div class="minv__field">
@@ -242,12 +239,6 @@ async function onGoogle() {
   letter-spacing: -0.02em;
 }
 
-.minv__lead {
-  margin: 0.6rem 0 1.1rem;
-  font-size: 0.88rem;
-  color: #334155;
-}
-
 .minv__muted {
   margin: 0;
   font-size: 0.8rem;
@@ -255,6 +246,7 @@ async function onGoogle() {
 }
 
 .minv__form {
+  margin-top: 1.1rem;
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
