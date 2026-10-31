@@ -1,0 +1,45 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+
+Person(admin, "Administrador", "Dueño de la cuenta o administrador asignado.")
+Person(board, "Junta directiva", "Solo lectura del edificio.")
+Person(resident, "Residente", "Ingresa por invitación con su cuenta de Google.")
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz web para administradores, junta y residentes. Envía X-Building-Id con el edificio activo.")
+
+Container_Boundary(api, "BuildingFex.Api - módulo IAM") {
+  Component(authCtrl, "Authentication Controller", "ASP.NET Core API Controller", "Invitaciones de un solo uso, registro con Google e inicio de sesión.")
+  Component(usersCtrl, "Users Controller", "ASP.NET Core API Controller", "Alta, consulta y baja de cuentas de residentes.")
+  Component(membersCtrl, "Members Controller", "ASP.NET Core API Controller", "Invita a un administrador o a la junta, anula invitaciones y retira accesos (/api/v1/members).")
+  Component(minvCtrl, "Member Invitations Controller", "ASP.NET Core API Controller", "Consulta pública y aceptación del enlace (/api/v1/member-invitations/{token}).")
+  Component(boardGuard, "Board Read-Only Middleware", "ASP.NET Core Middleware", "Rechaza con 403 BOARD_READ_ONLY las escrituras de la junta.")
+  Component(caller, "Caller Context Accessor", "C# Service", "Usuario, edificio activo (X-Building-Id) y rol en cada edificio: owner, admin o board_member.")
+  Component(accountSvc, "Account Service", "C# Service", "Valida el idToken, asigna rol y edificio (claims) y revoca el acceso al dar de baja.")
+  Component(userRepo, "User Repository", "EF Core Repository", "Acceso a las cuentas.")
+}
+
+System_Ext(firebaseAuth, "Firebase Authentication", "Identidad: correo y contraseña (administrador) o Google (residente).")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de IAM: cuentas, rol, edificio, miembros e invitaciones.")
+
+Rel(admin, spa, "Se registra e inicia sesión", "HTTPS")
+Rel(resident, spa, "Acepta la invitación e ingresa con Google", "HTTPS")
+Rel(spa, authCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, usersCtrl, "Usa", "JSON/HTTPS")
+Rel(board, spa, "Acepta la invitación y consulta el resumen", "HTTPS")
+Rel(spa, boardGuard, "Toda petición pasa por", "JSON/HTTPS")
+Rel(boardGuard, membersCtrl, "Deja pasar")
+Rel(spa, minvCtrl, "Acepta la invitación", "JSON/HTTPS")
+Rel(membersCtrl, caller, "Usa")
+Rel(boardGuard, caller, "Consulta el rol")
+Rel(minvCtrl, userRepo, "Crea la cuenta y la membresía")
+Rel(caller, userRepo, "Usa")
+Rel(spa, firebaseAuth, "Autentica y obtiene el idToken", "HTTPS")
+Rel(authCtrl, accountSvc, "Usa")
+Rel(usersCtrl, accountSvc, "Usa")
+Rel(accountSvc, userRepo, "Usa")
+' Etiqueta escrita a mano (mismo formato que Rel) para que no la corte el borde del módulo
+accountSvc -RIGHT->> firebaseAuth : **Valida tokens**        \n**y asigna claims**        \n**(Admin SDK)**        \n//<size:12>[HTTPS]</size>//        
+Rel(userRepo, db, "Lee y escribe", "EF Core")
+@enduml

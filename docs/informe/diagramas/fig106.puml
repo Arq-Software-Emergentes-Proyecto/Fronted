@@ -1,0 +1,116 @@
+@startuml
+scale 1.5
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam titleFontSize 14
+skinparam titleFontStyle bold
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+skinparam note {
+  BackgroundColor #FFFDE7
+  BorderColor #8A8A8A
+}
+hide empty members
+title Bounded Context IAM - Domain Layer
+
+interface IUserAccountRepository <<Repository>> {
+  +findById(id: AccountId): UserAccount
+  +findByEmail(email: Email): UserAccount
+  +save(account: UserAccount): void
+}
+
+class UserAccount <<Aggregate Root>> {
+  -id : AccountId
+  -email : Email
+  -role : Role
+  -buildingId : BuildingId
+  -identityProvider : IdentityProvider
+  -status : AccountStatus
+  -createdAt : DateTime
+  -accountKind : AccountKind
+  -parentAccountId : AccountId
+  --
+  +register(email: Email, role: Role, buildingId: BuildingId): UserAccount
+  +linkGoogleIdentity(externalId: String): void
+  +assignRole(role: Role): void
+  +deactivate(reason: String): void
+  +reactivate(): void
+  +isActive(): Boolean
+  +setAccountKind(kind: AccountKind): void
+  +createManagedBuildingAccount(parent: UserAccount, buildingName: String): UserAccount
+}
+
+class BuildingMember <<Entity>> {
+  -id : MemberId
+  -buildingId : BuildingId
+  -userId : AccountId
+  -role : MemberRole
+  -createdAt : DateTime
+  --
+  +create(buildingId: BuildingId, userId: AccountId, role: MemberRole): BuildingMember
+  +changeRole(role: MemberRole): void
+}
+
+class MemberInvitation <<Aggregate Root>> {
+  -id : InvitationId
+  -buildingId : BuildingId
+  -email : Email
+  -name : String
+  -role : MemberRole
+  -token : String
+  -expiresAt : DateTime
+  -acceptedAt : DateTime
+  -revokedAt : DateTime
+  --
+  +issue(buildingId: BuildingId, email: Email, role: MemberRole): MemberInvitation
+  +accept(): void
+  +revoke(): void
+  +isPending(now: DateTime): Boolean
+}
+
+class Email <<Value Object>> {
+  -value : String
+  --
+  +Email(value: String)
+  +equals(other: Email): Boolean
+}
+
+enum Role {
+  ADMIN
+  RESIDENT
+  BOARD_MEMBER
+}
+enum MemberRole {
+  ADMIN
+  BOARD_MEMBER
+}
+enum AccountKind {
+  ADMINISTRATOR
+  BOARD
+}
+enum AccountStatus {
+  ACTIVE
+  DEACTIVATED
+}
+enum IdentityProvider {
+  EMAIL_PASSWORD
+  GOOGLE
+}
+
+IUserAccountRepository ..> "*" UserAccount : persiste
+UserAccount "1" --> "1" Email : tiene
+UserAccount "*" --> "1" Role : cumple
+UserAccount "*" --> "1" AccountStatus : está en
+UserAccount "*" --> "1" IdentityProvider : se autentica con
+UserAccount "1" --> "0..*" BuildingMember : accede como
+UserAccount "1" --> "0..*" UserAccount : edificios del Portafolio
+MemberInvitation ..> BuildingMember : al aceptarse crea
+BuildingMember --> MemberRole
+MemberInvitation --> MemberRole
+UserAccount --> AccountKind
+@enduml

@@ -1,0 +1,97 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+
+System_Ext(fbauth, "Firebase Authentication", "Correo y contraseña\no Google.")
+Container(spa, "BuildingFex Web SPA", "Vue 3, Vercel", "Paneles del administrador,\nde la junta y del residente;\npase público del invitado.")
+Container(jobs, "Función de jobs", "AWS Lambda + EventBridge", "ai-index, monthly-billing,\nincident-escalation,\nimport-cleanup y migrate\n(mismo paquete .NET).")
+System_Ext(mp, "Mercado Pago", "Checkout Pro.")
+
+Container_Boundary(api, "BuildingFex.Api") {
+  Boundary(bIam, "1. IAM") {
+    Component(iamMod, "IAM — Authentication & Users", "ASP.NET Core", "Invitación de un solo uso,\nacceso con Google, alta/baja\nde residentes, junta y\nadministradores asignados.")
+  }
+  Boundary(bProfiles, "2. Profiles") {
+    Component(profilesMod, "Profiles", "ASP.NET Core", "Perfil del administrador,\ndatos del edificio y\nedificios del Portafolio.")
+  }
+  Boundary(bBilling, "4. Billing") {
+    Component(billingMod, "Billing — Suscripción", "ASP.NET Core", "Planes y suscripción\ndel administrador.")
+  }
+  Boundary(bFin, "3. Finances") {
+    Component(paymentsMod, "Payments (cuotas MP)", "ASP.NET Core", "Checkout, confirmación\ny webhook de pagos.")
+    Component(financesMod, "Finances", "ASP.NET Core", "Recibos, cuotas, gastos,\nKPI y cargos extra.")
+  }
+  Boundary(bSpaces, "5. Social Spaces") {
+    Component(spacesMod, "Spaces & Reservations", "ASP.NET Core", "Espacios, reservas\ny pases de invitado.")
+  }
+  Boundary(bInc, "6. Incidents") {
+    Component(incidentsMod, "Incidents & Providers", "ASP.NET Core", "Incidencias, triaje IA,\nescalamiento y\nproveedores de servicio.")
+  }
+  Boundary(bTeam, "9. Team") {
+    Component(teamMod, "Team", "ASP.NET Core", "Trabajadores,\nturnos y tareas.")
+  }
+  Boundary(bComm, "7. Communications") {
+    Component(announcementsMod, "Announcements", "ASP.NET Core", "Comunicados\npor edificio.")
+    Component(documents, "Documents", "Controller + Service", "Carpetas, cuota y tipo MIME;\nURL de subida y confirmación.")
+  }
+  Boundary(bRc, "8. Resident Care") {
+    Component(indexing, "Indexing", "AiContextIndexingJob", "Embeddings del documento\n→ ai_context_chunks. En AWS\nlo ejecuta la función de jobs;\nen local, un BackgroundService.")
+    Component(residentCareMod, "Resident Care Chat", "ASP.NET Core", "Chat con el asistente y\nescalado al administrador.")
+    Component(ragAccess, "RAG chunks", "ASP.NET Core", "Recupera ai_context_chunks\npara el asistente.")
+  }
+  Boundary(bInfra, "Infraestructura compartida") {
+    Component(auditMod, "Audit", "IAuditableEntity", "CreatedAt y UpdatedAt\nde las entidades.")
+    Component(fileStorage, "File Storage", "S3StorageService", "URL prefirmadas (15 min),\nmetadatos y borrado\nde huérfanos.")
+    Component(aiGateway, "Gateway de IA", "ASP.NET Core", "Único acceso a Gemini:\ngenerateContent y embeddings.")
+    Component(notificationMod, "Hub de avisos en tiempo real", "SignalR", "Avisos en vivo dentro\nde la app (chat e\nincidencias); solo en local\n(en AWS, polling).")
+  }
+  Component(sharedKernel, "Shared Kernel", "EF Core", "AppDbContext, UnitOfWork,\nResult y /health. Todos los\nmódulos persisten por él.")
+}
+
+System_Ext(gemini, "Google Gemini API", "Chat y embeddings.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (MySQL)", "Tablas de los\n9 módulos.")
+ContainerDb(s3, "Almacenamiento de archivos", "Amazon S3 (FilesBucket)", "Documentos e\nimportaciones.")
+
+' --- posición (aristas invisibles; fijan las filas) ---
+Lay_D(fbauth, iamMod)
+Lay_D(spa, profilesMod)
+Lay_D(mp, paymentsMod)
+Lay_D(mp, financesMod)
+Lay_D(iamMod, spacesMod)
+Lay_D(profilesMod, incidentsMod)
+Lay_D(spacesMod, teamMod)
+Lay_D(incidentsMod, announcementsMod)
+Lay_D(billingMod, documents)
+Lay_D(announcementsMod, residentCareMod)
+Lay_D(residentCareMod, notificationMod)
+Lay_D(ragAccess, aiGateway)
+Lay_D(indexing, fileStorage)
+Lay_D(ragAccess, auditMod)
+Lay_D(ragAccess, sharedKernel)
+Lay_D(sharedKernel, gemini)
+Lay_D(sharedKernel, s3)
+Lay_D(jobs, profilesMod)
+
+' --- relaciones ---
+Rel(spa, api, "Usa /api/v1 y rutas de compatibilidad (Bearer ID token)", "JSON/HTTPS")
+
+Rel_U(iamMod, fbauth, "Verifica el ID token", "Admin SDK")
+Rel_U(billingMod, paymentsMod, "Checkout de la suscripción")
+Rel_U(paymentsMod, mp, "Crea el cobro", "HTTPS")
+Rel_D(mp, paymentsMod, "Webhook (x-signature)", "HTTPS")
+
+Rel(documents, fileStorage, "Firma y confirma")
+Rel(documents, indexing, "Encola ai-index")
+Rel(jobs, indexing, "Ejecuta ai-index")
+Rel(indexing, fileStorage, "Lee el documento")
+Rel(indexing, aiGateway, "Embeddings")
+Rel(indexing, ragAccess, "Escribe chunks")
+Rel(residentCareMod, ragAccess, "Recupera contexto")
+Rel(residentCareMod, aiGateway, "generateContent")
+Rel(residentCareMod, notificationMod, "Aviso en vivo")
+
+Rel(fileStorage, s3, "URL prefirmadas y borrado", "AWS SDK")
+Rel(aiGateway, gemini, "Chat y embeddings", "HTTPS")
+Rel(sharedKernel, db, "Lee y escribe", "EF Core, TLS")
+@enduml

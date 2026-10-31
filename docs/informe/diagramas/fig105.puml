@@ -1,0 +1,55 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz para administradores, junta directiva y residentes. Envía X-Building-Id.")
+
+Container_Boundary(api, "BuildingFex.Api - bounded context IAM") {
+  Component(authCtrl, "AuthenticationController", "REST Controller", "POST /api/v1/authentication/register-admin (administrador) y POST /api/v1/authentication/sign-in-google (residente con invitación aceptada).")
+  Component(accCtrl, "UsersController", "REST Controller", "GET /api/v1/users/{id}, PATCH /api/v1/users/{id}/deactivate y PATCH /api/v1/users/{id}/reactivate.")
+  Component(memCtrl, "MembersController", "REST Controller", "GET /api/v1/members, POST /api/v1/members/invitations y DELETE de invitaciones y miembros.")
+  Component(minvCtrl, "MemberInvitationsController", "REST Controller", "GET /api/v1/member-invitations/{token} (público) y POST .../{token}/accept.")
+  ' separador invisible: evita que las flechas de la SPA crucen el título del límite
+  Component(sp, "XXXXXXXXXXXXXXXXXXXXXXXXXXXX", "", "")
+  Component(qh, "Query Handlers", "Application Layer", "GetAccountByIdQueryHandler")
+  Component(ch, "Command Handlers", "Application Layer", "RegisterAccountCommandHandler, SignInWithGoogleCommandHandler, DeactivateAccountCommandHandler, InviteMemberCommandHandler, AcceptMemberInvitationCommandHandler")
+  Component(repo, "UserAccountRepository", "Repository (EF Core)", "Implementa IUserAccountRepository sobre la tabla users de TiDB Cloud (compatible con MySQL).")
+  Component(fia, "FirebaseIdentityAdapter", "Anticorruption Layer", "Traduce Firebase Authentication al modelo UserAccount: verifica tokens, asigna claims (rol y edificio) y revoca sesiones.")
+  Component(dm, "Domain Model", "Domain Layer", "UserAccount, BuildingMember, MemberInvitation; Role: ADMIN, RESIDENT, BOARD_MEMBER")
+  Component(cca, "CallerContextAccessor", "Servicio de tenancy", "Edificio activo (X-Building-Id) y rol en cada edificio: owner, admin o board_member.")
+  Component(bro, "BoardReadOnlyMiddleware", "Middleware", "403 BOARD_READ_ONLY ante escrituras de la junta.")
+}
+
+Component_Ext(profiles, "Módulo Profiles", "Módulo de BuildingFex.Api", "Consume CuentaRegistrada y CuentaDesactivada.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de IAM: users, building_members, member_invitations.")
+System_Ext(fbauth, "Firebase Authentication", "Identidad: correo y contraseña o Google.")
+
+Lay_R(authCtrl, sp)
+Lay_R(sp, accCtrl)
+hide sp
+Lay_D(memCtrl, bro)
+Lay_D(minvCtrl, cca)
+
+Rel(spa, authCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, accCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, memCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, minvCtrl, "Usa", "JSON/HTTPS")
+Rel(memCtrl, ch, "Envía comando")
+Rel(minvCtrl, ch, "Envía comando")
+Rel(memCtrl, cca, "Resuelve edificio y rol")
+Rel(bro, cca, "Consulta el rol")
+Rel(cca, repo, "Lee")
+Rel(authCtrl, qh, "Consulta")
+Rel(authCtrl, ch, "Envía comando")
+Rel(accCtrl, qh, "Consulta")
+Rel(accCtrl, ch, "Envía comando")
+Rel(qh, repo, "Lee")
+Rel(ch, repo, "Persiste")
+Rel(ch, fia, "Usa")
+Rel(ch, dm, "Aplica reglas del dominio")
+' Flecha escrita a mano (mismo formato que Rel): la etiqueta se desplaza para que el borde del límite no la corte
+ch -->> profiles : <color:transparent>.</color>              **CuentaRegistrada**\n<color:transparent>.</color>              **CuentaDesactivada**
+Rel(repo, db, "Lee y escribe", "EF Core")
+Rel(fia, fbauth, "Verifica tokens y asigna claims", "HTTPS")
+@enduml

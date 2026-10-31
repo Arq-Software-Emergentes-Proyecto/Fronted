@@ -205,11 +205,8 @@ async function onGoogle() {
   align-items: center;
   justify-content: space-between;
   padding: 1rem 1.25rem;
-  background: #1e3a8a;
-}
-
-.minv__bar img {
-  filter: brightness(0) invert(1);
+  background: #fff;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 .minv__main {
