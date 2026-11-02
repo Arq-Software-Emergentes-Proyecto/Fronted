@@ -1,0 +1,83 @@
+@startuml
+!include common_class.iuml
+left to right direction
+hide circle
+hide methods
+title Bounded Context IAM - Database Design (TiDB Cloud · compatible con MySQL)
+
+entity users {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  external_id : VARCHAR(128) «UQ»
+  name : VARCHAR(200)
+  email : VARCHAR(320)
+  password_hash : LONGTEXT
+  role : VARCHAR(20)
+  auth_provider : VARCHAR(32) = 'password'
+  google_sub : VARCHAR(128) «IDX»
+  dni : VARCHAR(50)
+  address : LONGTEXT
+  company : VARCHAR(200)
+  ruc : VARCHAR(20)
+  floor : VARCHAR(10)
+  code : VARCHAR(20)
+  invite_token : VARCHAR(64) «IDX»
+  invite_expires_at : DATETIME(6)
+  invite_used_at : DATETIME(6)
+  invite_email : VARCHAR(320)
+  admission_date : DATETIME(6)
+  bill_from_next_month : TINYINT(1) = 0
+  owner_admin_id : INT «FK»
+  parent_admin_id : INT «FK»
+  account_kind : VARCHAR(20)
+  subscription_plan_id : VARCHAR(20) = 'free'
+  subscription_paid_until : DATETIME(6)
+  account_status : VARCHAR(20) = 'ACTIVE'
+  deactivated_at : DATETIME(6)
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+}
+
+entity building_members {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  owner_admin_id : INT «FK, UQ(owner_admin_id, user_id)»
+  user_id : INT «FK, IDX»
+  role : VARCHAR(20)
+  created_at : DATETIME(6)
+}
+
+entity member_invitations {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  external_id : VARCHAR(64) «UQ»
+  owner_admin_id : INT «FK, IDX»
+  email : VARCHAR(320)
+  name : LONGTEXT
+  role : VARCHAR(20)
+  token : VARCHAR(64) «UQ»
+  expires_at : DATETIME(6)
+  accepted_at : DATETIME(6)
+  revoked_at : DATETIME(6)
+  invited_by_user_id : INT
+  created_at : DATETIME(6)
+}
+
+users "1" -[norank]- "0..*" users : owner_admin_id
+users "1" -[norank]- "0..*" users : parent_admin_id
+
+note as N1
+  users.owner_admin_id: condominio al que pertenece el residente.
+  users.parent_admin_id: cuenta matriz de un edificio del Portafolio.
+  member_invitations.invited_by_user_id no tiene clave foránea.
+  Todas las FK hacia users: ON DELETE RESTRICT (users)
+  o ON DELETE CASCADE (building_members, member_invitations).
+end note
+users "1" -[norank]- "0..*" building_members : owner_admin_id
+users "1" -[norank]- "0..*" building_members : user_id
+users "1" -[norank]- "0..*" member_invitations : owner_admin_id
+' --- disposición en columnas (aristas ocultas); las relaciones usan [norank]
+users -[hidden]- building_members
+users -[hidden]- member_invitations
+users -[hidden]- N1
+@enduml

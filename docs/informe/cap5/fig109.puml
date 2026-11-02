@@ -1,0 +1,90 @@
+@startuml
+scale 1.5
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam titleFontSize 14
+skinparam titleFontStyle bold
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+skinparam note {
+  BackgroundColor #FFFDE7
+  BorderColor #8A8A8A
+}
+hide empty members
+title Bounded Context Profiles - Domain Layer
+
+class Building <<Aggregate Root>> {
+  {static} +NameMaxLength : int = 200
+  {static} +AddressMaxLength : int = 500
+  {static} +MaxDepartmentCount : int = 5000
+  -id : int
+  -ownerAdminId : int
+  -name : string
+  -address : string
+  -departmentCount : int
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Register(ownerAdminId: int, name: string, address: string, departmentCount: int): Building
+  +Update(name: string, address: string, departmentCount: int): void
+  +{static} Validate(name: string?, address: string?, departmentCount: int?): Dictionary<string, string[]>
+}
+
+class Profile <<Aggregate Root>> {
+  -id : int
+  -userExternalId : string
+  -name : string
+  -email : string
+  -dni : string?
+  -address : string?
+  -company : string?
+  -ruc : string?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(userExternalId, name, email, dni?, address?, company?, ruc?): Profile
+  +Update(name, email?, dni?, address?, company?, ruc?): void
+}
+
+interface IBuildingRepository <<Repository>> {
+  +ListByOwnerAdminIdAsync(ownerAdminId: int): IReadOnlyList<Building>
+  +SumDepartmentsByOwnerAdminIdAsync(ownerAdminId: int): int
+}
+
+interface "IBaseRepository<TEntity>" as IBaseRepository <<Repository · Shared>> {
+  +AddAsync(entity: TEntity): Task
+  +FindByIdAsync(id: int): TEntity?
+  +Update(entity: TEntity): void
+  +Remove(entity: TEntity): void
+  +ListAsync(): IEnumerable<TEntity>
+}
+
+interface IAuditableEntity <<Shared>> {
+  +CreatedAt : DateTimeOffset?
+  +UpdatedAt : DateTimeOffset?
+}
+
+class User <<Aggregate Root · IAM>> #F2F2F2 {
+  -id : int
+  -externalId : string
+}
+
+note right of User
+  Agregado de IAM (referenciado solo
+  por identificador). El padrón de
+  residentes, sus departamentos y sus
+  invitaciones viven en User.
+end note
+
+IBuildingRepository -up-|> IBaseRepository : TEntity = Building
+IBuildingRepository ..> "0..*" Building : persiste
+Building ..|> IAuditableEntity
+Profile ..|> IAuditableEntity
+Building "0..*" --> "1" User : ownerAdminId (users.id)
+Profile "0..1" --> "1" User : userExternalId (users.external_id)
+@enduml

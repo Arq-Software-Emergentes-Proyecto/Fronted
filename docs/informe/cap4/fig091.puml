@@ -1,0 +1,67 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+skinparam wrapWidth 170
+LAYOUT_TOP_DOWN()
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz web para administradores y residentes.")
+Component_Ext(team, "Módulo Team", "MaintenanceTaskCommandService", "Al completar la última tarea ligada, resuelve la incidencia.")
+Container(jobs, "Función de jobs", "AWS Lambda + EventBridge", "Job incident-escalation (cada hora); en local, IncidentEscalationWorker.")
+
+Container_Boundary(api, "BuildingFex.Api - módulo Incidents") {
+  Component(incCtrl, "IncidentsCompatController", "ASP.NET Core API Controller", "/incidents y /api/v1/incidents: registro, consulta, triaje (triage-suggestion y triage), asignación, resolución, comentarios y baja.")
+  Component(provCtrl, "ServiceProvidersCompatController", "ASP.NET Core API Controller", "/serviceProviders: alta, consulta y baja de proveedores (AppDbContext).")
+  Component(cmdSvc, "IncidentCommandService", "C# Application Service", "Create, Update, Assign, Resolve, AddComment, ConfirmTriage y Delete; registra cada cambio como IncidentEvent.")
+  Component(qrySvc, "IncidentQueryService", "C# Query Service", "Consulta incidencias por condominio y residente.")
+  Component(triage, "IncidentTriageService", "C# Application Service", "Sugerencia de categoría y prioridad con IA, sujeta al plan y al tope de consultas.")
+  Component(escJob, "IncidentEscalationJob", "C# Application Service", "Escala las incidencias sin asignar tras 48 h (EscalationPolicy).")
+  Component(advisor, "GeminiIncidentTriageAdvisor", "C# Infrastructure (IIncidentTriageAdvisor)", "Arma el prompt de triaje y llama al gateway de IA.")
+  Component(incRepo, "IncidentRepository", "EF Core Repository", "Incidencias y su historial (incident_events).")
+  Component(provRepo, "ServiceProviderRepository", "EF Core Repository", "Proveedores del condominio.")
+}
+
+Component_Ext(rc, "Módulo Resident Care", "SupportController, IncidentResolutionNotifier, PlanQuotaClient, AiUsageQuota", "Reporta incidencias desde el chat; avisa en él al resolverse; plan y tope de consultas de IA.")
+Component_Ext(aiGateway, "Gateway de IA", "GeminiClient", "Único acceso a Gemini.")
+System_Ext(gemini, "Google Gemini API", "Proveedor de IA externo.")
+Component_Ext(hub, "Hub de avisos", "SupportHub (SignalR, solo local)", "Aviso incidentUpdated al administrador y al residente.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Incidents: incidents, incident_events y service_providers.")
+
+Lay_R(incCtrl, provCtrl)
+Lay_D(spa, incCtrl)
+Lay_R(qrySvc, cmdSvc)
+Lay_R(cmdSvc, triage)
+Lay_R(triage, escJob)
+Lay_D(incCtrl, cmdSvc)
+Lay_R(provRepo, incRepo)
+Lay_R(incRepo, advisor)
+Lay_D(cmdSvc, incRepo)
+Lay_R(hub, db)
+Lay_R(aiGateway, rc)
+Lay_R(db, aiGateway)
+Lay_D(incRepo, db)
+Lay_D(aiGateway, gemini)
+
+Rel(spa, incCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, provCtrl, "Usa", "JSON/HTTPS")
+Rel_U(rc, cmdSvc, "CreateIncidentCommand (y SuggestAsync del triaje)")
+Rel(team, cmdSvc, "ResolveIncidentCommand")
+Rel(jobs, escJob, "Ejecuta incident-escalation")
+Rel(incCtrl, cmdSvc, "Usa")
+Rel(incCtrl, qrySvc, "Usa")
+Rel(incCtrl, triage, "Usa")
+Rel(incCtrl, hub, "Avisa cambios")
+Rel(cmdSvc, incRepo, "Usa")
+Rel(cmdSvc, provRepo, "Usa")
+Rel(cmdSvc, rc, "NotifyResolvedAsync")
+Rel(qrySvc, incRepo, "Usa")
+Rel(triage, incRepo, "Usa")
+Rel(triage, advisor, "Usa")
+Rel(triage, rc, "Plan y tope de IA")
+Rel(advisor, aiGateway, "GenerateReplyAsync")
+Rel(aiGateway, gemini, "generateContent", "HTTPS")
+Rel(escJob, incRepo, "Usa")
+Rel(escJob, hub, "Avisa escalamiento")
+Rel(incRepo, db, "Lee y escribe", "EF Core")
+Rel(provRepo, db, "Lee y escribe", "EF Core")
+Rel(provCtrl, db, "Lee y escribe (AppDbContext)", "EF Core")
+@enduml

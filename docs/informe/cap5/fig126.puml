@@ -1,0 +1,36 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz para administradores y residentes.")
+
+Container_Boundary(api, "BuildingFex.Api - bounded context Team") {
+  Component(staffCtrl, "TeamWorkersCompatController", "REST Controller", "GET y POST /api/v1/staff, PATCH /api/v1/staff/{id}, PATCH .../{id}/deactivate, PATCH .../{id}/reactivate y DELETE /api/v1/staff/{id} (también /teamWorkers).")
+  ' separador invisible (oculto): evita que las flechas de la SPA crucen el título del límite
+  Component(sp, "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", "", "")
+  Component(taskCtrl, "TasksController", "REST Controller", "GET y POST /api/v1/tasks, GET /api/v1/tasks/{id}, PATCH .../{id}/start, PATCH .../{id}/complete y PATCH .../{id}/reassign.")
+  Component(shiftCtrl, "ShiftsController", "REST Controller", "GET y POST /api/v1/shifts, GET, PUT/PATCH y DELETE /api/v1/shifts/{id}.")
+  Component(svc, "TeamWorkerCommandService / MaintenanceTaskCommandService / ShiftCommandService", "Application Services", "Registran, desactivan y reasignan trabajadores; crean, inician, completan y reasignan tareas; gestionan turnos sin cruces.")
+  Component(dm, "Domain Model", "Domain Layer", "TeamWorker, MaintenanceTask, Shift, WorkloadPolicy")
+  Component(repo, "TeamWorkerRepository / MaintenanceTaskRepository / ShiftRepository", "Repository (EF Core)", "Implementan los repositorios sobre TiDB Cloud (compatible con MySQL).")
+}
+
+Component_Ext(inc, "Módulo Incidents", "Módulo de BuildingFex.Api", "IIncidentRepository (valida la incidencia ligada) e IIncidentCommandService (ResolveIncidentCommand).")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Team: team_workers, maintenance_tasks, shifts.")
+
+Rel(spa, staffCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, taskCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, shiftCtrl, "Usa", "JSON/HTTPS")
+Rel(staffCtrl, svc, "Llama")
+Rel(taskCtrl, svc, "Llama")
+Rel(shiftCtrl, svc, "Llama")
+Rel(svc, dm, "Aplica reglas del dominio")
+Rel(svc, repo, "Persiste")
+Rel_R(svc, inc, "Valida incidencia;\nTareaCompletada")
+Rel(repo, db, "Lee y escribe", "EF Core")
+Lay_R(staffCtrl, sp)
+Lay_R(sp, taskCtrl)
+Lay_R(taskCtrl, shiftCtrl)
+hide sp
+@enduml

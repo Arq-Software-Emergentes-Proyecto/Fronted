@@ -1,0 +1,58 @@
+digraph G {
+  graph [rankdir=TB, newrank=true, splines=true, nodesep=0.1, ranksep=0.32, fontname="Liberation Sans", fontsize=15, pad="0.08", outputorder=edgesfirst];
+  node [fontname="Liberation Sans", fontsize=14, margin="0.10,0.06", penwidth=0];
+  edge [fontname="Liberation Sans", fontsize=14, color="#666666", fontcolor="#333333", arrowsize=0.7, penwidth=1.1];
+  labelloc=t; label=<<b>BuildingFex.Api - bounded context Incidents (azul claro:<br/>componentes; gris: otros módulos)</b>>;
+  spa [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>BuildingFex Web SPA</b></font><br/><i>[Vue 3]</i><br/>Interfaz para<br/>administradores y<br/>residentes.>];
+  rc [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Resident<br/>Care</b></font><br/><i>[BuildingFex.Api]</i><br/>SupportController<br/>reporta incidencias<br/>desde el chat;<br/>IncidentResolutionNotifier<br/>recibe<br/>IncidenteResuelto.>];
+  team [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Team</b></font><br/><i>[BuildingFex.Api]</i><br/>MaintenanceTaskCommandService<br/>resuelve la<br/>incidencia al<br/>completarse su<br/>última tarea<br/>ligada.>];
+  jobs [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>Función de jobs</b></font><br/><i>[AWS Lambda +<br/>EventBridge Scheduler]</i><br/>Job<br/>incident-escalation<br/>cada hora (en<br/>local,<br/>IncidentEscalationWorker).>];
+  incCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>IncidentsCompat<br/>Controller</b></font><br/><i>[REST Controller]</i><br/>/api/v1/incidents<br/>(y /incidents):<br/>GET, POST, PUT,<br/>DELETE,<br/>triage-suggestion,<br/>triage, assign,<br/>resolve y comments.>];
+  spCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ServiceProviders<br/>CompatController</b></font><br/><i>[REST Controller]</i><br/>GET, POST<br/>/serviceProviders y<br/>DELETE<br/>/serviceProviders/{id}.>];
+  cmd [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>IncidentCommand<br/>Service</b></font><br/><i>[Application Service<br/>(IIncidentCommandService)]</i><br/>Handle() de Create,<br/>Update, Assign,<br/>ConfirmTriage,<br/>AddComment, Resolve<br/>y Delete.>];
+  qry [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>IncidentQueryService</b></font><br/><i>[Application Service<br/>(IIncidentQueryService)]</i><br/>Incidencias del<br/>condominio por<br/>residente y estado.>];
+  tri [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>IncidentTriageService</b></font><br/><i>[Application Service]</i><br/>Sugerencia de<br/>categoría y<br/>prioridad con IA<br/>(plan Standard o<br/>superior, tope<br/>mensual de IA).>];
+  esc [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>IncidentEscalationJob</b></font><br/><i>[Background Job]</i><br/>Escala las<br/>incidencias<br/>abiertas y sin<br/>proveedor tras 48<br/>horas.>];
+  dm [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>Domain Model</b></font><br/><i>[Domain Layer]</i><br/>Incident,<br/>IncidentEvent,<br/>BuildingServiceProvider,<br/>EscalationPolicy,<br/>IncidentActor.>];
+  repo [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>IncidentRepository<br/>/ ServiceProvider<br/>Repository</b></font><br/><i>[Repository (EF Core)]</i><br/>IIncidentRepository<br/>e<br/>IServiceProviderRepository<br/>sobre TiDB Cloud.>];
+  adv [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>GeminiIncident<br/>TriageAdvisor</b></font><br/><i>[Anticorruption Layer<br/>(IIncidentTriageAdvisor)]</i><br/>Pide a Gemini un<br/>JSON con categoría,<br/>prioridad y motivo,<br/>y lo valida.>];
+  db [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>TiDB Cloud</b></font><br/><i>[MySQL compatible]</i><br/>incidents,<br/>incident_events,<br/>service_providers.>];
+  gemini [shape=box, style="rounded,filled", fillcolor="#999999", fontcolor="white", label=<<font point-size="15"><b>Google Gemini API</b></font><br/>Proveedor de IA<br/>(IGeminiClient<br/>compartido con<br/>Resident Care).>];
+  { rank=same; rc; spa; team; }
+  rc -> spa [style=invis, weight=5];
+  spa -> team [style=invis, weight=5];
+  { rank=same; spCtrl; incCtrl; jobs; }
+  spCtrl -> incCtrl [style=invis, weight=5];
+  incCtrl -> jobs [style=invis, weight=5];
+  { rank=same; qry; cmd; tri; esc; }
+  qry -> cmd [style=invis, weight=5];
+  cmd -> tri [style=invis, weight=5];
+  tri -> esc [style=invis, weight=5];
+  { rank=same; dm; repo; adv; }
+  dm -> repo [style=invis, weight=5];
+  repo -> adv [style=invis, weight=5];
+  { rank=same; db; gemini; }
+  db -> gemini [style=invis, weight=5];
+  rc -> spCtrl [style=invis, weight=0];
+  spCtrl -> qry [style=invis, weight=0];
+  qry -> dm [style=invis, weight=0];
+  dm -> db [style=invis, weight=0];
+  spa -> incCtrl [label=<JSON/HTTPS>];
+  spa -> spCtrl [];
+  rc -> cmd [label=<CreateIncident<br/>Command>];
+  team -> cmd [label=<ResolveIncident<br/>Command>];
+  jobs -> esc [label=<RunOnceAsync>];
+  incCtrl -> cmd [label=<Envía comando>];
+  incCtrl -> qry [label=<Consulta>];
+  incCtrl -> tri [label=<Pide triaje>];
+  spCtrl -> db [label=<service_providers<br/>(AppDbContext)>];
+  cmd -> dm [label=<Reglas>];
+  cmd -> repo [label=<Persiste>];
+  rc -> cmd [dir=back, label=<IncidenteResuelto>];
+  qry -> repo [label=<Lee>];
+  tri -> adv [label=<SuggestAsync>];
+  tri -> repo [label=<Guarda<br/>sugerencia>];
+  esc -> repo [label=<Candidatas y<br/>escalamiento>];
+  adv -> gemini [label=<generateContent<br/>(HTTPS)>];
+  repo -> db [label=<EF Core>];
+}

@@ -1,0 +1,69 @@
+digraph G {
+  graph [rankdir=TB, newrank=true, splines=true, nodesep=0.12, ranksep=0.32, fontname="Liberation Sans", fontsize=15, pad="0.08", outputorder=edgesfirst];
+  node [fontname="Liberation Sans", fontsize=14, margin="0.10,0.06", penwidth=0];
+  edge [fontname="Liberation Sans", fontsize=14, color="#666666", fontcolor="#333333", arrowsize=0.7, penwidth=1.1];
+  labelloc=t; label=<<b>BuildingFex.Api - módulo Incidents (azul claro: componentes<br/>del módulo; gris: otros módulos)</b>>;
+  spa [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>BuildingFex Web SPA</b></font><br/><i>[Vue 3]</i><br/>Interfaz web para<br/>administradores y<br/>residentes.>];
+  jobs [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>Función de jobs</b></font><br/><i>[AWS Lambda +<br/>EventBridge]</i><br/>Job<br/>incident-escalation<br/>(cada hora); en<br/>local,<br/>IncidentEscalationWorker.>];
+  team [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Team</b></font><br/><i>[MaintenanceTask<br/>CommandService]</i><br/>Al completar la<br/>última tarea<br/>ligada, resuelve la<br/>incidencia.>];
+  incCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>IncidentsCompatController</b></font><br/><i>[API Controller]</i><br/>/incidents y<br/>/api/v1/incidents:<br/>registro, consulta,<br/>triaje<br/>(triage-suggestion<br/>y triage),<br/>asignación,<br/>resolución,<br/>comentarios y baja.>];
+  provCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ServiceProviders<br/>CompatController</b></font><br/><i>[API Controller]</i><br/>/serviceProviders:<br/>alta, consulta y<br/>baja de proveedores<br/>(AppDbContext).>];
+  qrySvc [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>IncidentQueryService</b></font><br/><i>[Query Service]</i><br/>Incidencias por<br/>condominio y<br/>residente.>];
+  cmdSvc [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>IncidentCommandService</b></font><br/><i>[Application Service]</i><br/>Create, Update,<br/>Assign, Resolve,<br/>AddComment,<br/>ConfirmTriage y<br/>Delete; cada cambio<br/>queda como<br/>IncidentEvent.>];
+  triage [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>IncidentTriageService</b></font><br/><i>[Application Service]</i><br/>Sugerencia de<br/>categoría y<br/>prioridad con IA,<br/>sujeta al plan y al<br/>tope de consultas.>];
+  escJob [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>IncidentEscalationJob</b></font><br/><i>[Application Service]</i><br/>Escala las<br/>incidencias sin<br/>asignar tras 48 h<br/>(EscalationPolicy).>];
+  advisor [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>GeminiIncidentTriageAdvisor</b></font><br/><i>[Infrastructure<br/>(IIncidentTriageAdvisor)]</i><br/>Arma el prompt de<br/>triaje y llama al<br/>gateway de IA.>];
+  incRepo [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>IncidentRepository</b></font><br/><i>[EF Core Repository]</i><br/>Incidencias y su<br/>historial<br/>(incident_events).>];
+  provRepo [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ServiceProviderRepository</b></font><br/><i>[EF Core Repository]</i><br/>Proveedores del<br/>condominio.>];
+  rc [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Resident<br/>Care</b></font><br/><i>[SupportController,<br/>IncidentResolutionNotifier,<br/>PlanQuotaClient,<br/>AiUsageQuota]</i><br/>Reporta incidencias<br/>desde el chat,<br/>avisa al<br/>resolverse; plan y<br/>tope de IA.>];
+  hub [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Hub de avisos</b></font><br/><i>[SupportHub (SignalR,<br/>solo fuera de Lambda)]</i><br/>Aviso<br/>incidentUpdated al<br/>admin y al<br/>residente; en AWS,<br/>consulta periódica.>];
+  ai [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Gateway de IA</b></font><br/><i>[GeminiClient]</i><br/>Único acceso a<br/>Gemini.>];
+  db [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>TiDB Cloud</b></font><br/><i>[MySQL compatible]</i><br/>incidents,<br/>incident_events y<br/>service_providers.>];
+  gemini [shape=box, style="rounded,filled", fillcolor="#999999", fontcolor="white", label=<<font point-size="15"><b>Google Gemini API</b></font><br/>Proveedor de IA<br/>externo.>];
+  { rank=same; spa; team; jobs; }
+  spa -> team [style=invis, weight=5];
+  team -> jobs [style=invis, weight=5];
+  { rank=same; provCtrl; incCtrl; }
+  provCtrl -> incCtrl [style=invis, weight=5];
+  { rank=same; qrySvc; cmdSvc; hub; }
+  qrySvc -> cmdSvc [style=invis, weight=5];
+  cmdSvc -> hub [style=invis, weight=5];
+  { rank=same; triage; escJob; }
+  triage -> escJob [style=invis, weight=5];
+  { rank=same; provRepo; incRepo; advisor; }
+  provRepo -> incRepo [style=invis, weight=5];
+  incRepo -> advisor [style=invis, weight=5];
+  { rank=same; db; rc; ai; }
+  db -> rc [style=invis, weight=5];
+  rc -> ai [style=invis, weight=5];
+  { rank=same; gemini; }
+  spa -> provCtrl [style=invis, weight=0];
+  provCtrl -> qrySvc [style=invis, weight=0];
+  qrySvc -> triage [style=invis, weight=0];
+  triage -> provRepo [style=invis, weight=0];
+  provRepo -> db [style=invis, weight=0];
+  db -> gemini [style=invis, weight=0];
+  spa -> incCtrl [label=<JSON/HTTPS>];
+  spa -> provCtrl [];
+  cmdSvc -> rc [dir=back, label=<CreateIncident<br/>Command (y<br/>triaje)>];
+  team -> cmdSvc [label=<ResolveIncident<br/>Command>];
+  jobs -> escJob [label=<Ejecuta<br/>incident-escalation>];
+  incCtrl -> cmdSvc [];
+  incCtrl -> qrySvc [];
+  incCtrl -> triage [];
+  incCtrl -> hub [label=<Avisa cambios>];
+  cmdSvc -> incRepo [];
+  cmdSvc -> provRepo [];
+  cmdSvc -> rc [label=<NotifyResolved<br/>Async>];
+  qrySvc -> incRepo [];
+  triage -> incRepo [];
+  triage -> advisor [];
+  triage -> rc [label=<Plan y tope de<br/>IA>];
+  advisor -> ai [label=<GenerateReply<br/>Async>];
+  ai -> gemini [label=<generateContent<br/>(HTTPS)>];
+  escJob -> incRepo [];
+  hub -> escJob [dir=back, label=<Avisa<br/>escalamiento>];
+  incRepo -> db [label=<EF Core>];
+  provRepo -> db [];
+  provCtrl -> db [label=<AppDbContext>];
+}

@@ -1,0 +1,67 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+skinparam wrapWidth 230
+skinparam nodesep 30
+skinparam ranksep 70
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz para administradores, junta directiva y residentes.")
+
+Container_Boundary(api, "BuildingFex.Api - bounded context Finances") {
+  Component(opsCtrl, "FinanceOperationsController", "REST Controller", "POST /api/v1/finances/receipts/generate, GET .../billing-alerts, .../payment-calendar, .../payments/{paymentId}/receipt-pdf, .../receipts/{receiptId}/pdf y .../balance.")
+  Component(dashCtrl, "DashboardController", "REST Controller", "GET /api/v1/finances/kpi.")
+  Component(mpCtrl, "MercadoPagoController", "REST Controller", "GET /api/v1/payments/config; POST .../preference, .../checkout, .../confirm, .../process y .../webhook (firma x-signature).")
+  Component(compat, "Controladores Compat", "REST Controllers", "Fees, Payments, Receipts, FinanceSettings, Kpi, AdminManagementExpenses, SharedUtilityServices, FixedPayoutRecipients y ResidentExtraCharges (rutas json-server: /fees, /receipts…).")
+  Component(bill, "MonthlyBillingService", "Application Service", "Emite de forma idempotente los recibos del mes según FinanceSetting y da las alertas de facturación.")
+  Component(worker, "MonthlyBillingWorker", "Background Job", "Ejecuta la facturación de todos los condominios una vez al día.")
+  Component(mps, "MercadoPagoService", "Application Service", "Preferencias Checkout Pro, pago con tarjeta y conciliación idempotente (MaintenanceCheckout).")
+  Component(qs, "Servicios de consulta", "Application Services", "AccountStatusQueryService, PaymentCalendarQueryService, DashboardQueryService.")
+  Component(rds, "ReceiptDocumentService", "Application Service", "Comprobante PDF de un pago o de un recibo pagado.")
+  Component(dm, "Domain Model", "Domain Layer", "Fee, Payment, Receipt, FinanceSetting, MaintenanceCheckout, AdminManagementExpense, SharedUtilityService, FixedPayoutRecipient, KpiRecord, ResidentExtraCharge; Money, Period, MonthlyCharge; DelinquencyPolicy.")
+  Component(repo, "Repositorios EF Core", "Repository (EF Core)", "FeeRepository, PaymentRepository, ReceiptRepository, FinanceSettingRepository, KpiRepository, AdminManagementExpenseRepository, SharedUtilityServiceRepository, FixedPayoutRecipientRepository, MaintenanceCheckoutRepository.")
+  Component(pdf, "SimpleReceiptPdfRenderer", "Adapter", "Implementa IReceiptPdfRenderer (PDF 1.4).")
+}
+
+Component_Ext(social, "Módulo Social Spaces", "Módulo de BuildingFex.Api", "FinancesAccountStatusAcl: regla de reservas para morosos.")
+Component_Ext(billing, "Módulo Billing", "Módulo de BuildingFex.Api", "SubscriptionController usa MercadoPagoService; ISubscriptionService activa el plan pagado.")
+Component_Ext(iam, "Módulos IAM y Profiles", "Módulos de BuildingFex.Api", "IUserRepository (residentes y condominio), CallerContextAccessor e IBuildingRepository.")
+Component_Ext(dbctx, "AppDbContext", "Infraestructura compartida (EF Core)", "DbContext único de BuildingFex.Api.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Finances: fees, payments, receipts, finance_settings, maintenance_checkouts, kpi_records, admin_management_expenses, shared_utility_services, fixed_payout_recipients, resident_extra_charges.")
+System_Ext(mp, "Mercado Pago", "Checkout Pro, API de pagos y webhooks.")
+
+Rel(spa, opsCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, dashCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, mpCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, compat, "Usa", "JSON/HTTPS")
+
+Rel(opsCtrl, bill, "Genera recibos")
+Rel(opsCtrl, qs, "Consulta")
+Rel(opsCtrl, rds, "PDF")
+Rel(dashCtrl, qs, "KPI")
+Rel(mpCtrl, mps, "Preferencia, confirmación y webhook")
+Rel(compat, repo, "Lee y persiste")
+Rel(worker, bill, "GenerateForAllTenantsAsync")
+Rel(bill, dm, "Receipt.CreateMonthly")
+Rel(mps, dm, "Aplica reglas del dominio")
+Rel(mps, repo, "Persiste")
+Rel(rds, pdf, "Render")
+Rel(bill, dbctx, "Lee y escribe")
+Rel(qs, dbctx, "Lee")
+Rel(rds, dbctx, "Lee")
+Rel(repo, dbctx, "EF Core")
+Rel_R(dbctx, db, "Lee y escribe", "MySQL")
+Rel(mps, mp, "Preferencias y pagos (SDK)", "HTTPS")
+Rel_Back(mpCtrl, mp, "Webhook firmado (x-signature)", "HTTPS")
+Rel(mps, billing, "Activa la suscripción")
+Rel(social, qs, "Consulta morosidad")
+Rel(mps, iam, "Residentes y condominio")
+
+Lay_R(opsCtrl, dashCtrl)
+Lay_R(dashCtrl, mpCtrl)
+Lay_R(mpCtrl, compat)
+Lay_D(dm, dbctx)
+Lay_R(dbctx, db)
+Lay_R(billing, iam)
+Lay_D(pdf, billing)
+@enduml

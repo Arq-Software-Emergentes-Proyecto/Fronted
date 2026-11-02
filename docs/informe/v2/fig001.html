@@ -1,0 +1,82 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Lean UX Canvas</title>
+<!-- Figura 1 (v2): Lean UX Canvas reconstruido a partir de la imagen anterior (mismos 8 bloques, disposición y colores),
+     en formato vertical. Datos actualizados con la sección 1.2 y 1.2.2 del informe: precios S/ 79 / 159 / 289 y Portafolio
+     S/ 4 por departamento (mín. S/ 600); meta S/ 8,310 de MRR con 60 edificios; hitos 14 / 28 / 57 / 60 edificios;
+     el personal (conserjes y mantenimiento) no tiene cuenta propia. -->
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#454B57}
+#c{width:940px;padding:10px;box-sizing:border-box;background:#454B57;font-family:Inter,"Liberation Sans",Arial,sans-serif;color:#4a4a4a;
+   display:grid;grid-template-columns:1fr 1fr 1.08fr;gap:10px;align-items:start}
+.col{display:flex;flex-direction:column;gap:10px}
+.card{background:#fff;border-left:7px solid #D5DAE3;padding:8px 10px 9px;font-size:14px;line-height:1.3}
+.card h2{font-family:Montserrat,"Liberation Sans",sans-serif;font-size:16px;font-weight:800;color:#1E1E1E;margin:0 0 5px;line-height:1.2}
+.card h2:before{content:"⋮ ";color:#AAB;font-weight:400}
+p{margin:0 0 5px}
+ul{margin:0;padding-left:16px}
+li{margin:0 0 4px}
+b{color:#1E1E1E;font-weight:700}
+.q{color:#1E1E1E;font-weight:700}
+.it li{font-style:italic}
+.it b{font-style:italic;font-weight:800}
+.quote{color:#BBB;font-size:20px;line-height:.6;margin:0 0 4px}
+.muted{color:#888;font-size:14px}
+table{border-collapse:collapse;width:100%;font-size:14px;margin-top:4px}
+td{padding:3px 2px;border-bottom:1px solid #EEE;vertical-align:top}
+td:first-child{font-weight:700;color:#1E1E1E}
+td:last-child{text-align:right;white-space:nowrap}
+.h{background:#E6F4F4;border-left:5px solid #1A9C9C;padding:5px 8px;margin:0 0 6px;font-size:14px;line-height:1.3}
+.h .s{color:#1A9C9C;font-weight:700}
+</style></head><body><div id="c">
+<div class="col">
+ <div class="card"><h2>1. Business Problem</h2>
+  <p>La administración de edificios en Lima depende de Excel, cuadernos y grupos de WhatsApp. Las juntas directivas que administran su propio edificio (10 a 80 departamentos) y las empresas administradoras con varios edificios pierden horas conciliando pagos, persiguen la morosidad cara a cara y no tienen trazabilidad de reservas, incidencias ni documentos; cuando cambia la directiva, se pierde el historial.</p>
+  <p class="q">¿Cómo podríamos unificar cobranzas, áreas comunes, incidencias y comunicados en una sola plataforma SaaS, con planes desde S/ 79 al mes, para que las juntas rindan cuentas con transparencia y las administradoras crezcan sin contratar más personal?</p></div>
+ <div class="card"><h2>4. User outcomes and benefits</h2><ul>
+  <li><b>Roberto (junta):</b> cierra el mes sin discrepancias y rinde cuentas en asamblea con un reporte claro; ya no tiene que cobrar la mora en persona a sus vecinos.</li>
+  <li><b>Roberto:</b> recupera sus fines de semana y entrega la gestión a la siguiente directiva sin perder el historial del edificio.</li>
+  <li><b>Valeria (administradora):</b> deja de conciliar Yape, Plin y transferencias a mano y ve de un vistazo qué incidencia atender primero en toda su cartera.</li>
+  <li><b>Residentes:</b> ven su deuda, reservan áreas comunes y leen comunicados sin preguntar al conserje.</li></ul></div>
+ <div class="card"><h2>7. What's the most important thing we need to learn first?</h2>
+  <p class="q">¿Las juntas directivas pagarán entre S/ 79 y S/ 289 al mes (y las administradoras S/ 4 por departamento, con mínimo de S/ 600) por dejar Excel y WhatsApp, y seguirán pagando después de la prueba gratuita de 30 días?</p>
+  <p class="muted">Si la conversión del Plan Free es menor a 10 %, el costo de adquisición supera los S/ 480 por edificio pagante y el punto de equilibrio con el equipo (28 edificios, escenario B1) se retrasa.</p></div>
+</div>
+<div class="col">
+ <div class="card"><h2>2. Business Outcomes</h2><div class="quote">“</div><ul class="it">
+  <li><b>60 edificios pagantes y S/ 8,310 de MRR en 24 meses</b> (hitos: 14 edificios a los 6 meses, que cubren la operación mínima; 28 a los 12 meses, que cubren al equipo a media jornada; 57 hacia el mes 23 y 60 a los 24).</li>
+  <li>Al menos <b>10 %</b> de los edificios del Plan Free pasan a un plan de pago al terminar los 30 días.</li>
+  <li>Morosidad de los edificios piloto <b>25 % menor</b> que su línea base después de 3 meses.</li>
+  <li>Cerrar al menos <b>1 administradora</b> en el Plan Portafolio durante el piloto.</li></ul><div class="quote" style="text-align:right;margin-top:6px">”</div></div>
+ <div class="card"><h2>5. Solutions</h2><ul>
+  <li>Consola web para juntas y administradoras: cobranzas con recordatorios, incidencias, comunicados, documentos y visitas.</li>
+  <li>Aplicación web responsiva para residentes: estado de deuda, pago, reserva de áreas comunes y avisos oficiales.</li>
+  <li>Asistente con IA que responde a los residentes con el reglamento y las actas de su edificio y clasifica incidencias, con supervisión humana.</li>
+  <li>Consola multiedificio para administradoras.</li>
+  <li>Planes en soles según el tamaño del edificio:</li></ul>
+  <table>
+   <tr><td>Free</td><td>prueba 30 días</td><td>S/ 0</td></tr>
+   <tr><td>Essential</td><td>10–15 dptos.</td><td>S/ 79/mes</td></tr>
+   <tr><td>Standard</td><td>16–40 dptos.</td><td>S/ 159/mes</td></tr>
+   <tr><td>Scale</td><td>41–80 dptos.</td><td>S/ 289/mes</td></tr>
+   <tr><td>Portafolio</td><td>administradoras (desde 150 dptos.)</td><td>S/ 4/dpto.<br>(mín. S/ 600)</td></tr>
+  </table></div>
+ <div class="card"><h2>8. What's the least amount of work we need to do to learn the next most important thing?</h2><ul>
+  <li><b>Landing page con los planes nuevos</b> (Free, S/ 79, S/ 159, S/ 289 y Portafolio): medir cuántas visitas hacen clic en “Probar gratis” o “Solicitar demo”.</li>
+  <li><b>Entrevistas con pregunta de precio</b> a miembros de juntas directivas (Segmento 1) y a administradoras (Segmento 2), con la guía nueva y sin preguntas que induzcan hacia la IA.</li>
+  <li><b>Plan Free de 30 días</b> en edificios piloto: medir la conversión a plan de pago (meta: 10 %) y cronometrar las horas de soporte de cada prueba.</li>
+  <li><b>Piloto “Mago de Oz”</b> de cobranzas y reservas en un edificio, antes de programar todo el backend.</li></ul></div>
+</div>
+<div class="col">
+ <div class="card"><h2>3. Users</h2><ul>
+  <li><b>Roberto Salazar, presidente de junta directiva (Segmento 1):</b> 58 años, ingeniero civil, asumió el cargo ad honorem en un edificio de Jesús María sin administradora. Cuadra las cuentas en Excel los fines de semana y media conflictos por áreas comunes. <i>“No quiero ser el malo de la película por cobrarle la mora a mi propio vecino.”</i></li>
+  <li><b>Valeria Ramos, administradora de portafolio (Segmento 2):</b> 27 años, San Borja, gestiona 18 edificios (~700 departamentos). Coordina incidencias por WhatsApp y valida pagos a mano contra su Excel. Quiere crecer sin contratar a alguien por cada edificio nuevo.</li>
+  <li><b>Usuarios que no pagan:</b> residentes. Los conserjes y el personal de mantenimiento no tienen cuenta: la administración los registra en «Equipo».</li></ul></div>
+ <div class="card"><h2>6. Hypotheses</h2>
+  <div class="h">Creemos que <b>la puntualidad de pago</b> mejorará si juntas y residentes tienen visibilidad de deudas y recordatorios. <span class="s">Sabremos que tenemos razón cuando la morosidad baje ≥ 25 % vs. la línea base en 3 meses y ≥ 60 % de las cuotas se paguen antes del vencimiento.</span></div>
+  <div class="h">Creemos que <b>los coordinadores serán más eficientes</b> con una consola web unificada. <span class="s">Sabremos que tenemos razón cuando la asignación de una incidencia tome &lt; 30 min y cada coordinador ahorre ≥ 1 h diaria durante 2 meses.</span></div>
+  <div class="h">Creemos que <b>habrá menos quejas por áreas comunes</b> con reservas digitales. <span class="s">Sabremos que tenemos razón cuando los reclamos por cruces bajen ≥ 50 % en 3 meses y ≥ 70 % de las reservas se hagan en la plataforma.</span></div>
+  <div class="h">Creemos que <b>creceremos en todos los tamaños de cliente</b> con los planes Free, S/ 79, S/ 159, S/ 289 y Portafolio. <span class="s">Sabremos que tenemos razón cuando ≥ 10 % del Plan Free pase a pago a los 30 días y ningún plan tenga &lt; 15 % de los clientes en 6 meses.</span></div>
+  <div class="h">Creemos que <b>la IA reducirá el tiempo de orientación</b> de las incidencias. <span class="s">Sabremos que tenemos razón cuando la clasificación tome &lt; 5 min, ≥ 70 % de consultas se resuelvan sin derivar y la calificación sea ≥ 4/5 durante 2 meses.</span></div>
+  <div class="h" style="margin:0">Creemos que <b>podremos sumar edificios sin mezclar datos</b> con aislamiento multi-tenant. <span class="s">Sabremos que tenemos razón cuando se incorporen ≥ 20 edificios con cero accesos cruzados y el alta tome &lt; 1 día hábil.</span></div></div>
+</div>
+</div></body></html>

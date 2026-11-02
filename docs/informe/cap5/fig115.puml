@@ -1,0 +1,158 @@
+@startuml
+scale 1.5
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam titleFontSize 14
+skinparam titleFontStyle bold
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+skinparam note {
+  BackgroundColor #FFFDE7
+  BorderColor #8A8A8A
+}
+hide empty members
+title Bounded Context Billing - Domain Layer
+
+interface ISubscriptionRepository <<Repository>> {
+  +FindByOwnerAdminIdAsync(ownerAdminId: int): Subscription
+  +FindPaymentByMpIdAsync(mpPaymentId: string): SubscriptionPayment
+  +AddPaymentAsync(payment: SubscriptionPayment): void
+  +FindCheckoutAsync(externalId: string): SubscriptionCheckout
+  +AddCheckoutAsync(checkout: SubscriptionCheckout): void
+  +ReloadAsync(entity: object): void
+  +Detach(entity: object): void
+}
+
+class Subscription <<Aggregate Root>> {
+  -id : int
+  -ownerAdminId : int
+  -buildingId : int?
+  -planId : string
+  -status : string
+  -trialEndsAt : DateTimeOffset?
+  -paidUntil : DateTimeOffset?
+  -failedCharges : int
+  -billedDepartments : int?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} StartTrial(ownerAdminId: int, startedAt: DateTimeOffset): Subscription
+  +{static} FromLegacy(ownerAdminId: int, planId: string, paidUntil: DateTimeOffset?, graceStart: DateTimeOffset): Subscription
+  +Activate(planId: string, paidUntil: DateTimeOffset, billedDepartments: int?): void
+  +ChangeToFree(): void
+  +RegisterFailedCharge(): void
+  +Cancel(): void
+  +LinkBuilding(buildingId: int): void
+  +IsTrialExpired(now: DateTimeOffset): bool
+  +EffectiveStatus(now: DateTimeOffset): string
+  +RequiresPlanSelection(now: DateTimeOffset): bool
+  +AllowsRosterGrowth(now: DateTimeOffset): bool
+  +NextPaidUntil(now: DateTimeOffset): DateTimeOffset
+  +TrialDaysLeft(now: DateTimeOffset): int?
+  +Limits(): PlanLimits
+  +EffectiveLimits(now: DateTimeOffset): PlanLimits
+}
+
+class SubscriptionPayment <<Entity>> {
+  -id : int
+  -mpPaymentId : string
+  -ownerAdminId : int
+  -planId : string
+  -amount : decimal
+  -expectedAmount : decimal
+  -currency : string?
+  -departmentCount : int?
+  -checkoutExternalId : string?
+  -status : string
+  -source : string
+  -paidUntil : DateTimeOffset?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...): SubscriptionPayment
+  +IsApplied : bool
+}
+
+class SubscriptionCheckout <<Entity>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -planId : string
+  -departmentCount : int?
+  -amount : decimal
+  -status : string
+  -mpPaymentId : string?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(ownerAdminId: int, planId: string, departmentCount: int?, amount: decimal): SubscriptionCheckout
+  +MarkPaid(mpPaymentId: string): void
+}
+
+class PlanLimits <<Value Object>> {
+  -maxDepartments : int
+  -monthlyAiQueries : int
+  --
+  +{static} For(planId: string): PlanLimits
+  +AllowsDepartments(departmentCount: int): bool
+  +AllowsAiQuery(usedThisMonth: int): bool
+}
+
+class SubscriptionPlans <<static>> {
+  +FreeTrialDays = 30
+  +PaidGraceDays = 5
+  +PaidPeriodDays = 31
+  +PortafolioPricePerDepartmentPen = 4
+  +PortafolioMinimumPen = 600
+  --
+  +MaxResidents(planId: string): int
+  +MonthlyPricePen(planId: string, departmentCount: int): decimal
+  +MonthlyAiQueryCap(planId: string): int
+  +IsPaid(planId: string): bool
+  +EffectivePlanId(planId: string, paidUntil: DateTimeOffset?, now: DateTimeOffset): string
+}
+
+enum SubscriptionPlanIds <<constantes string>> {
+  free
+  essential
+  standard
+  scale
+  portafolio
+}
+
+enum SubscriptionStatus <<constantes string>> {
+  TRIAL
+  ACTIVE
+  PAYMENT_FAILED
+  SUSPENDED
+  CANCELLED
+}
+
+enum SubscriptionPaymentStatus <<constantes string>> {
+  APPLIED
+  REVIEW_AMOUNT_MISMATCH
+}
+
+note bottom of SubscriptionPayment
+  Se relaciona con Subscription por
+  ownerAdminId (sin clave foránea entre
+  ambas); mpPaymentId es único.
+end note
+
+ISubscriptionRepository ..> "0..1" Subscription : persiste
+ISubscriptionRepository ..> "*" SubscriptionPayment : registra
+ISubscriptionRepository ..> "*" SubscriptionCheckout : registra
+Subscription "1" -- "0..*" SubscriptionPayment : ownerAdminId
+Subscription "1" -- "0..*" SubscriptionCheckout : ownerAdminId
+SubscriptionCheckout "1" .. "0..1" SubscriptionPayment : checkoutExternalId
+Subscription ..> "1" PlanLimits : Limits()
+PlanLimits ..> SubscriptionPlans : For()
+Subscription "*" --> "1" SubscriptionPlanIds : planId
+Subscription "*" --> "1" SubscriptionStatus : status
+SubscriptionPayment "*" --> "1" SubscriptionPaymentStatus : status
+@enduml

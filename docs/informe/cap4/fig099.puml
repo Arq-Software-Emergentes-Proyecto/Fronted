@@ -1,0 +1,499 @@
+@startuml
+' Figura 99. Diagrama de base de datos global (generado del modelo EF Core de BuildingFex.Api + SchemaUpgrade)
+set separator none
+skinparam dpi 200
+skinparam defaultFontName "DejaVu Sans"
+skinparam shadowing false
+skinparam nodesep 40
+skinparam ranksep 60
+skinparam packageStyle rectangle
+hide circle
+hide methods
+hide stereotype
+skinparam class {
+  BackgroundColor white
+  FontColor white
+  FontStyle bold
+  AttributeFontSize 11
+  FontSize 12
+  BorderColor #3E64B4
+  HeaderBackgroundColor #3E64B4
+  ArrowColor #333333
+}
+skinparam package {
+  FontSize 13
+  FontStyle bold
+  BackgroundColor<<sup>> #EEF2FA
+  BorderColor<<sup>> #23408E
+  FontColor<<sup>> #23408E
+  BackgroundColor<<core>> #E3F2F0
+  BorderColor<<core>> #0F6E64
+  FontColor<<core>> #0F6E64
+  BackgroundColor<<gen>> #F2F2F2
+  BorderColor<<gen>> #5F6368
+  FontColor<<gen>> #5F6368
+}
+
+!$G = "#back:white;header:8E8E8E;line:8E8E8E"
+!$C = "#back:white;header:1E8C82;line:1E8C82"
+package "1. IAM" <<gen>> {
+  entity "users" as users $G {
+    **id : INT**
+    --
+    <i>◆ owner_admin_id : INT FK</i>
+    <i>◆ parent_admin_id : INT FK</i>
+    external_id : VARCHAR(128) UQ
+    account_kind : VARCHAR(20)
+    account_status : VARCHAR(20)
+    auth_provider : VARCHAR(32)
+    email : VARCHAR(320)
+    google_sub : VARCHAR(128)
+    invite_token : VARCHAR(64)
+    name : VARCHAR(200)
+    role : VARCHAR(20)
+    subscription_paid_until : DATETIME
+    subscription_plan_id : VARCHAR(20)
+  }
+  entity "building_members" as building_members $G {
+    **id : INT**
+    --
+    <i>◆ owner_admin_id : INT FK</i>
+    <i>◆ user_id : INT FK</i>
+    role : VARCHAR(20)
+  }
+  entity "member_invitations" as member_invitations $G {
+    **id : INT**
+    --
+    <i>◆ owner_admin_id : INT FK</i>
+    external_id : VARCHAR(64) UQ
+    accepted_at : DATETIME
+    email : VARCHAR(320)
+    expires_at : DATETIME
+    revoked_at : DATETIME
+    role : VARCHAR(20)
+    token : VARCHAR(64) UQ
+  }
+}
+
+package "2. Profiles" <<sup>> {
+  entity "profiles" as profiles  {
+    **id : INT**
+    --
+    <i>◇ user_external_id : VARCHAR(128) FK</i>
+    address : VARCHAR(500)
+    company : VARCHAR(200)
+    dni : VARCHAR(50)
+    email : VARCHAR(320)
+    name : VARCHAR(200)
+    ruc : VARCHAR(20)
+  }
+  entity "buildings" as buildings  {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : INT FK</i>
+    address : VARCHAR(500)
+    department_count : INT
+    name : VARCHAR(200)
+  }
+}
+
+package "4. Billing" <<gen>> {
+  entity "subscriptions" as subscriptions $G {
+    **id : INT**
+    --
+    <i>◇ building_id : INT</i>
+    <i>◇ owner_admin_id : INT FK</i>
+    billed_departments : INT
+    failed_charges : INT
+    paid_until : DATETIME
+    plan_id : VARCHAR(20)
+    status : VARCHAR(20)
+    trial_ends_at : DATETIME
+  }
+  entity "subscription_checkouts" as subscription_checkouts $G {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : INT FK</i>
+    external_id : VARCHAR(64) UQ
+    amount : DECIMAL(18,2)
+    department_count : INT
+    mp_payment_id : VARCHAR(64)
+    plan_id : VARCHAR(20)
+    status : VARCHAR(20)
+  }
+  entity "subscription_payments" as subscription_payments $G {
+    **id : INT**
+    --
+    <i>◆ checkout_external_id : VARCHAR(64)</i>
+    <i>◇ owner_admin_id : INT FK</i>
+    amount : DECIMAL(18,2)
+    expected_amount : DECIMAL(18,2)
+    mp_payment_id : VARCHAR(64) UQ
+    paid_until : DATETIME
+    plan_id : VARCHAR(20)
+    status : VARCHAR(32)
+  }
+}
+
+package "8. Resident Care" <<core>> {
+  entity "support_chats" as support_chats $C {
+    **id : INT**
+    --
+    <i>◇ incident_external_id : VARCHAR(64)</i>
+    <i>◆ linked_chat_id : VARCHAR(128)</i>
+    <i>◇ owner_admin_id : VARCHAR(128)</i>
+    <i>◇ resident_id : VARCHAR(128)</i>
+    external_id : VARCHAR(128) UQ
+    closed_at : DATETIME
+    kind : VARCHAR(16)
+    source : VARCHAR(32)
+    status : VARCHAR(32)
+    topic : VARCHAR(256)
+  }
+  entity "support_messages" as support_messages $C {
+    **id : INT**
+    --
+    <i>◆ chat_id : INT FK</i>
+    external_id : VARCHAR(64) UQ
+    author_role : VARCHAR(32)
+    body : LONGTEXT
+    cited_document_id : VARCHAR(128)
+  }
+  entity "ai_context_chunks" as ai_context_chunks $C {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : VARCHAR(128)</i>
+    <i>◇ upload_external_id : VARCHAR(128)</i>
+    chunk_index : INT
+    content : LONGTEXT
+    embedding_json : LONGTEXT
+    embedding_model : VARCHAR(64)
+    file_name : VARCHAR(512)
+  }
+  entity "ai_usages" as ai_usages $C {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : VARCHAR(128)</i>
+    filtered_count : INT
+    period : VARCHAR(7)
+    query_count : INT
+  }
+  entity "resident_ai_usages" as resident_ai_usages $C {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : VARCHAR(128)</i>
+    <i>◇ resident_id : VARCHAR(128)</i>
+    day : VARCHAR(10)
+    query_count : INT
+  }
+}
+
+package "6. Incidents" <<core>> {
+  entity "service_providers" as service_providers $C {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : VARCHAR(128)</i>
+    external_id : VARCHAR(128) UQ
+    name : VARCHAR(256)
+    phone : VARCHAR(64)
+    specialty : VARCHAR(128)
+  }
+  entity "incidents" as incidents $C {
+    **id : INT**
+    --
+    <i>◆ assignee_id : VARCHAR(128)</i>
+    <i>◇ owner_admin_id : INT FK</i>
+    <i>◇ resident_external_id : VARCHAR(64)</i>
+    <i>◇ source_chat_id : VARCHAR(128)</i>
+    external_id : VARCHAR(64) UQ
+    ai_suggested_category : VARCHAR(50)
+    ai_suggested_priority : VARCHAR(20)
+    category : VARCHAR(50)
+    description : VARCHAR(2000)
+    escalated_at : DATETIME
+    priority : VARCHAR(20)
+    provider : VARCHAR(200)
+    resolved_at : DATETIME
+    status : VARCHAR(20)
+    title : VARCHAR(200)
+  }
+  entity "incident_events" as incident_events $C {
+    **id : INT**
+    --
+    <i>◆ incident_id : INT FK</i>
+    author_role : VARCHAR(20)
+    comment : VARCHAR(2000)
+    status : VARCHAR(20)
+    type : VARCHAR(32)
+  }
+}
+
+package "3. Finances" <<sup>> {
+  entity "fees" as fees  {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : INT FK</i>
+    <i>◇ resident_external_id : VARCHAR(64)</i>
+    external_id : VARCHAR(64) UQ
+    amount : DECIMAL(18,2)
+    due_date : VARCHAR(20)
+    month : VARCHAR(40)
+    status : VARCHAR(20)
+  }
+  entity "payments" as payments  {
+    **id : INT**
+    --
+    <i>◆ fee_external_id : VARCHAR(64)</i>
+    <i>◇ owner_admin_id : INT FK</i>
+    <i>◇ resident_external_id : VARCHAR(64)</i>
+    external_id : VARCHAR(64) UQ
+    amount : DECIMAL(18,2)
+    method : VARCHAR(80)
+    paid_at : VARCHAR(40)
+    reference : VARCHAR(80)
+  }
+  entity "receipts" as receipts  {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : INT FK</i>
+    <i>◇ resident_external_id : VARCHAR(64)</i>
+    external_id : VARCHAR(64) UQ
+    amount : DECIMAL(18,2)
+    billing_month : VARCHAR(7)
+    due_date : VARCHAR(20)
+    extra_charges : DECIMAL(18,2)
+    kind : VARCHAR(16)
+    late_fee : DECIMAL(18,2)
+    status : VARCHAR(20)
+  }
+  entity "maintenance_checkouts" as maintenance_checkouts  {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : INT</i>
+    <i>◇ resident_external_id : VARCHAR(128)</i>
+    external_id : VARCHAR(64) UQ
+    items_json : LONGTEXT
+    mp_payment_id : VARCHAR(64) UQ
+    paid_at : DATETIME
+    status : VARCHAR(20)
+    total_amount : DECIMAL(18,2)
+  }
+  entity "admin_management_expenses" as admin_management_expenses  {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : INT FK</i>
+    external_id : VARCHAR(64) UQ
+    amount : DECIMAL(18,2)
+    name : VARCHAR(200)
+    purchase_date : VARCHAR(20)
+  }
+  entity "shared_utility_services" as shared_utility_services  {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : INT FK</i>
+    external_id : VARCHAR(64) UQ
+    amount : DECIMAL(18,2)
+    month : VARCHAR(10)
+    per_resident_share : DECIMAL(18,2)
+    resident_count : INT
+    type : VARCHAR(40)
+  }
+  entity "fixed_payout_recipients" as fixed_payout_recipients  {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : INT FK</i>
+    external_id : VARCHAR(64) UQ
+    dni : VARCHAR(80)
+    interval_days : INT
+    name : VARCHAR(200)
+    next_payment_date : VARCHAR(20)
+    salary : DECIMAL(18,2)
+  }
+  entity "resident_extra_charges" as resident_extra_charges  {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : VARCHAR(128)</i>
+    <i>◇ resident_id : VARCHAR(128)</i>
+    external_id : VARCHAR(128) UQ
+    amount : DECIMAL(18,2)
+    description : LONGTEXT
+    title : VARCHAR(256)
+  }
+  entity "finance_settings" as finance_settings  {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : INT FK</i>
+    external_id : VARCHAR(64) UQ
+    admission_pay_from_day : INT
+    admission_pay_to_day : INT
+    base_monthly_expense : DECIMAL(18,2)
+    late_fee_per_day : DECIMAL(18,2)
+    late_fee_rate : DECIMAL(8,4)
+    monthly_charges_json : LONGTEXT
+    restrict_reservations_when_delinquent : TINYINT(1)
+  }
+  entity "kpi_records" as kpi_records  {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : INT FK</i>
+    external_id : VARCHAR(64) UQ
+    empty_units : INT
+    occupied_units : INT
+    total_debt : DECIMAL(18,2)
+    total_residents : INT
+  }
+}
+
+package "5. Social Spaces" <<sup>> {
+  entity "social_spaces" as social_spaces  {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : INT FK</i>
+    external_id : VARCHAR(64) UQ
+    capacity : INT
+    description : VARCHAR(2000)
+    max_reservations_per_day : INT
+    name : VARCHAR(200)
+    rules : VARCHAR(2000)
+    status : VARCHAR(20)
+  }
+  entity "reservations" as reservations  {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : INT FK</i>
+    <i>◇ resident_external_id : VARCHAR(64)</i>
+    <i>◆ space_external_id : VARCHAR(64)</i>
+    external_id : VARCHAR(64) UQ
+    date : VARCHAR(20)
+    end_time : VARCHAR(10)
+    guest_invite_token : VARCHAR(64)
+    guests_json : LONGTEXT
+    start_time : VARCHAR(10)
+    status : VARCHAR(20)
+  }
+}
+
+package "7. Communications" <<sup>> {
+  entity "announcements" as announcements  {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : INT FK</i>
+    external_id : VARCHAR(64) UQ
+    body : VARCHAR(4000)
+    duration : INT
+    expires_at : DATETIME
+    priority : VARCHAR(20)
+    published_at : DATETIME
+    status : VARCHAR(20)
+    title : VARCHAR(500)
+  }
+  entity "import_folders" as import_folders  {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : VARCHAR(128)</i>
+    external_id : VARCHAR(128) UQ
+    is_context : TINYINT(1)
+    is_home : TINYINT(1)
+    name : VARCHAR(256)
+  }
+  entity "import_uploads" as import_uploads  {
+    **id : INT**
+    --
+    <i>◆ folder_id : VARCHAR(128)</i>
+    <i>◇ owner_admin_id : VARCHAR(128)</i>
+    <i>◆ supersedes_id : VARCHAR(128)</i>
+    external_id : VARCHAR(128) UQ
+    document_status : VARCHAR(20)
+    document_type : VARCHAR(20)
+    file_name : VARCHAR(512)
+    indexing_status : VARCHAR(32)
+    mime_type : VARCHAR(128)
+    published_at : DATETIME
+    size : BIGINT
+    storage_path : VARCHAR(1024)
+    upload_status : VARCHAR(32)
+    version : INT
+  }
+}
+
+package "9. Team" <<sup>> {
+  entity "team_workers" as team_workers  {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : VARCHAR(128)</i>
+    external_id : VARCHAR(128) UQ
+    dni : VARCHAR(32)
+    name : VARCHAR(256)
+    phone : VARCHAR(64)
+    position : VARCHAR(20)
+    salary : DECIMAL(18,2)
+    status : VARCHAR(20)
+  }
+  entity "maintenance_tasks" as maintenance_tasks  {
+    **id : INT**
+    --
+    <i>◇ incident_id : VARCHAR(128)</i>
+    <i>◇ owner_admin_id : VARCHAR(128)</i>
+    <i>◆ staff_id : VARCHAR(128)</i>
+    external_id : VARCHAR(128) UQ
+    completed_at : DATETIME
+    description : VARCHAR(2000)
+    scheduled_for : DATETIME
+    status : VARCHAR(20)
+  }
+  entity "shifts" as shifts  {
+    **id : INT**
+    --
+    <i>◇ owner_admin_id : VARCHAR(128)</i>
+    <i>◆ staff_id : VARCHAR(128)</i>
+    external_id : VARCHAR(128) UQ
+    ends_at : DATETIME
+    notes : VARCHAR(500)
+    starts_at : DATETIME
+  }
+}
+
+' --- relaciones (FK reales: línea continua; referencia por id sin FK: línea punteada) ---
+users ||--o{ users
+users ||--o{ building_members
+users ||--o{ member_invitations
+profiles |o-left-|| users
+buildings }o-left-|| users
+subscriptions |o--|| users
+support_chats ||--o{ support_messages
+incidents ||--o{ incident_events
+service_providers |o..o{ incidents
+subscription_checkouts |o..o{ subscription_payments
+fees |o..o{ payments
+social_spaces ||..o{ reservations
+import_folders |o..o{ import_uploads
+team_workers ||..o{ maintenance_tasks
+team_workers ||..o{ shifts
+
+' --- posición ---
+fees -[hidden]right- payments
+payments -[hidden]right- receipts
+receipts -[hidden]right- maintenance_checkouts
+maintenance_checkouts -[hidden]right- finance_settings
+admin_management_expenses -[hidden]right- shared_utility_services
+shared_utility_services -[hidden]right- fixed_payout_recipients
+fixed_payout_recipients -[hidden]right- resident_extra_charges
+resident_extra_charges -[hidden]right- kpi_records
+fees -[hidden]down- admin_management_expenses
+member_invitations -[hidden]down- fees
+users -[hidden]right- profiles
+profiles -[hidden]right- subscription_checkouts
+subscriptions -[hidden]right- support_chats
+finance_settings -[hidden]right- social_spaces
+social_spaces -[hidden]right- announcements
+announcements -[hidden]right- team_workers
+
+skinparam legendBackgroundColor white
+skinparam legendBorderColor white
+legend bottom
+  <color:#0F6E64>■</color> Core domain    <color:#23408E>■</color> Supporting subdomain    <color:#5F6368>■</color> Generic subdomain
+  Negrita: clave primaria (INT autoincremental); external_id (único) es el identificador público · FK: clave foránea real · ◆ referencia dentro del contexto · ◇ referencia a otro contexto
+  owner_admin_id identifica al condominio (cuenta en users): es INT con FK a users.id en Billing, buildings, Finances (salvo maintenance_checkouts, INT sin FK, y resident_extra_charges), Social Spaces, incidents y announcements; en las demás tablas es VARCHAR(128) con el external_id, sin FK.
+  Se omiten created_at, updated_at y columnas heredadas o secundarias. resident_ai_usages la crea SchemaUpgrade (SQL), sin entidad EF.
+endlegend
+@enduml

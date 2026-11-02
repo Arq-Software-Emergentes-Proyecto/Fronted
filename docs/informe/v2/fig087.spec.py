@@ -1,0 +1,62 @@
+# Fig. 87 - Diagrama de componentes de BuildingFex.Api (vista general)
+WRAP = 22
+SAMEROW_XLABEL = False
+NODES = [
+ ('fbauth','ext','Firebase Authentication','','Correo y contraseña o Google.'),
+ ('spa','container','BuildingFex Web SPA','Vue 3, Vercel','Paneles de admin, junta y residente; pase del invitado.'),
+ ('mp','ext','Mercado Pago','','Checkout Pro.'),
+ ('iam','component','1. IAM','Authentication & Users','Invitación de un solo uso, acceso con Google, residentes, junta y admins asignados.'),
+ ('prof','component','2. Profiles','ASP.NET Core','Perfil del admin, datos del edificio y edificios del Portafolio.'),
+ ('pay','component','3. Finances · Payments','Cuotas con Mercado Pago','Checkout, confirmación y webhook de pagos.'),
+ ('bill','component','4. Billing','Suscripción','Planes y suscripción del administrador.'),
+ ('spaces','component','5. Social Spaces','ASP.NET Core','Espacios, reservas y pases de invitado.'),
+ ('fin','component','3. Finances','ASP.NET Core','Recibos, cuotas, gastos, KPI y cargos extra.'),
+ ('inc','component','6. Incidents','ASP.NET Core','Incidencias, triaje con IA, escalamiento y proveedores.'),
+ ('team','component','9. Team','ASP.NET Core','Trabajadores, turnos y tareas.'),
+ ('ann','component','7. Communications · Announcements','ASP.NET Core','Comunicados por edificio.'),
+ ('docs','component','7. Communications · Documents','ImportFolders e ImportUploads','Carpetas, cuota y tipo MIME; subida, confirmación y publicación.'),
+ ('idx','component','8. Resident Care · Indexing','AiContextIndexingJob','Embeddings → ai_context_chunks. En AWS lo ejecuta la función de jobs; en local, AiContextIndexingWorker.'),
+ ('jobs','job','Función de jobs','AWS Lambda + EventBridge','ai-index, monthly-billing, incident-escalation, import-cleanup y migrate (mismo paquete .NET).'),
+ ('chat','component','8. Resident Care · Chat','SupportController','Chat con el asistente, tope de consultas y escalado al admin.'),
+ ('rag','component','8. Resident Care · RAG','AiContextIndexer','Guarda y recupera ai_context_chunks.'),
+ ('ai','component','Gateway de IA','GeminiClient y GeminiEmbeddingClient','Único acceso a Gemini: generateContent y embeddings.'),
+ ('hub','component','Hub de avisos','SignalR (SupportHub)','Avisos en vivo (chat e incidencias) solo fuera de Lambda; en AWS, consulta periódica.'),
+ ('fs','component','File Storage','S3StorageService','URL prefirmadas de 10 min (máx. 15), metadatos y borrado de huérfanos.'),
+ ('audit','component','Audit','IAuditableEntity + TenantAudit','created_at y updated_at; intentos de acceso a otro condominio.'),
+ ('sk','component','Shared Kernel','EF Core','AppDbContext, UnitOfWork, Result y /health. Todos los módulos persisten por él.'),
+ ('gemini','ext','Google Gemini API','','Chat y embeddings.'),
+ ('db','db','TiDB Cloud','TiDB Cloud Starter (MySQL)','Tablas de los 9 módulos.'),
+ ('s3','db','Amazon S3','FilesBucket','Documentos e importaciones.'),
+]
+CLUSTERS = {'BuildingFex.Api (monolito modular): módulos 1–9 e infraestructura compartida':
+  ['iam','prof','pay','bill','spaces','fin','inc','team','ann','docs','idx','chat','rag','ai','hub','fs','audit','sk']}
+ROWS = [
+ ['fbauth','spa','mp'],
+ ['iam','prof','pay'],
+ ['spaces','bill','fin'],
+ ['inc','team','ann'],
+ ['chat','docs','idx','jobs'],
+ ['rag','fs'],
+ ['hub','ai','audit','sk'],
+ ['gemini','s3','db'],
+]
+EDGES = [
+ ('spa','prof','/api/v1 a todos los módulos (Bearer ID token, JSON/HTTPS)'),
+ ('iam','fbauth','Verifica el ID token (JWKS) y asigna claims'),
+ ('bill','pay','Checkout de la suscripción'),
+ ('pay','mp','Crea el cobro'),
+ ('mp','pay','Webhook (x-signature)'),
+ ('docs','fs','Firma y verifica'),
+ ('docs','idx','Encola ai-index'),
+ ('jobs','idx','Ejecuta ai-index'),
+ ('idx','fs','Lee el documento'),
+ ('idx','ai','Embeddings'),
+ ('idx','rag','IndexUploadAsync'),
+ ('chat','rag','Recupera contexto'),
+ ('chat','ai','generateContent'),
+ ('inc','ai','Sugerencia de triaje'),
+ ('chat','hub','Aviso en vivo'),
+ ('fs','s3','URL prefirmadas y borrado (AWS SDK)'),
+ ('ai','gemini','HTTPS'),
+ ('sk','db','EF Core, TLS'),
+]

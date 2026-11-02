@@ -1,0 +1,82 @@
+digraph G {
+  graph [rankdir=TB, newrank=true, splines=true, nodesep=0.18, ranksep=0.32, fontname="Liberation Sans", fontsize=15, pad="0.08", outputorder=edgesfirst];
+  node [fontname="Liberation Sans", fontsize=14, margin="0.10,0.06", penwidth=0];
+  edge [fontname="Liberation Sans", fontsize=14, color="#666666", fontcolor="#333333", arrowsize=0.7, penwidth=1.1];
+  subgraph cluster_1 { label=<<b>BuildingFex.Api (monolito modular): módulos 1–9 e infraestructura compartida</b>>; style="dashed,rounded"; color="#444444"; fontcolor="#222222"; fontsize=15; margin=8;
+    iam [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>1. IAM</b></font><br/><i>[Authentication &amp; Users]</i><br/>Invitación de un solo<br/>uso, acceso con<br/>Google, residentes,<br/>junta y admins<br/>asignados.>];
+    prof [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>2. Profiles</b></font><br/><i>[ASP.NET Core]</i><br/>Perfil del admin,<br/>datos del edificio y<br/>edificios del<br/>Portafolio.>];
+    pay [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>3. Finances · Payments</b></font><br/><i>[Cuotas con Mercado Pago]</i><br/>Checkout, confirmación<br/>y webhook de pagos.>];
+    bill [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>4. Billing</b></font><br/><i>[Suscripción]</i><br/>Planes y suscripción<br/>del administrador.>];
+    spaces [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>5. Social Spaces</b></font><br/><i>[ASP.NET Core]</i><br/>Espacios, reservas y<br/>pases de invitado.>];
+    fin [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>3. Finances</b></font><br/><i>[ASP.NET Core]</i><br/>Recibos, cuotas,<br/>gastos, KPI y cargos<br/>extra.>];
+    inc [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>6. Incidents</b></font><br/><i>[ASP.NET Core]</i><br/>Incidencias, triaje<br/>con IA, escalamiento y<br/>proveedores.>];
+    team [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>9. Team</b></font><br/><i>[ASP.NET Core]</i><br/>Trabajadores, turnos y<br/>tareas.>];
+    ann [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>7. Communications ·<br/>Announcements</b></font><br/><i>[ASP.NET Core]</i><br/>Comunicados por<br/>edificio.>];
+    docs [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>7. Communications ·<br/>Documents</b></font><br/><i>[ImportFolders e<br/>ImportUploads]</i><br/>Carpetas, cuota y tipo<br/>MIME; subida,<br/>confirmación y<br/>publicación.>];
+    idx [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>8. Resident Care ·<br/>Indexing</b></font><br/><i>[AiContextIndexingJob]</i><br/>Embeddings →<br/>ai_context_chunks. En<br/>AWS lo ejecuta la<br/>función de jobs; en<br/>local,<br/>AiContextIndexingWorker.>];
+    chat [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>8. Resident Care ·<br/>Chat</b></font><br/><i>[SupportController]</i><br/>Chat con el asistente,<br/>tope de consultas y<br/>escalado al admin.>];
+    rag [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>8. Resident Care · RAG</b></font><br/><i>[AiContextIndexer]</i><br/>Guarda y recupera<br/>ai_context_chunks.>];
+    ai [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>Gateway de IA</b></font><br/><i>[GeminiClient y<br/>GeminiEmbeddingClient]</i><br/>Único acceso a Gemini:<br/>generateContent y<br/>embeddings.>];
+    hub [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>Hub de avisos</b></font><br/><i>[SignalR (SupportHub)]</i><br/>Avisos en vivo (chat e<br/>incidencias) solo<br/>fuera de Lambda; en<br/>AWS, consulta<br/>periódica.>];
+    fs [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>File Storage</b></font><br/><i>[S3StorageService]</i><br/>URL prefirmadas de 10<br/>min (máx. 15),<br/>metadatos y borrado de<br/>huérfanos.>];
+    audit [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>Audit</b></font><br/><i>[IAuditableEntity +<br/>TenantAudit]</i><br/>created_at y<br/>updated_at; intentos<br/>de acceso a otro<br/>condominio.>];
+    sk [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>Shared Kernel</b></font><br/><i>[EF Core]</i><br/>AppDbContext,<br/>UnitOfWork, Result y<br/>/health. Todos los<br/>módulos persisten por<br/>él.>];
+  }
+  fbauth [shape=box, style="rounded,filled", fillcolor="#999999", fontcolor="white", label=<<font point-size="15"><b>Firebase<br/>Authentication</b></font><br/>Correo y contraseña o<br/>Google.>];
+  spa [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>BuildingFex Web SPA</b></font><br/><i>[Vue 3, Vercel]</i><br/>Paneles de admin,<br/>junta y residente;<br/>pase del invitado.>];
+  mp [shape=box, style="rounded,filled", fillcolor="#999999", fontcolor="white", label=<<font point-size="15"><b>Mercado Pago</b></font><br/>Checkout Pro.>];
+  jobs [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>Función de jobs</b></font><br/><i>[AWS Lambda + EventBridge]</i><br/>ai-index,<br/>monthly-billing,<br/>incident-escalation,<br/>import-cleanup y<br/>migrate (mismo paquete<br/>.NET).>];
+  gemini [shape=box, style="rounded,filled", fillcolor="#999999", fontcolor="white", label=<<font point-size="15"><b>Google Gemini API</b></font><br/>Chat y embeddings.>];
+  db [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>TiDB Cloud</b></font><br/><i>[TiDB Cloud Starter<br/>(MySQL)]</i><br/>Tablas de los 9<br/>módulos.>];
+  s3 [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>Amazon S3</b></font><br/><i>[FilesBucket]</i><br/>Documentos e<br/>importaciones.>];
+  { rank=same; fbauth; spa; mp; }
+  fbauth -> spa [style=invis, weight=5];
+  spa -> mp [style=invis, weight=5];
+  { rank=same; iam; prof; pay; }
+  iam -> prof [style=invis, weight=5];
+  prof -> pay [style=invis, weight=5];
+  { rank=same; spaces; bill; fin; }
+  spaces -> bill [style=invis, weight=5];
+  bill -> fin [style=invis, weight=5];
+  { rank=same; inc; team; ann; }
+  inc -> team [style=invis, weight=5];
+  team -> ann [style=invis, weight=5];
+  { rank=same; chat; docs; idx; jobs; }
+  chat -> docs [style=invis, weight=5];
+  docs -> idx [style=invis, weight=5];
+  idx -> jobs [style=invis, weight=5];
+  { rank=same; rag; fs; }
+  rag -> fs [style=invis, weight=5];
+  { rank=same; hub; ai; audit; sk; }
+  hub -> ai [style=invis, weight=5];
+  ai -> audit [style=invis, weight=5];
+  audit -> sk [style=invis, weight=5];
+  { rank=same; gemini; s3; db; }
+  gemini -> s3 [style=invis, weight=5];
+  s3 -> db [style=invis, weight=5];
+  fbauth -> iam [style=invis, weight=0];
+  iam -> spaces [style=invis, weight=0];
+  spaces -> inc [style=invis, weight=0];
+  inc -> chat [style=invis, weight=0];
+  chat -> rag [style=invis, weight=0];
+  rag -> hub [style=invis, weight=0];
+  hub -> gemini [style=invis, weight=0];
+  spa -> prof [label=</api/v1 a todos<br/>los módulos<br/>(Bearer ID token,<br/>JSON/HTTPS)>];
+  fbauth -> iam [dir=back, label=<Verifica el ID<br/>token (JWKS) y<br/>asigna claims>];
+  pay -> bill [dir=back, label=<Checkout de la<br/>suscripción>];
+  mp -> pay [dir=back, label=<Crea el cobro>];
+  mp -> pay [label=<Webhook<br/>(x-signature)>];
+  docs -> fs [label=<Firma y verifica>];
+  docs -> idx [label=<Encola ai-index>];
+  jobs -> idx [label=<Ejecuta ai-index>];
+  idx -> fs [label=<Lee el documento>];
+  idx -> ai [label=<Embeddings>];
+  idx -> rag [label=<IndexUploadAsync>];
+  chat -> rag [label=<Recupera contexto>];
+  chat -> ai [label=<generateContent>];
+  inc -> ai [label=<Sugerencia de<br/>triaje>];
+  chat -> hub [label=<Aviso en vivo>];
+  fs -> s3 [label=<URL prefirmadas y<br/>borrado (AWS SDK)>];
+  ai -> gemini [label=<HTTPS>];
+  sk -> db [label=<EF Core, TLS>];
+}

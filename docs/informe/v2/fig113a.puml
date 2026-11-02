@@ -1,0 +1,114 @@
+@startuml
+!include common_class.iuml
+left to right direction
+hide circle
+hide methods
+title Finances - Database Design (1 de 2: recibos, cuotas y pagos)
+
+entity receipts {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  external_id : VARCHAR(64) «UQ»
+  owner_admin_id : INT «FK»
+  resident_external_id : VARCHAR(64)
+  issue_date : VARCHAR(20)
+  due_date : VARCHAR(20)
+  amount : DECIMAL(18,2)
+  status : VARCHAR(20)
+  late_fee : DECIMAL(18,2)
+  extra_charges : DECIMAL(18,2)
+  concept : VARCHAR(200)
+  billing_month : VARCHAR(7)
+  kind : VARCHAR(16) = 'MONTHLY'
+  monthly_key : VARCHAR(7)
+  payment_open : VARCHAR(20)
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+  ..
+  UQ ux_receipts_owner_resident_monthly_key
+   (owner_admin_id, resident_external_id, monthly_key)
+  IDX ix_receipts_owner_resident_billing_month
+   (owner_admin_id, resident_external_id, billing_month)
+}
+
+entity fees {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  external_id : VARCHAR(64) «UQ»
+  owner_admin_id : INT «FK»
+  resident_external_id : VARCHAR(64)
+  month : VARCHAR(40)
+  amount : DECIMAL(18,2)
+  due_date : VARCHAR(20)
+  status : VARCHAR(20)
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+}
+
+entity payments {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  external_id : VARCHAR(64) «UQ»
+  owner_admin_id : INT «FK»
+  resident_external_id : VARCHAR(64)
+  fee_external_id : VARCHAR(64)
+  fee_month : VARCHAR(40)
+  amount : DECIMAL(18,2)
+  paid_at : VARCHAR(40)
+  method : VARCHAR(80)
+  reference : VARCHAR(80)
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+}
+
+entity maintenance_checkouts {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  external_id : VARCHAR(64) «UQ»
+  owner_admin_id : INT «IDX(owner_admin_id, resident_external_id)»
+  resident_external_id : VARCHAR(128)
+  items_json : LONGTEXT
+  total_amount : DECIMAL(18,2)
+  status : VARCHAR(20)
+  mp_payment_id : VARCHAR(64) «UQ»
+  preference_id : VARCHAR(128)
+  paid_at : DATETIME(6)
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+}
+
+
+entity "users (IAM)" as users #F2F2F2 {
+  * id : INT «PK»
+  --
+  external_id : VARCHAR(128) «UQ»
+  ...
+}
+
+
+
+
+
+
+users "1" -[norank]- "0..*" receipts : owner_admin_id
+users "1" -[norank]- "0..*" fees : owner_admin_id
+users "1" -[norank]- "0..*" payments : owner_admin_id
+fees "0..1" .[norank]. "0..*" payments : fee_external_id\n(sin FK)
+
+note as N1
+  TiDB Cloud (compatible con MySQL).
+  FK owner_admin_id → users.id:
+  ON DELETE RESTRICT.
+  maintenance_checkouts.owner_admin_id
+  no tiene FK.
+  resident_external_id identifica al
+  residente (users.external_id),
+  sin clave foránea.
+end note
+' --- disposición en columnas (aristas ocultas); las relaciones usan [norank]
+users -[hidden]- receipts
+users -[hidden]- maintenance_checkouts
+users -[hidden]- fees
+users -[hidden]- payments
+users -[hidden]- receipts
+@enduml

@@ -1,0 +1,34 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+
+Person(admin, "Administrador", "Dueño de la cuenta (junta o empresa administradora).")
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz web para administradores y residentes.")
+
+Container_Boundary(api, "BuildingFex.Api - módulo Profiles") {
+  Component(profCtrl, "Profile Controller", "ASP.NET Core API Controller", "Registra y consulta perfiles (/api/v1/profiles).")
+  Component(profSvc, "Profile Service", "C# Service", "Mantiene nombre, DNI, empresa, RUC y dirección; el primer usuario del edificio queda como administrador.")
+  Component(portCtrl, "Portfolio Controller", "ASP.NET Core API Controller", "Edificios accesibles (/api/v1/me/buildings), resumen por edificio y alta de edificios del Portafolio (/api/v1/portfolio/buildings).")
+  Component(bldCtrl, "Buildings Controller", "ASP.NET Core API Controller", "Registra y edita el edificio de la cuenta (/api/v1/buildings).")
+  Component(profRepo, "Profile Repository", "EF Core Repository", "Acceso a los perfiles y a los edificios.")
+}
+
+Component_Ext(iam, "Módulo IAM", "Módulo de BuildingFex.Api", "Cuenta del usuario.")
+Component_Ext(billing, "Módulo Billing", "Módulo de BuildingFex.Api", "Plan activo y límite de departamentos.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Profiles: perfiles vinculados a la cuenta.")
+
+Rel(admin, spa, "Completa su perfil", "HTTPS")
+Rel(spa, profCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, bldCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, portCtrl, "Cambia de edificio y agrega edificios", "JSON/HTTPS")
+Rel(portCtrl, iam, "Edificios accesibles y rol (Caller Context)")
+Rel(portCtrl, billing, "Exige plan Portafolio vigente")
+Rel(portCtrl, profRepo, "Usa")
+Rel(bldCtrl, profRepo, "Usa")
+Rel(profCtrl, profSvc, "Usa")
+Rel(iam, profSvc, "CuentaRegistrada: vincula el perfil a la cuenta")
+Rel(billing, profSvc, "PlanCambiado: límite de departamentos")
+Rel(profSvc, profRepo, "Usa")
+Rel(profRepo, db, "Lee y escribe", "EF Core")
+@enduml

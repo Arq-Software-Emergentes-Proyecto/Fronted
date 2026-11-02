@@ -1,0 +1,69 @@
+@startuml
+scale 1.5
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam titleFontSize 14
+skinparam titleFontStyle bold
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+skinparam note {
+  BackgroundColor #FFFDE7
+  BorderColor #8A8A8A
+}
+hide empty members
+title Bounded Context Billing - Domain Layer
+
+interface ISubscriptionRepository <<Repository>> {
+  +findByBuilding(id: BuildingId): Subscription
+  +save(s: Subscription): void
+}
+
+class Subscription <<Aggregate Root>> {
+  -id : SubscriptionId
+  -buildingId : BuildingId
+  -plan : Plan
+  -status : SubscriptionStatus
+  -trialEndsAt : Date
+  -paidUntil : Date
+  --
+  +startTrial(today: Date): Subscription
+  +activate(plan: Plan, paidUntil: Date): void
+  +changePlan(plan: Plan): void
+  +effectiveStatus(today: Date): SubscriptionStatus
+  +limits(): PlanLimits
+  +propagateToPortfolio(): void
+}
+
+class PlanLimits <<Value Object>> {
+  -maxDepartments : Integer
+  -monthlyAiQueries : Integer
+  --
+  +allowsDepartments(count: Integer): Boolean
+  +allowsAiQuery(used: Integer): Boolean
+}
+
+enum Plan {
+  FREE
+  ESSENTIAL
+  STANDARD
+  SCALE
+  PORTAFOLIO
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAYMENT_FAILED
+  SUSPENDED
+}
+
+ISubscriptionRepository ..> "*" Subscription : persiste
+Subscription "1" --> "1" PlanLimits : aplica
+Subscription "*" --> "1" Plan : contrata
+Subscription "*" --> "1" SubscriptionStatus : está en
+@enduml

@@ -1,0 +1,74 @@
+@startuml
+!include common_class.iuml
+title Bounded Context Social Spaces - Domain Layer (2 de 2: política y repositorios)
+left to right direction
+hide empty members
+
+
+class SocialSpace <<Aggregate Root>> #F2F2F2 {
+  .. detalle en la otra parte ..
+}
+
+class Reservation <<Aggregate Root>> #F2F2F2 {
+  .. detalle en la otra parte ..
+}
+
+
+class ReservationPolicy <<Domain Service>> {
+  +MaxGuests = 5
+  --
+  +CanReserve(...)
+  +CanHostGuests(...)
+}
+
+class ReservationPolicyResult <<Value Object>> {
+  -violation : ReservationViolation
+  --
+  +IsAllowed : bool
+}
+
+enum ReservationViolation {
+  None
+  SpaceUnderMaintenance
+  Overlap
+  DailyLimitReached
+  CapacityExceeded
+  TooManyGuests
+  ResidentDelinquent
+}
+
+interface ISocialSpaceRepository <<Repository>> {
+  +FindByExternalIdAsync(...): SocialSpace
+  +ListByOwnerExternalIdAsync(...)
+  +AddAsync(entity): void
+  +Update(entity): void
+  +Remove(entity): void
+}
+
+interface IReservationRepository <<Repository>> {
+  +FindByExternalIdAsync(...): Reservation
+  +FindByGuestInviteTokenAsync(...)
+  +FindBySpaceAndDateAsync(...)
+  +ListAsync(...)
+  +BeginBookingAsync(...)
+  +AddAsync(entity): void
+  +Update(entity): void
+  +Remove(entity): void
+}
+
+
+
+
+
+ISocialSpaceRepository .[norank].> "*" SocialSpace : persiste
+IReservationRepository .[norank].> "*" Reservation : persiste
+ReservationPolicy .[norank].> SocialSpace : evalúa
+ReservationPolicy .[norank].> "*" Reservation : evalúa
+ReservationPolicy .[norank].> ReservationPolicyResult : devuelve
+ReservationPolicyResult -[norank]-> "1" ReservationViolation
+' --- columnas (aristas ocultas); relaciones con [norank]
+ISocialSpaceRepository -[hidden]- SocialSpace
+ISocialSpaceRepository -[hidden]- Reservation
+ISocialSpaceRepository -[hidden]- ReservationPolicyResult
+ISocialSpaceRepository -[hidden]- ReservationViolation
+@enduml

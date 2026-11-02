@@ -1,0 +1,48 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+skinparam wrapWidth 220
+LAYOUT_TOP_DOWN()
+
+Person(admin, "Administrador", "Dueño de la cuenta (junta o empresa administradora).")
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz web para administradores y residentes.")
+
+Container_Boundary(api, "BuildingFex.Api - módulo Profiles") {
+  Component(profCtrl, "ProfilesController", "ASP.NET Core API Controller", "/api/v1/profiles: registra y consulta el perfil (nombre, correo, DNI, empresa, RUC y dirección) y asegura la cuenta en IAM.")
+  Component(bldCtrl, "BuildingsController", "ASP.NET Core API Controller", "/api/v1/buildings: registra y edita el edificio de la cuenta y lista sus residentes.")
+  Component(portCtrl, "PortfolioController", "ASP.NET Core API Controller", "/api/v1/me/buildings y /api/v1/portfolio/buildings: edificios accesibles, resumen y alta de edificios (plan Portafolio).")
+  Component(impCtrl, "ResidentImportController", "ASP.NET Core API Controller", "/api/v1/residents/import: carga del padrón y plantilla; lee el archivo con ExcelRosterReader (.xlsx o .csv).")
+  Component(impSvc, "ResidentRosterImportService", "C# Application Service", "Valida las filas y crea los residentes con el comando de IAM, dentro del tope del plan.")
+  Component(bldRepo, "BuildingRepository", "EF Core Repository", "Acceso a los edificios.")
+}
+
+Component_Ext(iam, "Módulo IAM", "UserCommandService, UserQueryService, UserRepository y CallerContextAccessor", "Cuentas, residentes, edificio activo y rol.")
+Component_Ext(billing, "Módulo Billing", "SubscriptionService y SubscriptionPlans", "Plan efectivo, tope de departamentos y vínculo del edificio a la suscripción.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Profiles: profiles (FK user_external_id → users) y buildings.")
+
+Lay_R(impCtrl, profCtrl)
+Lay_R(bldCtrl, portCtrl)
+Lay_D(profCtrl, portCtrl)
+Lay_D(impCtrl, impSvc)
+Lay_R(impSvc, bldCtrl)
+Lay_R(iam, db)
+Lay_R(db, billing)
+
+Rel(admin, spa, "Completa su perfil y su edificio", "HTTPS")
+Rel(spa, profCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, bldCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, portCtrl, "Cambia de edificio y agrega edificios", "JSON/HTTPS")
+Rel(spa, impCtrl, "Sube el padrón", "multipart/HTTPS")
+Rel(impCtrl, impSvc, "Usa")
+Rel(bldCtrl, bldRepo, "Usa (IUnitOfWork)")
+Rel(profCtrl, iam, "UpsertFirebaseAdminCommand")
+Rel(bldCtrl, iam, "Busca residentes (UserQueryService)")
+Rel(portCtrl, iam, "Edificios accesibles y rol (CallerContextAccessor)")
+Rel(impSvc, iam, "CreateResidentCommand")
+Rel(bldCtrl, billing, "LinkBuildingAsync")
+Rel(impSvc, billing, "CheckRosterGrowthAsync")
+Rel(portCtrl, billing, "Exige plan Portafolio vigente")
+Rel(bldRepo, db, "Lee y escribe", "EF Core")
+Rel(profCtrl, db, "profiles (AppDbContext)", "EF Core")
+Rel(portCtrl, db, "Crea la cuenta del edificio y el edificio (AppDbContext)", "EF Core")
+@enduml

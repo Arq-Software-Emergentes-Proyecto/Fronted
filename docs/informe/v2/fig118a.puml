@@ -1,0 +1,120 @@
+@startuml
+!include common_class.iuml
+title Bounded Context Social Spaces - Domain Layer (1 de 2: agregados)
+left to right direction
+hide empty members
+
+
+class SocialSpace <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -name : string
+  -description : string
+  -capacity : int?
+  -imageUrl : string
+  -rules : string
+  -status : string
+  -maxReservationsPerDay : int?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...): SocialSpace
+  +Patch(...): void
+  +SetRules(rules): void
+  +SetMaxReservationsPerDay(max): void
+  +IsAvailable(): bool
+  +SetUnderMaintenance(): void
+  +SetAvailable(): void
+  +SetStatus(status): void
+}
+
+class Reservation <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -spaceExternalId : string
+  -residentExternalId : string
+  -residentName : string
+  -residentCode : string
+  -date : string
+  -startTime : string
+  -endTime : string
+  -guestsJson : string
+  -guestInviteToken : string?
+  -guestInviteExpiresAt : DateTimeOffset?
+  -status : string
+  -slotKey : string?
+  -cancelledAt : DateTimeOffset?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...): Reservation
+  +IsActive : bool
+  +Slot : TimeSlot?
+  +PatchGuests(...): void
+  +IssueGuestInvite(...): void
+  +Cancel(now): void
+  +ComputeGuestInviteExpiry(...)
+  +GuestPassValidFrom(tz): DateTimeOffset?
+  +GuestPassStatusAt(now, tz): string
+  +SetGuestCheckedIn(...): bool
+  +{static} CountGuests(guestsJson): int
+}
+
+class TimeSlot <<Value Object>> {
+  -date : DateOnly
+  -start : TimeOnly
+  -end : TimeOnly
+  --
+  +{static} TryCreate(...): TimeSlot?
+  +Overlaps(other): bool
+  +DateKey : string
+  +StartKey : string
+  +EndKey : string
+  +DurationMinutes : int
+}
+
+
+
+
+
+
+enum ReservationStatus <<constantes string>> {
+  PENDING
+  CONFIRMED
+  CANCELLED
+}
+
+enum SocialSpaceStatus <<constantes string>> {
+  AVAILABLE
+  MAINTENANCE
+}
+
+enum GuestPassStatus <<constantes string>> {
+  VALID
+  NOT_YET_VALID
+  EXPIRED
+  CANCELLED
+  USED
+}
+
+note right of Reservation
+  Pase de visita con QR: guestInviteToken
+  (uno por reserva), guestInviteExpiresAt
+  (fin + 2 h) y guestsJson (hasta 5
+  invitados con su marca de ingreso).
+end note
+
+SocialSpace "1" -[norank]- "0..*" Reservation : spaceExternalId
+Reservation "1" -[norank]-> "0..1" TimeSlot : Slot
+Reservation "*" -[norank]-> "1" ReservationStatus : status
+Reservation .[norank].> GuestPassStatus : GuestPassStatusAt()
+SocialSpace "*" -[norank]-> "1" SocialSpaceStatus : status
+' --- columnas (aristas ocultas); relaciones con [norank]
+Reservation -[hidden]- SocialSpace
+Reservation -[hidden]- TimeSlot
+Reservation -[hidden]- ReservationStatus
+Reservation -[hidden]- SocialSpaceStatus
+Reservation -[hidden]- GuestPassStatus
+@enduml

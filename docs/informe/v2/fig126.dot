@@ -1,0 +1,38 @@
+digraph G {
+  graph [rankdir=TB, newrank=true, splines=true, nodesep=0.14, ranksep=0.32, fontname="Liberation Sans", fontsize=15, pad="0.08", outputorder=edgesfirst];
+  node [fontname="Liberation Sans", fontsize=14, margin="0.10,0.06", penwidth=0];
+  edge [fontname="Liberation Sans", fontsize=14, color="#666666", fontcolor="#333333", arrowsize=0.7, penwidth=1.1];
+  labelloc=t; label=<<b>BuildingFex.Api - bounded context Team (azul<br/>claro: componentes; gris: otros módulos)</b>>;
+  spa [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>BuildingFex Web SPA</b></font><br/><i>[Vue 3]</i><br/>Interfaz para<br/>administradores y<br/>residentes.>];
+  staffCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>TeamWorkersCompat<br/>Controller</b></font><br/><i>[REST Controller]</i><br/>GET y POST<br/>/api/v1/staff; PATCH<br/>.../{id},<br/>.../{id}/deactivate,<br/>.../{id}/reactivate;<br/>DELETE .../{id}<br/>(también<br/>/teamWorkers).>];
+  taskCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>TasksController</b></font><br/><i>[REST Controller]</i><br/>GET y POST<br/>/api/v1/tasks; GET<br/>.../{id}; PATCH<br/>.../{id}/start,<br/>.../complete y<br/>.../reassign.>];
+  shiftCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ShiftsController</b></font><br/><i>[REST Controller]</i><br/>GET y POST<br/>/api/v1/shifts; GET,<br/>PUT/PATCH y DELETE<br/>.../{id}.>];
+  svc [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>TeamWorker /<br/>MaintenanceTask /<br/>Shift CommandService</b></font><br/><i>[Application Services]</i><br/>Registran, desactivan<br/>y reasignan<br/>trabajadores; crean,<br/>inician, completan y<br/>reasignan tareas;<br/>gestionan turnos sin<br/>cruces.>];
+  dm [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>Domain Model</b></font><br/><i>[Domain Layer]</i><br/>TeamWorker,<br/>MaintenanceTask,<br/>Shift, WorkloadPolicy.>];
+  repo [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>TeamWorker /<br/>MaintenanceTask /<br/>Shift Repository</b></font><br/><i>[Repository (EF Core)]</i><br/>Implementan los<br/>repositorios sobre<br/>TiDB Cloud.>];
+  inc [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Incidents</b></font><br/><i>[BuildingFex.Api]</i><br/>IIncidentRepository<br/>(valida la incidencia<br/>ligada) e<br/>IIncidentCommandService<br/>(ResolveIncidentCommand).>];
+  db [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>TiDB Cloud</b></font><br/><i>[MySQL compatible]</i><br/>team_workers,<br/>maintenance_tasks,<br/>shifts.>];
+  { rank=same; spa; }
+  { rank=same; staffCtrl; taskCtrl; shiftCtrl; }
+  staffCtrl -> taskCtrl [style=invis, weight=5];
+  taskCtrl -> shiftCtrl [style=invis, weight=5];
+  { rank=same; svc; }
+  { rank=same; dm; repo; inc; }
+  dm -> repo [style=invis, weight=5];
+  repo -> inc [style=invis, weight=5];
+  { rank=same; db; }
+  spa -> staffCtrl [style=invis, weight=0];
+  staffCtrl -> svc [style=invis, weight=0];
+  svc -> dm [style=invis, weight=0];
+  dm -> db [style=invis, weight=0];
+  spa -> staffCtrl [];
+  spa -> taskCtrl [label=<JSON/HTTPS>];
+  spa -> shiftCtrl [];
+  staffCtrl -> svc [label=<Llama>];
+  taskCtrl -> svc [label=<Llama>];
+  shiftCtrl -> svc [label=<Llama>];
+  svc -> dm [label=<Reglas del<br/>dominio>];
+  svc -> repo [label=<Persiste>];
+  svc -> inc [label=<Valida<br/>incidencia;<br/>TareaCompletada>];
+  repo -> db [label=<EF Core>];
+}

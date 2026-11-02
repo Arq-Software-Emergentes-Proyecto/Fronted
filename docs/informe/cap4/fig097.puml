@@ -1,0 +1,45 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+skinparam wrapWidth 220
+LAYOUT_TOP_DOWN()
+
+Person(admin, "Administrador", "Dueño de la cuenta: contrata y cambia el plan.")
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz web para administradores y residentes.")
+
+Container_Boundary(api, "BuildingFex.Api - módulo Billing") {
+  Component(plansCtrl, "PlansController", "ASP.NET Core API Controller", "/api/v1/plans: catálogo de planes, detalle y plan sugerido.")
+  Component(subCtrl, "SubscriptionController", "ASP.NET Core API Controller", "/api/v1/subscription: estado, límites, cambio a Free, checkout y confirm del pago del periodo.")
+  Component(catalog, "SubscriptionPlans y PlanCatalog", "Domain Model", "Planes Free, Essential, Standard, Scale y Portafolio: precios, topes (PlanLimits), prueba de 30 días y gracia de 5 días.")
+  Component(subSvc, "SubscriptionService", "C# Application Service", "Prueba Free, activación del plan pagado, aplicación del pago, tope de departamentos y propagación del plan a los edificios del Portafolio.")
+  Component(subRepo, "SubscriptionRepository", "EF Core Repository", "Suscripción, pagos (subscription_payments) y checkouts (subscription_checkouts).")
+}
+
+Component_Ext(mpSvc, "Módulo Finances", "MercadoPagoService (ACL)", "Crea la preferencia de la suscripción, confirma el pago y procesa el webhook.")
+Component_Ext(callers, "Módulos IAM y Profiles", "UserCommandService, BuildingsController, ResidentRosterImportService", "Inician la prueba, vinculan el edificio y validan el tope de departamentos.")
+Component_Ext(rc, "Módulo Resident Care", "PlanQuotaClient (ACL)", "Lee el tope de consultas de IA del plan.")
+System_Ext(mp, "Mercado Pago", "Checkout Pro: pago de cada periodo del plan.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Billing: subscriptions, subscription_payments y subscription_checkouts; plan vigente en users.subscription_plan_id.")
+
+Lay_R(plansCtrl, subCtrl)
+Lay_D(mpSvc, mp)
+Lay_R(catalog, subSvc)
+Lay_D(catalog, rc)
+Lay_D(subRepo, db)
+Lay_R(rc, db)
+Lay_R(db, callers)
+
+Rel(admin, spa, "Elige el plan", "HTTPS")
+Rel(spa, plansCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, subCtrl, "Usa", "JSON/HTTPS")
+Rel(plansCtrl, catalog, "Lee")
+Rel(subCtrl, subSvc, "Usa")
+Rel_L(subCtrl, mpSvc, "Checkout y confirm")
+Rel(mpSvc, subSvc, "CreateCheckoutAsync / ApplyPaymentAsync")
+Rel_U(callers, subSvc, "StartTrialAsync / LinkBuildingAsync / CheckRosterGrowthAsync")
+Rel_U(rc, catalog, "MonthlyAiQueryCap")
+Rel(subSvc, catalog, "Aplica")
+Rel(subSvc, subRepo, "Usa")
+Rel(mpSvc, mp, "Preferencias y pagos; webhook firmado (x-signature)", "HTTPS")
+Rel(subRepo, db, "Lee y escribe", "EF Core")
+@enduml

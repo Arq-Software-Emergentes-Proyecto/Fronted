@@ -1,0 +1,91 @@
+@startuml
+!include common_class.iuml
+title Bounded Context IAM - Domain Layer (2 de 2: miembros, invitaciones y repositorio)
+left to right direction
+hide circle
+
+class User <<Aggregate Root>> #F2F2F2 {
+  .. detalle en la parte 1 ..
+}
+
+class BuildingMember <<Aggregate Root>> {
+  -id : int
+  -ownerAdminId : int
+  -userId : int
+  -role : string
+  -createdAt : DateTimeOffset
+  --
+  +{static} Create(...): BuildingMember
+  +ChangeRole(role)
+}
+
+class MemberInvitation <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -email : string
+  -name : string
+  -role : string
+  -token : string
+  -expiresAt : DateTimeOffset
+  -acceptedAt : DateTimeOffset?
+  -revokedAt : DateTimeOffset?
+  -invitedByUserId : int
+  -createdAt : DateTimeOffset
+  --
+  +{static} Issue(...): MemberInvitation
+  +IsPending(now): bool
+  +IsExpired(now): bool
+  +Accept()
+  +Revoke()
+}
+
+class Email <<Value Object>> {
+  -value : string
+  --
+  +{static} Create(raw): Email
+  +{static} TryCreate(raw, out email): bool
+  +{static} IsValid(raw): bool
+  +{static} Normalize(raw): string
+}
+
+interface IUserRepository <<Repository>> {
+  +FindByEmailAsync(email): User?
+  +FindByExternalIdAsync(id): User?
+  +FindByGoogleSubAsync(googleSub): User?
+  +FindByInviteTokenAsync(token): User?
+  +ExistsByEmailAsync(email): bool
+  +ListByOwnerAdminIdAsync(id)
+  +SearchAsync(email?, role?, code?, owner?)
+  +ExistsResidentByCodeAsync(code, owner?)
+  +CountResidentsByOwnerAdminIdAsync(id)
+  +ListPortfolioBuildingsAsync(parentId)
+  +AnyUsersAsync(): bool
+  +AnyAdminAsync(): bool
+  .. de IBaseRepository<User> ..
+  +AddAsync, FindByIdAsync,\n Update, Remove, ListAsync
+}
+
+enum MemberRoles <<enumeration>> {
+  Admin = "admin"
+  Board = "board_member"
+}
+
+
+' --- columnas (aristas ocultas): 1) MemberInvitation, BuildingMember, MemberRoles, IUserRepository, Email  2) User  3) enumeraciones y notas
+' --- columnas (aristas ocultas)
+MemberInvitation -[hidden]- User
+BuildingMember -[hidden]- User
+IUserRepository -[hidden]- User
+MemberRoles -[hidden]- User
+Email -[hidden]- User
+' --- relaciones (sin fijar rango)
+IUserRepository .[norank].> "0..*" User : persiste
+BuildingMember "0..*" -[norank]-> "1" User : ownerAdmin
+BuildingMember "0..*" -[norank]-> "1" User : user
+MemberInvitation "0..*" -[norank]-> "1" User : ownerAdmin
+MemberInvitation .[norank].> BuildingMember : al aceptarse\nse registra
+MemberInvitation .[norank].> Email : valida el correo
+BuildingMember "0..*" -[norank]-> "1" MemberRoles : role
+MemberInvitation "0..*" -[norank]-> "1" MemberRoles : role
+@enduml

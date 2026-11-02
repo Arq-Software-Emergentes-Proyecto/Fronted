@@ -1,0 +1,50 @@
+digraph G {
+  graph [rankdir=TB, newrank=true, splines=true, nodesep=0.12, ranksep=0.32, fontname="Liberation Sans", fontsize=15, pad="0.08", outputorder=edgesfirst];
+  node [fontname="Liberation Sans", fontsize=14, margin="0.10,0.06", penwidth=0];
+  edge [fontname="Liberation Sans", fontsize=14, color="#666666", fontcolor="#333333", arrowsize=0.7, penwidth=1.1];
+  labelloc=t; label=<<b>BuildingFex.Api - módulo Profiles (azul claro: componentes<br/>del módulo; gris: otros módulos)</b>>;
+  admin [shape=box, style="rounded,filled", fillcolor="#08427B", fontcolor="white", label=<<font point-size="15"><b>Administrador</b></font><br/>Dueño de la cuenta<br/>(junta o empresa<br/>administradora).>];
+  spa [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>BuildingFex Web SPA</b></font><br/><i>[Vue 3]</i><br/>Interfaz web para<br/>administradores y<br/>residentes.>];
+  profCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ProfilesController</b></font><br/><i>[API Controller]</i><br/>/api/v1/profiles:<br/>registra y consulta<br/>el perfil (nombre,<br/>correo, DNI,<br/>empresa, RUC,<br/>dirección) y asegura<br/>la cuenta en IAM.>];
+  bldCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>BuildingsController</b></font><br/><i>[API Controller]</i><br/>/api/v1/buildings:<br/>registra y edita el<br/>edificio y lista sus<br/>residentes.>];
+  portCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>PortfolioController</b></font><br/><i>[API Controller]</i><br/>/api/v1/me/buildings<br/>y<br/>/api/v1/portfolio/buildings:<br/>edificios<br/>accesibles, resumen<br/>y alta de edificios<br/>(plan Portafolio).>];
+  impCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ResidentImportController</b></font><br/><i>[API Controller]</i><br/>/api/v1/residents/import:<br/>padrón y plantilla;<br/>ExcelRosterReader<br/>(.xlsx o .csv).>];
+  impSvc [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ResidentRosterImportService</b></font><br/><i>[Application Service]</i><br/>Valida las filas y<br/>crea los residentes<br/>con el comando de<br/>IAM, dentro del tope<br/>del plan.>];
+  bldRepo [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>BuildingRepository</b></font><br/><i>[EF Core Repository]</i><br/>Acceso a los<br/>edificios.>];
+  iam [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo IAM</b></font><br/><i>[UserCommand/<br/>QueryService,<br/>UserRepository,<br/>CallerContext Accessor]</i><br/>Cuentas, residentes,<br/>edificio activo y<br/>rol.>];
+  billing [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Billing</b></font><br/><i>[SubscriptionService y<br/>SubscriptionPlans]</i><br/>Plan efectivo, tope<br/>de departamentos y<br/>vínculo del edificio<br/>a la suscripción.>];
+  db [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>TiDB Cloud</b></font><br/><i>[MySQL compatible]</i><br/>profiles (FK<br/>user_external_id →<br/>users) y buildings.>];
+  { rank=same; admin; }
+  { rank=same; spa; }
+  { rank=same; profCtrl; portCtrl; }
+  profCtrl -> portCtrl [style=invis, weight=5];
+  { rank=same; bldCtrl; impCtrl; }
+  bldCtrl -> impCtrl [style=invis, weight=5];
+  { rank=same; bldRepo; impSvc; }
+  bldRepo -> impSvc [style=invis, weight=5];
+  { rank=same; iam; db; billing; }
+  iam -> db [style=invis, weight=5];
+  db -> billing [style=invis, weight=5];
+  admin -> spa [style=invis, weight=0];
+  spa -> profCtrl [style=invis, weight=0];
+  profCtrl -> bldCtrl [style=invis, weight=0];
+  bldCtrl -> bldRepo [style=invis, weight=0];
+  bldRepo -> iam [style=invis, weight=0];
+  admin -> spa [label=<Perfil y<br/>edificio>];
+  spa -> profCtrl [];
+  spa -> bldCtrl [label=<JSON/HTTPS>];
+  spa -> portCtrl [label=<Cambia o<br/>agrega<br/>edificios>];
+  spa -> impCtrl [label=<Sube el padrón<br/>(multipart)>];
+  impCtrl -> impSvc [];
+  bldCtrl -> bldRepo [label=<IUnitOfWork>];
+  profCtrl -> iam [label=<UpsertFirebase<br/>AdminCommand>];
+  bldCtrl -> iam [label=<Busca<br/>residentes>];
+  portCtrl -> iam [label=<Edificios y<br/>rol>];
+  impSvc -> iam [label=<CreateResident<br/>Command>];
+  bldCtrl -> billing [label=<LinkBuildingAsync>];
+  impSvc -> billing [label=<CheckRoster<br/>GrowthAsync>];
+  portCtrl -> billing [label=<Exige plan<br/>Portafolio>];
+  bldRepo -> db [label=<EF Core>];
+  profCtrl -> db [label=<profiles>];
+  portCtrl -> db [label=<Crea cuenta y<br/>edificio>];
+}

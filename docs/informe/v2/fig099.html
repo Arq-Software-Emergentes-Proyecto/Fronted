@@ -1,0 +1,60 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Mapa de tablas</title>
+<!-- Figura 99 (v2): mapa de tablas de TiDB Cloud por bounded context. Las columnas de cada tabla están en
+     los diagramas de base de datos por contexto del Capítulo V (Figs. 107, 110, 113, 116, 119, 122, 125, 128 y 131). -->
+<style>
+body{margin:0;background:#fff;font-family:"Liberation Sans",Arial,sans-serif;color:#111}
+#c{width:880px;padding:14px 16px 16px;box-sizing:border-box}
+h1{font-size:19px;margin:0 0 4px;text-align:center}
+.sub{font-size:15px;text-align:center;margin:0 0 10px;color:#333}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.card{border:1.6px solid;border-radius:9px;padding:7px 9px 9px;font-size:15px}
+.card h2{font-size:16px;margin:0 0 4px}
+.card h2 span{font-weight:normal;font-size:14px}
+.core{background:#E3F2EF;border-color:#0F5E57}.core h2{color:#0F5E57}
+.sup{background:#E8EDF7;border-color:#1F3864}.sup h2{color:#1F3864}
+.gen{background:#F1F2F4;border-color:#4B5563}.gen h2{color:#374151}
+.fk{font-size:14px;margin:0 0 6px;padding:2px 6px;border-radius:5px;background:#fff;border:1px solid #888;display:inline-block}
+.fk.no{border-style:dashed}
+.t{display:inline-block;background:#fff;border:1.4px solid #4B5563;border-radius:6px;padding:2px 6px;margin:2px 3px 2px 0;font-size:15px}
+.t.d{border-style:dashed}
+.t.b{font-weight:bold;border-width:2.4px}
+.rel{font-size:14px;margin:5px 0 0;line-height:1.35}
+.rel b{font-weight:bold}
+.wide{grid-column:span 2}
+.note{grid-column:span 3;background:#FFFDE7;border:1px solid #8A8A8A;border-radius:6px;padding:7px 10px;font-size:14px;line-height:1.4}
+.arrow{font-weight:bold}
+</style></head><body><div id="c">
+<h1>Base de datos TiDB Cloud: mapa de tablas por bounded context</h1>
+<p class="sub">Tabla con borde continuo: owner_admin_id con FK a users.id · borde punteado: sin esa FK · → clave foránea · ⇢ referencia por id sin FK</p>
+<div class="grid">
+ <div class="card gen"><h2>1. IAM <span>(genérico)</span></h2>
+  <span class="t b">users</span><span class="t">building_members</span><span class="t">member_invitations</span>
+  <div class="rel">users → users (<b>owner_admin_id</b>, parent_admin_id)<br>building_members → users (owner_admin_id, user_id)<br>member_invitations → users (owner_admin_id)</div></div>
+ <div class="card sup"><h2>2. Profiles <span>(soporte)</span></h2>
+  <span class="t">buildings</span><span class="t">profiles</span>
+  <div class="rel">buildings → users (owner_admin_id)<br>profiles → users (user_external_id → users.external_id)</div></div>
+ <div class="card gen"><h2>4. Billing <span>(genérico)</span></h2>
+  <span class="t">subscriptions</span><span class="t">subscription_checkouts</span><span class="t">subscription_payments</span>
+  <div class="rel">las 3 tablas → users (owner_admin_id)<br>subscription_checkouts ⇢ subscription_payments (checkout_external_id)</div></div>
+ <div class="card sup wide"><h2>3. Finances <span>(soporte)</span></h2>
+  <span class="t">fees</span><span class="t">payments</span><span class="t">receipts</span><span class="t">finance_settings</span><span class="t">kpi_records</span><span class="t">admin_management_expenses</span><span class="t">shared_utility_services</span><span class="t">fixed_payout_recipients</span><span class="t d">maintenance_checkouts</span><span class="t d">resident_extra_charges</span>
+  <div class="rel">8 de 10 tablas → users (owner_admin_id); maintenance_checkouts guarda owner_admin_id INT sin FK y resident_extra_charges los ids externos como texto<br>fees ⇢ payments (fee_external_id)</div></div>
+ <div class="card sup"><h2>5. Social Spaces <span>(soporte)</span></h2>
+  <span class="t">social_spaces</span><span class="t">reservations</span>
+  <div class="rel">las 2 tablas → users (owner_admin_id)<br>social_spaces ⇢ reservations (space_external_id)</div></div>
+ <div class="card core"><h2>6. Incidents <span>(core)</span></h2>
+  <span class="t">incidents</span><span class="t">incident_events</span><span class="t d">service_providers</span>
+  <div class="rel">incidents → users (owner_admin_id)<br>incident_events → incidents (incident_id)<br>service_providers ⇢ incidents (assignee_id)<br>service_providers ⇢ users (owner_admin_id = external_id)</div></div>
+ <div class="card sup"><h2>7. Communications <span>(soporte)</span></h2>
+  <span class="t">announcements</span><span class="t d">import_folders</span><span class="t d">import_uploads</span>
+  <div class="rel">announcements → users (owner_admin_id)<br>import_folders ⇢ import_uploads (folder_id)<br>import_uploads ⇢ import_uploads (supersedes_id)</div></div>
+ <div class="card core"><h2>8. Resident Care <span>(core)</span></h2>
+  <span class="t d">support_chats</span><span class="t d">support_messages</span><span class="t d">ai_context_chunks</span><span class="t d">ai_usages</span><span class="t d">resident_ai_usages</span>
+  <div class="rel">support_messages → support_chats (chat_id, ON DELETE CASCADE)<br>support_chats ⇢ support_chats (linked_chat_id)</div></div>
+ <div class="card sup"><h2>9. Team <span>(soporte)</span></h2>
+  <span class="t d">team_workers</span><span class="t d">maintenance_tasks</span><span class="t d">shifts</span>
+  <div class="rel">team_workers ⇢ maintenance_tasks (staff_id)<br>team_workers ⇢ shifts (staff_id)</div></div>
+ <div class="card wide" style="border:1.6px dashed #999;background:#fff"><h2 style="color:#333">Leyenda</h2>
+  <div class="rel" style="margin:0"><span style="color:#0F5E57">■</span> core · <span style="color:#1F3864">■</span> soporte · <span style="color:#4B5563">■</span> genérico<br><b>users</b> (IAM): cuenta del condominio; owner_admin_id la referencia desde los demás contextos.</div></div>
+ <div class="note">Vista resumida: solo nombres de tabla y relaciones. Las columnas, tipos, claves e índices de cada tabla se detallan en los diagramas de base de datos por contexto del Capítulo V (Figs. 107, 110, 113, 116, 119, 122, 125, 128 y 131). En las tablas con borde punteado, owner_admin_id es VARCHAR(128) con el external_id del condominio, sin FK (salvo maintenance_checkouts: INT sin FK). resident_ai_usages la crea SchemaUpgrade (SQL), sin entidad EF.</div>
+</div></div></body></html>

@@ -1,0 +1,194 @@
+/* ── Unified confirm / cancel actions (BuildingFex) ── */
+
+/* Ventanas: la tarjeta entra desde abajo y se desliza hasta su lugar; al cerrar baja y sale. */
+@keyframes bf-dialog-in {
+  from {
+    transform: translate3d(0, calc(50vh + 60%), 0);
+  }
+}
+
+@keyframes bf-dialog-out {
+  to {
+    transform: translate3d(0, calc(50vh + 60%), 0);
+  }
+}
+
+@keyframes bf-mask-in {
+  from {
+    background-color: transparent;
+    backdrop-filter: blur(0);
+  }
+}
+
+@keyframes bf-mask-out {
+  to {
+    background-color: transparent;
+    backdrop-filter: blur(0);
+  }
+}
+
+@keyframes bf-spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.bf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.625rem;
+  width: 100%;
+}
+
+.bf-actions--center {
+  justify-content: center;
+}
+
+.bf-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 2.125rem;
+  padding: 0.3rem 1.15rem;
+  border: 1px solid transparent;
+  border-radius: var(--apple-radius-pill);
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.bf-btn:focus-visible {
+  outline: var(--apple-focus-ring);
+  outline-offset: var(--apple-focus-ring-offset);
+}
+
+.bf-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.bf-btn:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.bf-btn:not(:disabled):active {
+  transform: translateY(0) scale(0.97);
+  transition-duration: 0.08s;
+}
+
+.bf-btn--cancel {
+  background: var(--apple-bg);
+  color: var(--apple-text);
+  border-color: var(--apple-border-hairline);
+}
+
+.bf-btn--cancel:not(:disabled):hover {
+  background: var(--apple-bg-secondary);
+  border-color: rgba(0, 0, 0, 0.14);
+}
+
+.bf-btn--confirm {
+  background: var(--apple-blue);
+  border-color: var(--apple-blue);
+  color: #ffffff;
+}
+
+.bf-btn--confirm:not(:disabled):hover {
+  background: var(--apple-blue-hover);
+  border-color: var(--apple-blue-hover);
+}
+
+.bf-btn--danger {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #ffffff;
+}
+
+.bf-btn--danger:not(:disabled):hover {
+  background: #c81e1e;
+  border-color: #c81e1e;
+}
+
+.bf-btn__spinner {
+  width: 0.875rem;
+  height: 0.875rem;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: bf-spinner 0.65s linear infinite;
+  flex-shrink: 0;
+}
+
+.bf-btn--cancel .bf-btn__spinner {
+  border-color: rgba(0, 0, 0, 0.12);
+  border-top-color: var(--apple-text);
+}
+
+/*
+ * PrimeVue Dialog / ConfirmDialog. Reemplaza las animaciones propias de PrimeVue (no se suman:
+ * dos animaciones seguidas hacían que la ventana apareciera, desapareciera y volviera a entrar).
+ * Clases dobles para ganarle al CSS del tema, que se inserta después.
+ */
+.p-dialog.p-dialog-enter-active {
+  animation: bf-dialog-in 0.62s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+.p-dialog.p-dialog-leave-active {
+  animation: bf-dialog-out 0.36s cubic-bezier(0.5, 0, 0.75, 0) both;
+}
+
+.p-dialog-mask.p-overlay-mask {
+  backdrop-filter: blur(3px);
+}
+
+.p-dialog-mask.p-overlay-mask.p-overlay-mask-enter-active {
+  animation: bf-mask-in 0.38s ease both;
+}
+
+.p-dialog-mask.p-overlay-mask.p-overlay-mask-leave-active {
+  animation: bf-mask-out 0.3s ease both;
+}
+
+.p-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0;
+  padding-top: 0.25rem;
+}
+
+.p-dialog-footer .bf-actions {
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .p-dialog.p-dialog-enter-active,
+  .p-dialog.p-dialog-leave-active,
+  .p-dialog-mask.p-overlay-mask.p-overlay-mask-enter-active,
+  .p-dialog-mask.p-overlay-mask.p-overlay-mask-leave-active {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+  }
+
+  .bf-btn:not(:disabled):hover,
+  .bf-btn:not(:disabled):active {
+    transform: none;
+  }
+
+}

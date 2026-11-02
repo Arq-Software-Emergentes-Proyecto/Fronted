@@ -1,0 +1,78 @@
+digraph G {
+  graph [rankdir=TB, newrank=true, splines=true, nodesep=0.06, ranksep=0.32, fontname="Liberation Sans", fontsize=15, pad="0.08", outputorder=edgesfirst];
+  node [fontname="Liberation Sans", fontsize=14, margin="0.10,0.06", penwidth=0];
+  edge [fontname="Liberation Sans", fontsize=14, color="#666666", fontcolor="#333333", arrowsize=0.7, penwidth=1.1];
+  labelloc=t; label=<<b>BuildingFex.Api - bounded context Finances (azul claro:<br/>componentes; gris: otros módulos e infraestructura)</b>>;
+  spa [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>BuildingFex Web<br/>SPA</b></font><br/><i>[Vue 3]</i><br/>Interfaz para<br/>administradores,<br/>junta directiva y<br/>residentes.>];
+  jobs [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>Función de jobs</b></font><br/><i>[AWS Lambda +<br/>EventBridge<br/>Scheduler]</i><br/>Job<br/>monthly-billing:<br/>diario a las 06:15<br/>(Lima).>];
+  mp [shape=box, style="rounded,filled", fillcolor="#999999", fontcolor="white", label=<<font point-size="15"><b>Mercado Pago</b></font><br/>Checkout Pro, API<br/>de pagos y<br/>webhooks.>];
+  opsCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>FinanceOperations<br/>Controller</b></font><br/><i>[REST Controller]</i><br/>/api/v1/finances:<br/>receipts/generate,<br/>billing-alerts,<br/>payment-calendar,<br/>PDF de pago y de<br/>recibo, balance.>];
+  dashCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>DashboardController</b></font><br/><i>[REST Controller]</i><br/>GET<br/>/api/v1/finances/kpi.>];
+  mpCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>MercadoPagoController</b></font><br/><i>[REST Controller]</i><br/>/api/v1/payments:<br/>config,<br/>preference,<br/>checkout, confirm,<br/>process y webhook<br/>(x-signature).>];
+  compat [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>Controladores<br/>Compat</b></font><br/><i>[REST Controllers]</i><br/>9 controladores<br/>con rutas<br/>json-server<br/>(/fees, /receipts,<br/>/financeSettings…):<br/>cuotas, pagos,<br/>recibos,<br/>configuración,<br/>KPI, gastos y<br/>cargos extra.>];
+  worker [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>MonthlyBillingWorker</b></font><br/><i>[Background Job: solo<br/>fuera de Lambda<br/>(local)]</i><br/>Ejecuta la<br/>facturación de<br/>todos los<br/>condominios una<br/>vez al día.>];
+  bill [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>MonthlyBillingService</b></font><br/><i>[Application Service]</i><br/>Emite<br/>(idempotente) los<br/>recibos del mes<br/>según<br/>FinanceSetting;<br/>alertas de<br/>facturación.>];
+  qs [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>Servicios de<br/>consulta</b></font><br/><i>[Application Services]</i><br/>AccountStatus,<br/>PaymentCalendar y<br/>Dashboard<br/>QueryService.>];
+  rds [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ReceiptDocumentService</b></font><br/><i>[Application Service]</i><br/>Comprobante PDF de<br/>un pago o de un<br/>recibo pagado.>];
+  mps [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>MercadoPagoService</b></font><br/><i>[Application Service]</i><br/>Checkout Pro, pago<br/>con tarjeta y<br/>conciliación<br/>idempotente.>];
+  pdf [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>SimpleReceiptPdfRenderer</b></font><br/><i>[Adapter]</i><br/>Implementa<br/>IReceiptPdfRenderer<br/>(PDF 1.4).>];
+  dm [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>Domain Model</b></font><br/><i>[Domain Layer]</i><br/>10 agregados (Fee,<br/>Payment, Receipt,<br/>FinanceSetting,<br/>MaintenanceCheckout…);<br/>Money, Period,<br/>MonthlyCharge;<br/>DelinquencyPolicy<br/>(Fig. 112).>];
+  repo [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>Repositorios EF<br/>Core</b></font><br/><i>[Repository (EF Core)]</i><br/>Un repositorio por<br/>agregado (9;<br/>ResidentExtraCharge<br/>no tiene).>];
+  social [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Social<br/>Spaces</b></font><br/><i>[BuildingFex.Api]</i><br/>FinancesAccountStatusAcl:<br/>regla de reservas<br/>para morosos.>];
+  billing [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Billing</b></font><br/><i>[BuildingFex.Api]</i><br/>Usa<br/>MercadoPagoService;<br/>activa el plan<br/>pagado.>];
+  iam [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulos IAM y<br/>Profiles</b></font><br/><i>[BuildingFex.Api]</i><br/>IUserRepository,<br/>CallerContextAccessor<br/>e<br/>IBuildingRepository.>];
+  dbctx [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>AppDbContext</b></font><br/><i>[Infraestructura<br/>compartida (EF Core)]</i><br/>DbContext único de<br/>BuildingFex.Api.>];
+  db [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>TiDB Cloud</b></font><br/><i>[MySQL compatible]</i><br/>Las 10 tablas de<br/>Finances (Fig.<br/>113).>];
+  { rank=same; spa; jobs; mp; }
+  spa -> jobs [style=invis, weight=5];
+  jobs -> mp [style=invis, weight=5];
+  { rank=same; compat; opsCtrl; dashCtrl; mpCtrl; }
+  compat -> opsCtrl [style=invis, weight=5];
+  opsCtrl -> dashCtrl [style=invis, weight=5];
+  dashCtrl -> mpCtrl [style=invis, weight=5];
+  { rank=same; worker; bill; qs; mps; }
+  worker -> bill [style=invis, weight=5];
+  bill -> qs [style=invis, weight=5];
+  qs -> mps [style=invis, weight=5];
+  { rank=same; social; rds; dm; billing; }
+  social -> rds [style=invis, weight=5];
+  rds -> dm [style=invis, weight=5];
+  dm -> billing [style=invis, weight=5];
+  { rank=same; repo; pdf; iam; }
+  repo -> pdf [style=invis, weight=5];
+  pdf -> iam [style=invis, weight=5];
+  { rank=same; dbctx; }
+  { rank=same; db; }
+  spa -> compat [style=invis, weight=0];
+  compat -> worker [style=invis, weight=0];
+  worker -> social [style=invis, weight=0];
+  social -> repo [style=invis, weight=0];
+  repo -> dbctx [style=invis, weight=0];
+  dbctx -> db [style=invis, weight=0];
+  spa -> opsCtrl [label=<JSON/HTTPS>];
+  spa -> dashCtrl [];
+  spa -> mpCtrl [];
+  spa -> compat [];
+  jobs -> bill [label=<monthly-billing>];
+  worker -> bill [];
+  opsCtrl -> bill [label=<Genera recibos>];
+  opsCtrl -> qs [label=<Consulta>];
+  opsCtrl -> rds [label=<PDF>];
+  dashCtrl -> qs [label=<KPI>];
+  mpCtrl -> mps [label=<Preferencia,<br/>confirmación y<br/>webhook>];
+  compat -> repo [label=<Lee y persiste>];
+  bill -> dm [label=<Receipt.Create<br/>Monthly>];
+  mps -> dm [label=<Reglas>];
+  mps -> repo [label=<Persiste>];
+  rds -> pdf [label=<Render>];
+  bill -> dbctx [];
+  qs -> dbctx [];
+  rds -> dbctx [];
+  repo -> dbctx [label=<EF Core>];
+  dbctx -> db [label=<MySQL>];
+  mp -> mps [dir=back, label=<Preferencias y<br/>pagos (SDK,<br/>HTTPS)>];
+  mp -> mpCtrl [label=<Webhook<br/>firmado<br/>(x-signature)>];
+  mps -> billing [label=<Activa la<br/>suscripción>];
+  qs -> social [dir=back, label=<Consulta<br/>morosidad>];
+  mps -> iam [label=<Residentes y<br/>condominio>];
+}

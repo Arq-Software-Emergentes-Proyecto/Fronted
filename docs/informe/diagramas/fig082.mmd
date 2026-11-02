@@ -1,0 +1,23 @@
+sequenceDiagram
+  autonumber
+  actor A as Titular de la cuenta
+  actor R as Residente
+  box rgb(220,227,238) Bounded contexts
+    participant B as Billing
+    participant P as Profiles
+    participant RC as Resident Care
+  end
+  participant MP as Mercado Pago<br/>(externo, vía ACL)
+  A->>B: ContratarPlan (por ejemplo, Standard o Portafolio)
+  B->>MP: Crear preferencia de pago del periodo<br/>(Checkout Pro)
+  MP-->>B: Pago aprobado (webhook o consulta)
+  B->>B: SuscripciónActivada<br/>(PlanContratado)
+  Note over B: En Portafolio la suscripción es de toda la cuenta:<br/>se cobra por departamento y cubre todos sus edificios
+  A->>P: ImportarPadrón (Excel o CSV)
+  P->>B: Consultar límite de<br/>departamentos del plan
+  B-->>P: Límite de departamentos
+  R->>RC: Consulta sobre el reglamento
+  RC->>B: Consultar tope de consultas de IA<br/>(PlanQuotaClient)
+  B-->>RC: Tope mensual del plan<br/>(en Portafolio, compartido por los edificios)
+  RC->>RC: Contar consultas del<br/>mes frente al tope
+  RC->>R: Respuesta con IA, o derivación a la junta<br/>si se alcanzó el tope

@@ -1,0 +1,7 @@
+' Estilo común para TODOS los diagramas C4 del informe (mismo look que las Figuras 88 y 105 originales)
+HIDE_STEREOTYPE()
+skinparam dpi 200
+skinparam defaultFontName "DejaVu Sans"
+skinparam shadowing false
+skinparam ArrowColor #666666
+skinparam wrapWidth 260

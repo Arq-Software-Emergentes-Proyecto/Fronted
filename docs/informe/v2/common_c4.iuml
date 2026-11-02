@@ -1,0 +1,15 @@
+' Estilo común v2 (legibilidad en A4): todos los textos >= 14 px base.
+' Incluir DESPUÉS de !include <C4/...>; antes del include C4 poner: !$TECHN_FONT_SIZE = 14
+HIDE_STEREOTYPE()
+skinparam defaultFontName "Liberation Sans"
+skinparam defaultFontSize 14
+skinparam shadowing false
+skinparam ArrowColor #666666
+skinparam arrow {
+  FontSize 14
+  FontColor #444444
+}
+skinparam wrapWidth 190
+skinparam nodesep 22
+skinparam ranksep 26
+skinparam padding 2

@@ -1,0 +1,56 @@
+@startuml
+skinparam dpi 200
+skinparam defaultFontName "DejaVu Sans"
+skinparam shadowing false
+hide circle
+hide methods
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+title Bounded Context IAM - Database Design (TiDB Cloud · compatible con MySQL)
+
+entity users {
+  * id : CHAR(36) «PK»
+  --
+  email : VARCHAR(160) «UQ»
+  role : VARCHAR(20)
+  owner_admin_id : CHAR(36) «FK»
+  identity_provider : VARCHAR(20)
+  external_id : VARCHAR(128) «UQ»
+  status : VARCHAR(20)
+  created_at : DATETIME
+  parent_admin_id : CHAR(36) «FK»
+  account_kind : VARCHAR(20)
+}
+
+entity building_members {
+  * id : CHAR(36) «PK»
+  --
+  owner_admin_id : CHAR(36) «FK»
+  user_id : CHAR(36) «FK»
+  role : VARCHAR(20)
+  created_at : DATETIME
+}
+
+entity member_invitations {
+  * id : CHAR(36) «PK»
+  --
+  owner_admin_id : CHAR(36) «FK»
+  email : VARCHAR(160)
+  name : VARCHAR(120)
+  role : VARCHAR(20)
+  token : CHAR(64) «UQ»
+  invited_by_id : CHAR(36) «FK»
+  expires_at : DATETIME
+  accepted_at : DATETIME
+  revoked_at : DATETIME
+  created_at : DATETIME
+}
+
+users "1   " -- "   0..*" users : administra
+users "1" -- "0..*" building_members : es miembro
+users "1" -- "0..*" member_invitations : invita
+@enduml

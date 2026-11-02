@@ -1,0 +1,168 @@
+@startuml
+!include common_class.iuml
+title Bounded Context Finances - Domain Layer (3 de 3: configuración, gastos, KPI y cargos)
+left to right direction
+hide empty members
+
+
+class Receipt <<Aggregate Root>> #F2F2F2 {
+  .. detalle en la otra parte ..
+}
+
+
+
+
+
+class FinanceSetting <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -baseMonthlyExpense : decimal
+  -lateFeeRate : decimal
+  -lateFeePerDay : decimal
+  -admissionPayFromDay : int
+  -admissionPayToDay : int
+  -monthlyChargesJson : string
+  -restrictReservationsWhenDelinquent : bool
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...): FinanceSetting
+  +Patch(...): void
+  +PatchBillingRules(...): void
+  +SetReservationRestriction(restrict?): void
+  +GetMonthlyCharges(...)
+  +FindCharge(month): MonthlyCharge?
+}
+
+class MonthlyCharge <<Value Object>> {
+  -id : string
+  -month : string
+  -amount : decimal
+  -billingStart : string
+  -billingEnd : string
+  -paymentOpen : string
+  -paymentDue : string
+  --
+  +{static} Normalize(...): MonthlyCharge?
+  +{static} ParseList(...)
+  +{static} ToJson(charges): string
+  +IsBillable : bool {derivada}
+}
+
+class Period <<Value Object>> {
+  -year : int
+  -month : int
+  --
+  +{static} FromDate(date): Period
+  +{static} TryParse(value, out period): bool
+  +{static} Normalize(value): string?
+  +Next(): Period
+  +Previous(): Period
+  +AddMonths(delta): Period
+  +Key : string {derivada}
+}
+
+class Money <<Value Object>> {
+  -amount : decimal
+  -currency : string = "PEN"
+  --
+  +{static} Of(amount): Money
+  +Add(other): Money
+  +IsPositive(): bool
+}
+
+class AdminManagementExpense <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -name : string
+  -amount : decimal
+  -purchaseDate : string
+  -invoicePhotoUrl : string
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...)
+}
+
+class SharedUtilityService <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -type : string
+  -amount : decimal
+  -month : string?
+  -residentCount : int?
+  -perResidentShare : decimal?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...): SharedUtilityService
+}
+
+class FixedPayoutRecipient <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -name : string
+  -dni : string
+  -phone : string
+  -salary : decimal
+  -intervalDays : int
+  -nextPaymentDate : string
+  -photoUrl : string
+  -paymentHistoryJson : string
+  -createdAtIso : string?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...): FixedPayoutRecipient
+  +ReplaceFrom(...): void
+}
+
+class KpiRecord <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -totalResidents : int
+  -occupiedUnits : int
+  -emptyUnits : int
+  -totalDebt : decimal
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...): KpiRecord
+}
+
+class ResidentExtraCharge <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : string
+  -residentId : string
+  -title : string
+  -amount : decimal
+  -description : string
+  -createdAt : DateTimeOffset
+  --
+  +{static} Create(...): ResidentExtraCharge
+}
+
+
+
+
+
+
+FinanceSetting "1" *-[norank]- "0..*" MonthlyCharge : monthlyChargesJson
+Receipt .[norank].> MonthlyCharge : CreateMonthly
+Receipt .[norank].> Period : billingMonth
+FinanceSetting .[norank].> Period : FindCharge
+' --- columnas (aristas ocultas); relaciones con [norank]
+AdminManagementExpense -[hidden]- FinanceSetting
+AdminManagementExpense -[hidden]- KpiRecord
+AdminManagementExpense -[hidden]- ResidentExtraCharge
+FinanceSetting -[hidden]- Receipt
+FinanceSetting -[hidden]- MonthlyCharge
+FinanceSetting -[hidden]- Period
+FinanceSetting -[hidden]- Money
+@enduml

@@ -1,0 +1,49 @@
+@startuml
+skinparam dpi 200
+skinparam defaultFontName "DejaVu Sans"
+skinparam shadowing false
+hide circle
+hide methods
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+title Bounded Context Profiles - Database Design (TiDB Cloud · compatible con MySQL)
+
+entity buildings {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  owner_admin_id : INT «FK, IDX»
+  name : VARCHAR(200)
+  address : VARCHAR(500)
+  department_count : INT
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+}
+
+entity profiles {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  user_external_id : VARCHAR(128) «FK, UQ»
+  name : VARCHAR(200)
+  email : VARCHAR(320)
+  dni : VARCHAR(50)
+  address : VARCHAR(500)
+  company : VARCHAR(200)
+  ruc : VARCHAR(20)
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+}
+
+entity "users (IAM)" as users #F2F2F2 {
+  * id : INT «PK»
+  --
+  external_id : VARCHAR(128) «UQ»
+  ...
+}
+
+users "1" -- "0..*" buildings : owner_admin_id → users.id\n(ON DELETE CASCADE)
+users "1" -- "0..1" profiles : user_external_id → users.external_id\n(ON DELETE CASCADE)
+@enduml

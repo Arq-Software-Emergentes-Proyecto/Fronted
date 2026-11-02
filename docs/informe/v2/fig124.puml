@@ -1,0 +1,134 @@
+@startuml
+!include common_class.iuml
+left to right direction
+hide empty members
+title Bounded Context Communications - Domain Layer
+
+class Announcement <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -title : string
+  -body : string
+  -priority : string
+  -duration : int
+  -authorName : string
+  -status : string
+  -publishedAt : DateTimeOffset?
+  -expiresAt : DateTimeOffset?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...)
+  +Update(...): void
+  +IsActive(now): bool
+  +EffectiveStatus(now): string
+  +{static} IsValidDuration(...)
+}
+
+interface IAnnouncementRepository <<Repository>> {
+  +FindByExternalIdAsync(...)
+  +ListByOwnerAdminIdAsync(...)
+  +AnyAnnouncementsAsync(): bool
+}
+
+enum AnnouncementPriorities <<constantes>> {
+  normal
+  important
+  urgent
+}
+
+enum AnnouncementStatuses <<constantes>> {
+  draft
+  published
+  archived
+  expired [derivado de expiresAt]
+}
+
+class ImportUpload <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : string
+  -fileName : string
+  -mimeType : string
+  -size : long
+  -storagePath : string
+  -downloadUrl : string
+  -dataUrl : string
+  -folderId : string?
+  -uploadStatus : string
+  -indexingStatus : string
+  -indexingError : string?
+  -uploadedAt : DateTimeOffset
+  -documentType : string
+  -version : int
+  -publishedAt : DateTimeOffset?
+  -documentStatus : string
+  -supersedesId : string?
+  --
+  +IsCurrent : bool
+  +{static} CreatePending(...)
+  +Confirm(needsIndexing): void
+  +Patch(fileName, folderId): void
+  +SetIndexingStatus(...): void
+  +SetDocumentType(...): void
+  +Publish(...): void
+  +Supersede(): void
+  +Archive(): void
+}
+
+class ImportFolder <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : string
+  -name : string
+  -isHome : bool
+  -isContext : bool
+  -createdAt : DateTimeOffset
+  --
+  +{static} Create(...)
+  +Patch(...): void
+}
+
+enum OfficialDocumentType <<constantes>> {
+  REGULATION
+  MINUTES
+  OTHER
+}
+
+enum OfficialDocumentStatus <<constantes>> {
+  PENDING_UPLOAD
+  PUBLISHED
+  SUPERSEDED
+  ARCHIVED
+}
+
+enum ImportUploadStatus <<constantes>> {
+  pending_upload
+  confirmed
+}
+
+enum ImportIndexingStatus <<constantes>> {
+  none
+  pending
+  indexing
+  done
+  failed
+}
+
+IAnnouncementRepository .[norank].> "*" Announcement : persiste
+Announcement "*" -[norank]-> "1" AnnouncementPriorities : priority
+Announcement "*" -[norank]-> "1" AnnouncementStatuses : status
+ImportFolder "0..1" <-[norank]- "*" ImportUpload : folderId
+ImportUpload "0..1" <-[norank]- "0..1" ImportUpload : supersedesId
+ImportUpload "*" -[norank]-> "1" OfficialDocumentType : documentType
+ImportUpload "*" -[norank]-> "1" OfficialDocumentStatus : documentStatus
+ImportUpload "*" -[norank]-> "1" ImportUploadStatus : uploadStatus
+ImportUpload "*" -[norank]-> "1" ImportIndexingStatus : indexingStatus
+' --- disposición en columnas (aristas ocultas); las relaciones usan [norank]
+IAnnouncementRepository -[hidden]- ImportUpload
+ImportUpload -[hidden]- OfficialDocumentType
+ImportUpload -[hidden]- OfficialDocumentStatus
+ImportUpload -[hidden]- ImportUploadStatus
+ImportUpload -[hidden]- ImportIndexingStatus
+@enduml

@@ -1,0 +1,39 @@
+digraph CM {
+  rankdir=LR; splines=true; forcelabels=true; nodesep=0.5; ranksep=1.0; pad=0.2; dpi=200;
+  node [shape=box, style=filled, fontname="Liberation Serif", fontsize=21, color="#1F3864", penwidth=1, width=2.6, height=1.0, margin="0.15,0.08"];
+  edge [color="#1F3864", fontname="Liberation Serif", fontsize=19, arrowsize=0.8, penwidth=1.2];
+  MP  [label=<Mercado Pago<br/><i>externo</i>>, fillcolor=white, color="#999999", style="dashed"];
+  IA  [label=<Proveedor de IA -<br/>Gemini<br/><i>externo</i>>, fillcolor=white, color="#999999", style="dashed"];
+  GO  [label=<Google OAuth<br/><i>externo</i>>, fillcolor=white, color="#999999", style="dashed"];
+  IAM [label=<IAM<br/><i>generic</i>>, fillcolor="#F2F2F2", color="#999999"];
+  BIL [label=<Billing<br/><i>generic</i>>, fillcolor="#F2F2F2", color="#999999"];
+  PRO [label=<Profiles<br/><i>supporting</i>>, fillcolor="#DCE3EE"];
+  FIN [label=<Finances<br/><i>supporting</i>>, fillcolor="#DCE3EE"];
+  SS  [label=<Social Spaces<br/><i>supporting</i>>, fillcolor="#DCE3EE"];
+  COM [label=<Communications<br/><i>supporting</i>>, fillcolor="#DCE3EE"];
+  TEAM[label=<Team<br/><i>supporting</i>>, fillcolor="#DCE3EE"];
+  INC [label=<<font color="white">Incidents<br/><i>core</i></font>>, fillcolor="#1F3864"];
+  RC  [label=<<font color="white">Resident Care<br/><i>core</i></font>>, fillcolor="#1F3864"];
+  node [shape=plaintext, style=filled, fillcolor="#F2F2F2", color="#F2F2F2", width=0, height=0, margin="0.06,0.03", fontsize=13];
+
+  { rank=same; GO -> MP -> IA [style=invis]; rankdir=TB; }
+  { rank=same; IAM -> BIL -> INC -> COM [style=invis]; }
+  { rank=same; PRO; TEAM; }
+  { rank=same; FIN; RC; }
+
+  MP  -> FIN [label=<<table border="0" cellborder="0" cellpadding="3" bgcolor="#F2F2F2"><tr><td>U: API / D: ACL</td></tr></table>>];
+  MP  -> BIL [label=<<table border="0" cellborder="0" cellpadding="3" bgcolor="#F2F2F2"><tr><td>U: API / D: ACL</td></tr></table>>];
+  GO  -> IAM [label=<<table border="0" cellborder="0" cellpadding="3" bgcolor="#F2F2F2"><tr><td>U: API OAuth / D: ACL</td></tr></table>>];
+  IA  -> INC [label=<<table border="0" cellborder="0" cellpadding="3" bgcolor="#F2F2F2"><tr><td>U: API / D: ACL</td></tr></table>>];
+  IA  -> RC  [label=<<table border="0" cellborder="0" cellpadding="3" bgcolor="#F2F2F2"><tr><td>U: API / D: ACL</td></tr></table>>];
+  IAM -> PRO [label=<<table border="0" cellborder="0" cellpadding="3" bgcolor="#F2F2F2"><tr><td>U: OHS + PL (JWT y edificio<br/>activo)/ D: todos los contextos</td></tr></table>>];
+  BIL -> PRO [label=<<table border="0" cellborder="0" cellpadding="3" bgcolor="#F2F2F2"><tr><td>C/S (límite de<br/>departamentos)</td></tr></table>>];
+  BIL -> RC  [label=<<table border="0" cellborder="0" cellpadding="3" bgcolor="#F2F2F2"><tr><td>C/S + PL (tope de IA,<br/>PlanQuotaClient)</td></tr></table>>];
+  PRO -> FIN [label=<<table border="0" cellborder="0" cellpadding="3" bgcolor="#F2F2F2"><tr><td>C/S</td></tr></table>>];
+  PRO -> RC  [label=<<table border="0" cellborder="0" cellpadding="3" bgcolor="#F2F2F2"><tr><td>C/S</td></tr></table>>];
+  PRO -> SS  [label=<<table border="0" cellborder="0" cellpadding="3" bgcolor="#F2F2F2"><tr><td>C/S</td></tr></table>>];
+  FIN -> SS  [label=<<table border="0" cellborder="0" cellpadding="3" bgcolor="#F2F2F2"><tr><td>C/S (estado<br/>de cuenta)</td></tr></table>>];
+  COM -> RC  [label=<<table border="0" cellborder="0" cellpadding="3" bgcolor="#F2F2F2"><tr><td>C/S + PL</td></tr></table>>];
+  INC -> RC  [label=<<table border="0" cellborder="0" cellpadding="3" bgcolor="#F2F2F2"><tr><td>C/S</td></tr></table>>];
+  INC -> TEAM[label=<<table border="0" cellborder="0" cellpadding="3" bgcolor="#F2F2F2"><tr><td>C/S</td></tr></table>>];
+}

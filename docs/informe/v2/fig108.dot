@@ -1,0 +1,57 @@
+digraph G {
+  graph [rankdir=TB, newrank=true, splines=true, nodesep=0.12, ranksep=0.32, fontname="Liberation Sans", fontsize=15, pad="0.08", outputorder=edgesfirst];
+  node [fontname="Liberation Sans", fontsize=14, margin="0.10,0.06", penwidth=0];
+  edge [fontname="Liberation Sans", fontsize=14, color="#666666", fontcolor="#333333", arrowsize=0.7, penwidth=1.1];
+  labelloc=t; label=<<b>BuildingFex.Api - bounded context Profiles (azul claro:<br/>componentes; gris: otros módulos e infraestructura)</b>>;
+  spa [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>BuildingFex Web SPA</b></font><br/><i>[Vue 3]</i><br/>Interfaz para<br/>administradores,<br/>junta directiva y<br/>residentes. Envía<br/>X-Building-Id.>];
+  bldCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>BuildingsController</b></font><br/><i>[REST Controller]</i><br/>POST<br/>/api/v1/buildings,<br/>GET .../mine, GET y<br/>PUT .../{id}, GET<br/>.../{id}/residents.>];
+  profCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ProfilesController</b></font><br/><i>[REST Controller]</i><br/>POST<br/>/api/v1/profiles,<br/>GET .../me y GET<br/>.../{userId}.>];
+  impCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ResidentImportController</b></font><br/><i>[REST Controller]</i><br/>POST<br/>/api/v1/residents/import<br/>(Excel o CSV, todo<br/>o nada) y GET<br/>.../template.>];
+  portCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>PortfolioController</b></font><br/><i>[REST Controller]</i><br/>GET<br/>/api/v1/me/buildings;<br/>GET y POST<br/>/api/v1/portfolio/buildings.>];
+  imp [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ResidentRosterImportService</b></font><br/><i>[Application Service]</i><br/>Valida todas las<br/>filas y registra a<br/>los residentes en<br/>una sola<br/>transacción<br/>(RosterImportResult,<br/>RosterRowError).>];
+  xls [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ExcelRosterReader</b></font><br/><i>[Adapter]</i><br/>Lee en memoria el<br/>Excel o CSV<br/>(RosterSheet,<br/>RosterRawRow) y<br/>genera la<br/>plantilla.>];
+  dm [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>Domain Model</b></font><br/><i>[Domain Layer]</i><br/>Building, Profile;<br/>IBuildingRepository.>];
+  repo [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>BuildingRepository</b></font><br/><i>[Repository (EF Core)]</i><br/>IBuildingRepository<br/>sobre la tabla<br/>buildings.>];
+  iam [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo IAM</b></font><br/><i>[BuildingFex.Api]</i><br/>UserCommandService<br/>(CreateResident,<br/>UpsertFirebaseAdmin),<br/>UserQueryService,<br/>IUserRepository,<br/>CallerContextAccessor.>];
+  billing [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Billing</b></font><br/><i>[BuildingFex.Api]</i><br/>ISubscriptionService:<br/>límite del plan y<br/>vínculo del<br/>edificio con la<br/>suscripción.>];
+  dbctx [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>AppDbContext</b></font><br/><i>[Infraestructura<br/>compartida (EF Core)]</i><br/>DbContext único de<br/>BuildingFex.Api.>];
+  db [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>TiDB Cloud</b></font><br/><i>[MySQL compatible]</i><br/>buildings,<br/>profiles.>];
+  { rank=same; spa; }
+  { rank=same; bldCtrl; profCtrl; }
+  bldCtrl -> profCtrl [style=invis, weight=5];
+  { rank=same; dm; repo; portCtrl; }
+  dm -> repo [style=invis, weight=5];
+  repo -> portCtrl [style=invis, weight=5];
+  { rank=same; impCtrl; billing; }
+  impCtrl -> billing [style=invis, weight=5];
+  { rank=same; xls; imp; }
+  xls -> imp [style=invis, weight=5];
+  { rank=same; iam; dbctx; }
+  iam -> dbctx [style=invis, weight=5];
+  { rank=same; db; }
+  spa -> bldCtrl [style=invis, weight=0];
+  bldCtrl -> dm [style=invis, weight=0];
+  dm -> impCtrl [style=invis, weight=0];
+  impCtrl -> xls [style=invis, weight=0];
+  xls -> iam [style=invis, weight=0];
+  iam -> db [style=invis, weight=0];
+  spa -> bldCtrl [label=<JSON/HTTPS>];
+  spa -> profCtrl [];
+  spa -> impCtrl [];
+  spa -> portCtrl [];
+  bldCtrl -> dm [label=<Register /<br/>Update>];
+  bldCtrl -> repo [label=<Lee y persiste>];
+  bldCtrl -> iam [label=<Residentes del<br/>edificio>];
+  bldCtrl -> billing [label=<LinkBuilding<br/>Async>];
+  profCtrl -> iam [label=<UpsertFirebase<br/>AdminCommand>];
+  profCtrl -> dbctx [label=<profiles>];
+  impCtrl -> xls [label=<Lee el archivo>];
+  impCtrl -> imp [label=<ImportAsync>];
+  imp -> iam [label=<CreateResident<br/>Command>];
+  billing -> imp [dir=back, label=<CheckRoster<br/>GrowthAsync>];
+  imp -> dbctx [label=<Transacción>];
+  portCtrl -> iam [label=<Edificios y<br/>rol>];
+  portCtrl -> dbctx [label=<buildings y<br/>cuentas del<br/>Portafolio>];
+  repo -> dbctx [label=<EF Core>];
+  dbctx -> db [label=<MySQL>];
+}

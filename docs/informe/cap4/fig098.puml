@@ -1,0 +1,497 @@
+@startuml
+scale 1.55
+set separator none
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam packageStyle rectangle
+skinparam roundCorner 8
+skinparam nodesep 40
+skinparam ranksep 50
+hide circle
+hide stereotype
+hide methods
+skinparam class {
+  BackgroundColor #FFFFFF
+  FontColor #FFFFFF
+  FontStyle bold
+  FontSize 14
+  AttributeFontSize 13
+  AttributeFontColor #222222
+  ArrowColor #222222
+}
+skinparam class<<sup>> {
+  FontColor #FFFFFF
+  StereotypeFontColor #FFFFFF
+  HeaderBackgroundColor #3B5BA5
+  BorderColor #1F3864
+}
+skinparam class<<core>> {
+  FontColor #FFFFFF
+  StereotypeFontColor #FFFFFF
+  HeaderBackgroundColor #1F8A80
+  BorderColor #0F5E57
+}
+skinparam class<<gen>> {
+  FontColor #FFFFFF
+  StereotypeFontColor #FFFFFF
+  HeaderBackgroundColor #6B7280
+  BorderColor #4B5563
+}
+skinparam package {
+  FontSize 15
+  FontStyle bold
+}
+skinparam package<<sup>> {
+  BackgroundColor #E8EDF7
+  BorderColor #1F3864
+  FontColor #1F3864
+}
+skinparam package<<core>> {
+  BackgroundColor #E3F2EF
+  BorderColor #0F5E57
+  FontColor #0F5E57
+}
+skinparam package<<gen>> {
+  BackgroundColor #F1F2F4
+  BorderColor #4B5563
+  FontColor #374151
+}
+skinparam legend {
+  BackgroundColor #F7F8FA
+  BorderColor #374151
+  FontSize 13
+}
+
+' ===== Fila 1 =====
+package "2. Profiles" <<sup>> {
+  class Profile <<sup>> {
+    **id**
+    --
+    <U+25C7> //userExternalId//
+    name
+    email
+    dni
+    company
+    ruc
+    address
+  }
+  class Building <<sup>> {
+    **id**
+    --
+    <U+25C7> //ownerAdminId//
+    name
+    address
+    departmentCount
+  }
+}
+
+package "1. IAM" <<gen>> {
+  class User <<gen>> {
+    **id · externalId**
+    --
+    <U+25C6> //ownerAdminId//
+    <U+25C6> //parentAdminId//
+    email
+    name
+    role
+    accountKind
+    accountStatus
+    authProvider
+    subscriptionPlanId
+    subscriptionPaidUntil
+    inviteToken
+  }
+  class BuildingMember <<gen>> {
+    **id**
+    --
+    <U+25C6> //ownerAdminId//
+    <U+25C6> //userId//
+    role
+    createdAt
+  }
+  class MemberInvitation <<gen>> {
+    **id · externalId**
+    --
+    <U+25C6> //ownerAdminId//
+    email
+    role
+    token
+    expiresAt
+    acceptedAt
+    revokedAt
+  }
+}
+
+package "4. Billing" <<gen>> {
+  class Subscription <<gen>> {
+    **id**
+    --
+    <U+25C7> //ownerAdminId//
+    planId
+    status
+    trialEndsAt
+    paidUntil
+    billedDepartments
+    failedCharges
+  }
+  class SubscriptionCheckout <<gen>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    planId
+    departmentCount
+    amount
+    status
+  }
+  class SubscriptionPayment <<gen>> {
+    **id**
+    --
+    <U+25C7> //ownerAdminId//
+    <U+25C6> //checkoutExternalId//
+    mpPaymentId
+    planId
+    amount
+    expectedAmount
+    status
+    paidUntil
+  }
+}
+
+package "8. Resident Care" <<core>> {
+  class SupportChat <<core>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    <U+25C7> //residentId//
+    <U+25C7> //incidentExternalId//
+    <U+25C6> //linkedChatId//
+    kind
+    source
+    topic
+    status
+    closedAt
+  }
+  class SupportMessage <<core>> {
+    **id · externalId**
+    --
+    <U+25C6> //chatId//
+    authorRole
+    body
+    citedDocumentId
+    createdAt
+  }
+  class AiContextChunk <<core>> {
+    **id**
+    --
+    <U+25C7> //ownerAdminId//
+    <U+25C7> //uploadExternalId//
+    chunkIndex
+    content
+    embeddingJson
+    embeddingModel
+  }
+  class AiUsage <<core>> {
+    **id**
+    --
+    <U+25C7> //ownerAdminId//
+    period
+    queryCount
+    filteredCount
+  }
+}
+
+package "6. Incidents" <<core>> {
+  class Incident <<core>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    <U+25C7> //residentExternalId//
+    <U+25C6> //assigneeId//
+    <U+25C7> //sourceChatId//
+    title
+    description
+    category
+    priority
+    status
+    aiSuggestedCategory
+    aiSuggestedPriority
+    escalatedAt
+    resolvedAt
+  }
+  class IncidentEvent <<core>> {
+    **id**
+    --
+    <U+25C6> //incidentId//
+    type
+    status
+    comment
+    authorRole
+    createdAt
+  }
+  class BuildingServiceProvider <<core>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    name
+    phone
+    specialty
+  }
+}
+
+' ===== Fila 2 =====
+package "3. Finances" <<sup>> {
+  class Fee <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    <U+25C7> //residentExternalId//
+    month
+    amount
+    dueDate
+    status
+  }
+  class Payment <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    <U+25C7> //residentExternalId//
+    <U+25C6> //feeExternalId//
+    amount
+    method
+    reference
+    paidAt
+  }
+  class Receipt <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    <U+25C7> //residentExternalId//
+    kind
+    billingMonth
+    amount
+    lateFee
+    extraCharges
+    dueDate
+    status
+  }
+  class MaintenanceCheckout <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    <U+25C7> //residentExternalId//
+    itemsJson
+    totalAmount
+    mpPaymentId
+    status
+    paidAt
+  }
+  class AdminManagementExpense <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    name
+    amount
+    purchaseDate
+    invoicePhotoUrl
+  }
+  class SharedUtilityService <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    type
+    month
+    amount
+    residentCount
+    perResidentShare
+  }
+  class FixedPayoutRecipient <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    name
+    dni
+    salary
+    intervalDays
+    nextPaymentDate
+  }
+  class ResidentExtraCharge <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    <U+25C7> //residentId//
+    title
+    amount
+    description
+  }
+  class FinanceSetting <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    baseMonthlyExpense
+    monthlyChargesJson
+    lateFeeRate
+    lateFeePerDay
+    restrictReservationsWhenDelinquent
+  }
+  class KpiRecord <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    totalResidents
+    occupiedUnits
+    emptyUnits
+    totalDebt
+  }
+}
+
+package "5. Social Spaces" <<sup>> {
+  class SocialSpace <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    name
+    description
+    capacity
+    maxReservationsPerDay
+    rules
+    status
+  }
+  class Reservation <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    <U+25C6> //spaceExternalId//
+    <U+25C7> //residentExternalId//
+    date
+    startTime
+    endTime
+    status
+    guestsJson
+    guestInviteToken
+  }
+}
+
+package "7. Communications" <<sup>> {
+  class Announcement <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    title
+    body
+    priority
+    status
+    duration
+    publishedAt
+    expiresAt
+  }
+  class ImportFolder <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    name
+    isHome
+    isContext
+  }
+  class ImportUpload <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    <U+25C6> //folderId//
+    <U+25C6> //supersedesId//
+    fileName
+    mimeType
+    size
+    storagePath
+    uploadStatus
+    indexingStatus
+    documentType
+    version
+    documentStatus
+  }
+}
+
+package "9. Team" <<sup>> {
+  class TeamWorker <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    name
+    dni
+    phone
+    position
+    salary
+    status
+  }
+  class MaintenanceTask <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    <U+25C6> //staffId//
+    <U+25C7> //incidentId//
+    description
+    status
+    scheduledFor
+    completedAt
+  }
+  class Shift <<sup>> {
+    **id · externalId**
+    --
+    <U+25C7> //ownerAdminId//
+    <U+25C6> //staffId//
+    startsAt
+    endsAt
+    notes
+  }
+}
+
+' ===== Relaciones =====
+Profile |o.left.|| User
+Building }o.left.|| User
+User ||.right.o| Subscription
+User ||--o{ User
+User ||--o{ BuildingMember : accede
+User ||--o{ MemberInvitation : invita
+SubscriptionCheckout ||--o{ SubscriptionPayment
+SupportChat *--o{ SupportMessage
+Incident *--o{ IncidentEvent
+BuildingServiceProvider |o--o{ Incident : asignado
+Fee ||--o{ Payment
+SocialSpace ||--o{ Reservation
+ImportFolder |o--o{ ImportUpload
+TeamWorker ||--o{ MaintenanceTask
+TeamWorker ||--o{ Shift
+
+' ===== Disposición =====
+Fee -[hidden]right- Receipt
+Receipt -[hidden]right- MaintenanceCheckout
+MaintenanceCheckout -[hidden]right- FinanceSetting
+FinanceSetting -[hidden]right- KpiRecord
+Payment -[hidden]right- AdminManagementExpense
+AdminManagementExpense -[hidden]right- SharedUtilityService
+SharedUtilityService -[hidden]right- FixedPayoutRecipient
+FixedPayoutRecipient -[hidden]right- ResidentExtraCharge
+MemberInvitation -[hidden]down- Fee
+User -[hidden]right- Profile
+Subscription -[hidden]right- AiContextChunk
+KpiRecord -[hidden]right- SocialSpace
+SocialSpace -[hidden]right- Announcement
+Announcement -[hidden]right- ImportFolder
+ImportFolder -[hidden]right- TeamWorker
+AiContextChunk -[hidden]right- BuildingServiceProvider
+
+legend bottom
+  <b><size:15>Enumeraciones (constantes de estado) y objetos de valor</size></b>
+  <#F7F8FA,#F7F8FA>|<b>role</b> (UserRoles): admin · board_member · resident · staff<U+2003><U+2003>|<b>accountStatus</b>: ACTIVE · DEACTIVATED<U+2003><U+2003>|<b>accountKind</b>: administrator · board|
+  <#F7F8FA,#F7F8FA>|<b>planId</b>: free · essential · standard · scale · portafolio<U+2003><U+2003>|<b>SubscriptionStatus</b>: TRIAL · ACTIVE · PAYMENT_FAILED · SUSPENDED · CANCELLED<U+2003><U+2003>|<b>PlanLimits «VO»</b>: maxDepartments · monthlyAiQueries|
+  <#F7F8FA,#F7F8FA>|<b>FeeStatus</b>: Pending · Paid · Overdue<U+2003><U+2003>|<b>PaymentMethod</b>: Mercado Pago · Voucher · Transferencia bancaria · Efectivo<U+2003><U+2003>|<b>Receipt.kind</b>: MONTHLY · EXTRA|
+  <#F7F8FA,#F7F8FA>|<b>Money «VO»</b>: amount · currency (PEN)<U+2003><U+2003>|<b>Period «VO»</b>: year · month;  <b>MonthlyCharge «VO»</b><U+2003><U+2003>|<b>ReservationStatus</b>: PENDING · CONFIRMED · CANCELLED|
+  <#F7F8FA,#F7F8FA>|<b>SocialSpaceStatus</b>: AVAILABLE · MAINTENANCE<U+2003><U+2003>|<b>GuestPassStatus</b>: VALID · NOT_YET_VALID · EXPIRED · CANCELLED · USED<U+2003><U+2003>|<b>TimeSlot «VO»</b>: date · start · end|
+  <#F7F8FA,#F7F8FA>|<b>IncidentStatuses</b>: open · in-progress · resolved<U+2003><U+2003>|<b>IncidentPriorities</b>: low · medium · high · critical<U+2003><U+2003>|<b>IncidentActor «VO»</b>: id · name · role|
+  <#F7F8FA,#F7F8FA>|<b>AnnouncementStatuses</b>: draft · published · archived · expired<U+2003><U+2003>|<b>AnnouncementPriorities</b>: normal · important · urgent<U+2003><U+2003>|<b>documentType</b>: REGULATION · MINUTES · OTHER|
+  <#F7F8FA,#F7F8FA>|<b>documentStatus</b>: PENDING_UPLOAD · PUBLISHED · SUPERSEDED · ARCHIVED<U+2003><U+2003>|<b>StaffPosition</b>: CONCIERGE · MAINTENANCE · CLEANING · SECURITY<U+2003><U+2003>|<b>StaffStatus</b>: ACTIVE · INACTIVE|
+  <#F7F8FA,#F7F8FA>|<b>User → User</b>: ownerAdminId (cuenta del condominio) · parentAdminId (edificio del Portafolio → cuenta principal)<U+2003><U+2003>|<b>Email «VO»</b> (IAM);  <b>KnowledgeSource «VO»</b> (Resident Care)<U+2003><U+2003>||
+  <#F7F8FA,#F7F8FA>|<b>MaintenanceTaskStatus</b>: PENDING · IN_PROGRESS · COMPLETED<U+2003><U+2003>|<b>ConversationStatus</b>: open · answered · derived · closed<U+2003><U+2003>|<b>SupportChat.kind</b>: ai · admin|
+  
+  <back:#E3F2EF><color:#0F5E57> ■ </color></back> Core domain     <back:#E8EDF7><color:#1F3864> ■ </color></back> Supporting subdomain     <back:#F1F2F4><color:#4B5563> ■ </color></back> Generic subdomain          <size:12><U+25C7> referencia por id a otro contexto (ownerAdminId = condominio, una cuenta User de IAM) · <U+25C6> referencia dentro del contexto · negrita: identificador (id interno y externalId público)</size>
+endlegend
+@enduml

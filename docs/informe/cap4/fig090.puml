@@ -1,0 +1,38 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+skinparam wrapWidth 200
+LAYOUT_TOP_DOWN()
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz web para administradores, residentes y el pase público del invitado.")
+
+Container_Boundary(api, "BuildingFex.Api - módulo Social Spaces") {
+  Component(spaceCtrl, "SocialSpacesCompatController", "ASP.NET Core API Controller", "/socialSpaces: alta, edición, consulta y baja de espacios comunes.")
+  Component(resCtrl, "ReservationsCompatController", "ASP.NET Core API Controller", "/reservations: crea, consulta, edita invitados y cancela reservas.")
+  Component(guestCtrl, "GuestPassesController", "ASP.NET Core API Controller", "/api/v1/guest-passes/{token}: validación pública del pase QR y registro del ingreso (check-in).")
+  Component(resSvc, "ReservationCommandService", "C# Application Service", "Crea reservas sin traslapes, gestiona los invitados (GuestsJson) y el token del pase, cancela y registra ingresos.")
+  Component(policy, "ReservationPolicy", "Domain Service", "Reglas de reserva: espacio disponible, límite por día y máximo 5 invitados.")
+  Component(acl, "FinancesAccountStatusAcl", "Anticorruption Layer (IAccountStatusAcl)", "Traduce el estado de cuenta de Finances a «puede reservar».")
+  Component(spaceRepo, "SocialSpaceRepository", "EF Core Repository", "Acceso a los espacios comunes.")
+  Component(resRepo, "ReservationRepository", "EF Core Repository", "Acceso a las reservas y al pase por su token.")
+}
+
+Component_Ext(finances, "Módulo Finances", "AccountStatusQueryService", "Morosidad del residente y si el reglamento restringe reservas.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Social Spaces: social_spaces y reservations (los invitados van en guests_json).")
+
+Rel(spa, spaceCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, resCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, guestCtrl, "Usa", "JSON/HTTPS")
+Rel(spaceCtrl, spaceRepo, "Usa (IUnitOfWork)")
+Rel(resCtrl, resSvc, "Usa")
+Rel(resCtrl, resRepo, "Consulta")
+Rel(guestCtrl, resSvc, "Check-in")
+Rel(guestCtrl, resRepo, "Valida el pase")
+Rel(resSvc, policy, "Aplica reglas")
+Rel(resSvc, acl, "¿Moroso?")
+Rel(resSvc, spaceRepo, "Usa")
+Rel(resSvc, resRepo, "Usa")
+Rel(acl, finances, "GetAsync (estado de cuenta)")
+Rel(spaceRepo, db, "Lee y escribe", "EF Core")
+Rel(resRepo, db, "Lee y escribe", "EF Core")
+@enduml

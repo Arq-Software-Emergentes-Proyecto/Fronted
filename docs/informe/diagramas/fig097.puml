@@ -1,0 +1,30 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+
+Person(admin, "Administrador", "Dueño de la cuenta: contrata y cambia el plan.")
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz web para administradores y residentes.")
+
+Container_Boundary(api, "BuildingFex.Api - módulo Billing") {
+  Component(subCtrl, "Subscription Controller", "ASP.NET Core API Controller", "Contratar o cambiar el plan y pagar cada periodo (/api/v1/subscription, checkout y confirm).")
+  Component(subSvc, "Subscription Service", "C# Service", "Prueba Free de 30 días, pago de cada periodo con Checkout Pro, gracia (PAYMENT_FAILED) y SUSPENDED, topes por plan. En Portafolio suma los departamentos de todos los edificios de la cuenta y aplica el plan a cada uno.")
+  Component(subRepo, "Subscription Repository", "EF Core Repository", "Acceso a la suscripción.")
+}
+
+Component_Ext(residentCare, "Módulo Resident Care", "Módulo de BuildingFex.Api", "Aplica el tope de consultas de IA.")
+Component_Ext(mpAdapter, "Mercado Pago Adapter (ACL)", "Adaptador compartido con Finances", "Traduce preferencias y webhooks.")
+Component_Ext(profiles, "Módulo Profiles", "Módulo de BuildingFex.Api", "Aplica el límite de departamentos.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Billing: suscripción, plan y vigencia.")
+System_Ext(mp, "Mercado Pago", "Checkout Pro: pago de cada periodo del plan.")
+
+Rel(admin, spa, "Elige el plan", "HTTPS")
+Rel(spa, subCtrl, "Usa", "JSON/HTTPS")
+Rel(subCtrl, subSvc, "Usa")
+Rel(residentCare, subSvc, "Consulta plan activo y tope")
+Rel(subSvc, subRepo, "Usa")
+Rel(subSvc, mpAdapter, "Crea el checkout del periodo")
+Rel(subSvc, profiles, "PlanCambiado")
+Rel(subRepo, db, "Lee y escribe", "EF Core")
+Rel(mpAdapter, mp, "Preferencias y webhooks (firma HMAC x-signature)", "HTTPS")
+@enduml

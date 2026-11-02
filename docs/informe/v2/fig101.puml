@@ -1,0 +1,40 @@
+@startuml
+!$TECHN_FONT_SIZE = 14
+!include <C4/C4_Deployment>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+
+Deployment_Node(dev, "Equipo del desarrollador", "Sin dotnet run ni MySQL locales") {
+  Deployment_Node(browser, "Navegador web", "Chrome, Edge o Firefox") {
+    Container(spa, "BuildingFex Web SPA", "Vue 3", "Abierta en http://localhost:5173 con los datos reales de la API en AWS.")
+  }
+  Deployment_Node(vite, "Vite dev server", "Node.js, puerto 5173") {
+    Container(proxy, "Proxy de Vite", "server.proxy", "Reenvía /api y las rutas de compatibilidad a VITE_API_PROXY_TARGET (URL de API Gateway).")
+  }
+}
+
+Deployment_Node(aws, "Amazon Web Services", "us-east-2 (Ohio), stack buildingfex-api") {
+  Deployment_Node(apigw, "Amazon API Gateway", "HTTP API", "Ruta ANY /{proxy+} hacia ApiFunction.")
+  Deployment_Node(lambdaApi, "AWS Lambda: ApiFunction", "dotnet10, arm64, 1024 MB") {
+    Container(api, "BuildingFex.Api", "ASP.NET Core (.NET 10)", "La misma API de producción (sin hub SignalR), con los mismos servicios externos (Gemini, Mercado Pago).")
+  }
+  ContainerDb(files, "Almacenamiento de archivos", "Amazon S3 (FilesBucket)", "Bucket privado y cifrado.")
+}
+
+Deployment_Node(tidb, "TiDB Cloud", "AWS us-east-1") {
+  ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Base buildingfex; TLS con SslMode=VerifyFull.")
+}
+
+Deployment_Node(gcp, "Google Cloud", "Firebase") {
+  System_Ext(fbauth, "Firebase Authentication", "Proyecto emergentes-36306. Emite el ID token.")
+}
+
+Rel(spa, proxy, "SPA y llamadas a /api", "HTTP :5173")
+Rel(proxy, apigw, "Reenvía /api y rutas de compatibilidad", "HTTPS/JSON")
+Rel(apigw, api, "Invoca (proxy)", "Lambda")
+Rel(api, db, "Lee y escribe", "EF Core, TLS")
+Rel(api, files, "Firma URL prefirmadas", "AWS SDK")
+Rel(spa, files, "Sube y descarga con URL prefirmada (10 min, máx. 15)", "HTTPS")
+Rel(spa, fbauth, "Inicia sesión y obtiene el ID token", "HTTPS")
+Rel(api, fbauth, "Verifica el ID token", "HTTPS")
+@enduml

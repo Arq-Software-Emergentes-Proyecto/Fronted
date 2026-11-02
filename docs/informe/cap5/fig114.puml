@@ -1,0 +1,42 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz para administradores y residentes.")
+Component_Ext(iam, "Módulo IAM", "Módulo de BuildingFex.Api", "UserCommandService: prueba Free al registrar un administrador y tope de residentes.")
+Component_Ext(profiles, "Módulo Profiles", "Módulo de BuildingFex.Api", "BuildingsController y ResidentRosterImportService: edificio principal y tope de departamentos.")
+
+Container_Boundary(api, "BuildingFex.Api - bounded context Billing") {
+  Component(plansCtrl, "PlansController", "REST Controller", "GET /api/v1/plans, GET /api/v1/plans/{planId} y GET /api/v1/plans/suggest (público).")
+  Component(subCtrl, "SubscriptionController", "REST Controller", "GET y PATCH /api/v1/subscription, POST /api/v1/subscription/checkout, POST /api/v1/subscription/confirm y GET /api/v1/subscription/limits.")
+  Component(svc, "SubscriptionService", "Application Service (ISubscriptionService)", "GetOrStartAsync, StartTrialAsync, ActivatePaidPlanAsync, ChangeToFreeAsync, CreateCheckoutAsync, ApplyPaymentAsync, CheckRosterGrowthAsync, LinkBuildingAsync.")
+  Component(dm, "Domain Model", "Domain Layer", "Subscription, SubscriptionPayment, SubscriptionCheckout, PlanLimits, SubscriptionPlans, PlanCatalog, SubscriptionStatus.")
+  Component(repo, "SubscriptionRepository", "Repository (EF Core)", "Implementa ISubscriptionRepository sobre TiDB Cloud (compatible con MySQL).")
+}
+
+Component_Ext(fin, "MercadoPagoService (Finances)", "IMercadoPagoService", "Preferencia Checkout Pro, confirm y webhook (MercadoPagoController, POST /api/v1/payments/webhook, firma x-signature).")
+Component_Ext(rc, "Módulo Resident Care", "Módulo de BuildingFex.Api", "PlanQuotaClient: tope de consultas de IA y módulos del plan.")
+System_Ext(mp, "Mercado Pago", "Checkout Pro: pago de cada periodo.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Billing: subscriptions, subscription_payments, subscription_checkouts.")
+
+Rel(spa, subCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, plansCtrl, "Usa", "JSON/HTTPS")
+Rel(iam, svc, "StartTrialAsync, CheckRosterGrowthAsync")
+Rel(profiles, svc, "LinkBuildingAsync, CheckRosterGrowthAsync")
+Rel(plansCtrl, dm, "Lee PlanCatalog")
+Rel(subCtrl, svc, "Usa")
+Rel_L(subCtrl, fin, "Checkout y confirm")
+Rel(fin, svc, "CreateCheckoutAsync, ApplyPaymentAsync")
+Rel(svc, dm, "Aplica reglas del dominio")
+Rel(svc, repo, "Persiste")
+Rel(rc, dm, "Lee topes del plan")
+Rel(fin, mp, "Preferencia, pago y webhook", "HTTPS")
+Rel(repo, db, "Lee y escribe", "EF Core")
+' orden: Finances y Mercado Pago a la izquierda (Rel_L), para que ninguna flecha cruce el título del límite
+Lay_D(fin, mp)
+Lay_R(spa, iam)
+Lay_R(iam, profiles)
+Lay_R(subCtrl, plansCtrl)
+Lay_R(db, rc)
+@enduml

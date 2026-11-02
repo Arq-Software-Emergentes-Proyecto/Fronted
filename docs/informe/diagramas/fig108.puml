@@ -1,0 +1,63 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+skinparam wrapWidth 200
+skinparam nodesep 25
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz para administradores, junta directiva y residentes.")
+Component_Ext(iam, "Módulo IAM", "Módulo de BuildingFex.Api", "Crea la cuenta y publica CuentaRegistrada.")
+
+Container_Boundary(api, "BuildingFex.Api - bounded context Profiles") {
+  Component(resCtrl, "ResidentsController", "REST Controller", "GET/POST /api/v1/residents y PATCH /api/v1/residents/{id}.")
+  Component(depCtrl, "DepartmentsController", "REST Controller", "POST /api/v1/departments/{id}/residents (cada residente paga su propia cuota).")
+  Component(invCtrl, "InvitationsController", "REST Controller", "POST /api/v1/invitations y GET /api/v1/invitations/{token} (valida el enlace antes del registro con Google).")
+  Component(rosCtrl, "RosterImportsController", "REST Controller", "POST /api/v1/roster-imports con el archivo Excel o CSV en la solicitud (todo o nada).")
+  Component(portCtrl, "PortfolioController", "REST Controller", "GET /api/v1/me/buildings, GET y POST /api/v1/portfolio/buildings (edificios del Portafolio como condominios aparte).")
+  Component(accCons, "AccountRegisteredConsumer", "Event Consumer", "Consume CuentaRegistrada (IAM) para vincular la cuenta con el residente.")
+  ' separador invisible (oculto): evita que las flechas de la SPA crucen el título del límite
+  Component(sp, "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", "", "")
+  Component(qh, "Query Handlers", "Application Layer", "GetResidentsQueryHandler")
+  Component(ch, "Command Handlers", "Application Layer", "InviteResidentCommandHandler, AcceptInvitationCommandHandler, AssignDepartmentCommandHandler, ImportRosterCommandHandler")
+  Component(repo, "ResidentRepository / DepartmentRepository / InvitationRepository", "Repository (EF Core)", "Implementan las interfaces de repositorio sobre TiDB Cloud (compatible con MySQL).")
+  Component(plc, "PlanLimitsClient", "Anticorruption Layer", "Consulta a Billing el límite de departamentos del plan activo.")
+  Component(xls, "ExcelRosterReader", "Adapter", "Lee en memoria el Excel o CSV recibido en la solicitud, sin almacenarlo.")
+  Component(dm, "Domain Model", "Domain Layer", "Resident, Department, Invitation")
+}
+
+Component_Ext(others, "Finances, Social Spaces, Resident Care", "Módulo de BuildingFex.Api", "Consumen ResidenteRegistrado y DepartamentoAsignado.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Profiles: residents, departments, department_residents, invitations, roster_imports.")
+Component_Ext(billing, "Módulo Billing", "Módulo de BuildingFex.Api", "Límite de departamentos del plan.")
+
+Rel(spa, resCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, depCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, invCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, rosCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, portCtrl, "Usa", "JSON/HTTPS")
+Rel(portCtrl, repo, "Lee y registra edificios")
+Rel(iam, accCons, "CuentaRegistrada")
+Rel(resCtrl, qh, "Consulta")
+Rel(resCtrl, ch, "Envía comando")
+Rel(depCtrl, qh, "Consulta")
+Rel(depCtrl, ch, "Envía comando")
+Rel(invCtrl, qh, "Consulta")
+Rel(invCtrl, ch, "Envía comando")
+Rel(rosCtrl, qh, "Consulta")
+Rel(rosCtrl, ch, "Envía comando")
+Rel_L(accCons, ch, "Envía comando")
+Rel(qh, repo, "Lee")
+Rel(ch, repo, "Persiste")
+Rel(ch, plc, "Usa")
+Rel(ch, xls, "Usa")
+Rel(ch, dm, "Aplica reglas del dominio")
+Rel(ch, others, "DepartamentoAsignado")
+Rel(repo, db, "Lee y escribe", "EF Core")
+Rel(plc, billing, "Consulta límite")
+Lay_D(dm, others)
+Lay_R(resCtrl, depCtrl)
+Lay_R(depCtrl, sp)
+Lay_R(sp, invCtrl)
+Lay_R(invCtrl, rosCtrl)
+hide sp
+Lay_D(iam, rosCtrl)
+@enduml

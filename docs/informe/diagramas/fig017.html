@@ -1,0 +1,33 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{margin:0;background:#fff;font-family:"Liberation Serif","Times New Roman",serif;color:#000}
+#c{width:1180px;padding:18px 20px 22px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center}
+.band{border:1px solid #ddd;padding:8px 16px 14px;display:flex;flex-direction:column;align-items:center;gap:10px;box-sizing:border-box}
+.band h3{margin:0;font-weight:normal;font-size:15px}
+.row{display:flex;gap:16px;justify-content:center;flex-wrap:nowrap}
+.b{display:flex;align-items:center;justify-content:center;border:1px solid #1F3864;background:#DCE3EE;padding:8px 14px;font-size:15px;text-align:center;line-height:1.25;min-width:96px}
+.r{border-radius:22px}
+.d{background:#1F3864;color:#fff}
+.g{background:#F2F2F2;border-color:#999}
+.x{background:#fff;border:1.5px dashed #999}
+.cyl{background:#DCE3EE;border:1px solid #1F3864;border-radius:50%/16px;padding:18px 16px 12px;font-size:15px;text-align:center;line-height:1.25}
+.arr{width:2px;height:26px;background:#1F3864;position:relative;margin:2px 0 6px}
+.arr:after{content:"";position:absolute;bottom:-7px;left:-5px;border:6px solid transparent;border-top:8px solid #1F3864}
+</style></head><body><div id="c">
+<div class="band" style="width:900px"><h3>Usuarios</h3><div class="row">
+ <div class="b r">Residente</div><div class="b r">Administrador<br>(empresa, asignado o junta titular)</div><div class="b r">Junta directiva<br>(solo lectura)</div><div class="b r">Invitado de una reserva</div></div></div>
+<div class="arr"></div>
+<div class="b">Cliente web responsivo (Vue 3)<br>con selector de edificio activo</div>
+<div class="arr"></div>
+<div class="b">API REST (ASP.NET Core)<br>edificio activo en X-Building-Id</div>
+<div class="arr"></div>
+<div class="band" style="width:1000px"><h3>Bounded contexts - monolito modular</h3>
+ <div class="row"><div class="b">IAM<br>(miembros e invitaciones)</div><div class="b">Profiles</div><div class="b">Finances</div><div class="b">Billing<br>(planes y Portafolio)</div><div class="b">Social Spaces</div></div>
+ <div class="row"><div class="b d">Incidents</div><div class="b">Communications</div><div class="b">Team</div><div class="b d">Resident Care</div></div></div>
+<div class="arr"></div>
+<div class="band" style="width:1000px"><h3>Infraestructura compartida - no son bounded contexts</h3><div class="row">
+ <div class="b g">Avisos en la aplicación<br>(SignalR)</div><div class="b g">Auditoría</div><div class="b g">Procesamiento de<br>archivos Excel</div><div class="b g">Gateway de IA - ACL</div></div></div>
+<div class="arr"></div>
+<div class="band" style="width:1140px"><h3>Persistencia y sistemas externos</h3><div class="row" style="align-items:center">
+ <div class="cyl">Base relacional con tenant_id<br>(TiDB Cloud)</div><div class="cyl">Almacenamiento de<br>documentos (Amazon S3)</div>
+ <div class="b x">Firebase<br>Authentication</div><div class="b x">Mercado Pago</div><div class="b x">Google Gemini</div></div></div>
+</div></body></html>

@@ -1,0 +1,327 @@
+@startuml
+scale 1.5
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam titleFontSize 14
+skinparam titleFontStyle bold
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+skinparam note {
+  BackgroundColor #FFFDE7
+  BorderColor #8A8A8A
+}
+hide empty members
+title Bounded Context Finances - Domain Layer
+
+class Receipt <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -residentExternalId : string
+  -issueDate : string?
+  -dueDate : string?
+  -amount : decimal
+  -status : string
+  -lateFee : decimal
+  -extraCharges : decimal
+  -concept : string?
+  -billingMonth : string?
+  -kind : string
+  -monthlyKey : string?
+  -paymentOpen : string?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(externalId, ownerAdminId, residentExternalId, issueDate, dueDate, amount, status, lateFee, extraCharges, concept, billingMonth?, paymentOpen?, kind?): Receipt
+  +{static} CreateMonthly(externalId, ownerAdminId, residentExternalId, charge: MonthlyCharge, issueDate: DateOnly): Receipt
+  +CoversMonth(month: Period): bool
+  +EffectiveBillingMonth(): string?
+  +Patch(status?, lateFee?, extraCharges?, concept?): void
+  +MarkAsPaid(): void
+  +IsPaid : bool {derivada}
+  +IsMonthly : bool {derivada}
+  +Total : decimal {derivada}
+}
+
+class Fee <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -residentExternalId : string
+  -month : string
+  -amount : decimal
+  -dueDate : string
+  -status : string
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(externalId, ownerAdminId, residentExternalId, month, amount, dueDate, status): Fee
+  +UpdateStatus(status: string): void
+}
+
+class Payment <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -residentExternalId : string
+  -feeExternalId : string?
+  -feeMonth : string?
+  -amount : decimal
+  -paidAt : string?
+  -method : string?
+  -reference : string?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(externalId, ownerAdminId, residentExternalId, amount, feeExternalId?, feeMonth?, paidAt?, method?, reference?): Payment
+}
+
+class MaintenanceCheckout <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -residentExternalId : string
+  -itemsJson : string
+  -totalAmount : decimal
+  -status : string
+  -mpPaymentId : string?
+  -preferenceId : string?
+  -paidAt : DateTimeOffset?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(ownerAdminId, residentExternalId, items): MaintenanceCheckout
+  +GetItems(): IReadOnlyList<Item>
+  +AttachPreference(preferenceId?): void
+  +MarkPaid(mpPaymentId, paidAt, needsReview): void
+  +AmountMatches(paidAmount: decimal): bool
+}
+
+class "MaintenanceCheckout.Item" as Item <<Value Object>> {
+  -type : string
+  -externalId : string
+  -amount : decimal
+}
+
+class FinanceSetting <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -baseMonthlyExpense : decimal
+  -lateFeeRate : decimal
+  -lateFeePerDay : decimal
+  -admissionPayFromDay : int
+  -admissionPayToDay : int
+  -monthlyChargesJson : string
+  -restrictReservationsWhenDelinquent : bool
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...): FinanceSetting
+  +Patch(baseMonthlyExpense?, lateFeeRate?): void
+  +PatchBillingRules(...): void
+  +SetReservationRestriction(restrict?): void
+  +GetMonthlyCharges(): IReadOnlyList<MonthlyCharge>
+  +FindCharge(month: Period): MonthlyCharge?
+}
+
+class MonthlyCharge <<Value Object>> {
+  -id : string
+  -month : string
+  -amount : decimal
+  -billingStart : string
+  -billingEnd : string
+  -paymentOpen : string
+  -paymentDue : string
+  --
+  +{static} Normalize(month, amount, paymentOpen?, paymentDue?, id?): MonthlyCharge?
+  +{static} ParseList(json: string?): IReadOnlyList<MonthlyCharge>
+  +{static} ToJson(charges): string
+  +IsBillable : bool {derivada}
+}
+
+class Period <<Value Object>> {
+  -year : int
+  -month : int
+  --
+  +{static} FromDate(date: DateOnly): Period
+  +{static} TryParse(value: string?, out period): bool
+  +{static} Normalize(value: string?): string?
+  +Next(): Period
+  +Previous(): Period
+  +AddMonths(delta: int): Period
+  +Key : string {derivada}
+}
+
+class Money <<Value Object>> {
+  -amount : decimal
+  -currency : string = "PEN"
+  --
+  +{static} Of(amount: decimal): Money
+  +Add(other: Money): Money
+  +IsPositive(): bool
+}
+
+class AdminManagementExpense <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -name : string
+  -amount : decimal
+  -purchaseDate : string
+  -invoicePhotoUrl : string
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...): AdminManagementExpense
+}
+
+class SharedUtilityService <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -type : string
+  -amount : decimal
+  -month : string?
+  -residentCount : int?
+  -perResidentShare : decimal?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...): SharedUtilityService
+}
+
+class FixedPayoutRecipient <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -name : string
+  -dni : string
+  -phone : string
+  -salary : decimal
+  -intervalDays : int
+  -nextPaymentDate : string
+  -photoUrl : string
+  -paymentHistoryJson : string
+  -createdAtIso : string?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...): FixedPayoutRecipient
+  +ReplaceFrom(...): void
+}
+
+class KpiRecord <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -totalResidents : int
+  -occupiedUnits : int
+  -emptyUnits : int
+  -totalDebt : decimal
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...): KpiRecord
+}
+
+class ResidentExtraCharge <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : string
+  -residentId : string
+  -title : string
+  -amount : decimal
+  -description : string
+  -createdAt : DateTimeOffset
+  --
+  +{static} Create(...): ResidentExtraCharge
+}
+
+class DelinquencyPolicy <<Domain Service>> {
+  {static} +DueSoonDays : int = 5
+  {static} +DelinquencyDays : int = 30
+  {static} +DefaultCriticalThreshold : decimal = 0.15
+  --
+  +{static} IsOverdue(status, dueDate, today): bool
+  +{static} DaysOverdue(status, dueDate, today): int
+  +{static} IsDelinquent(status, dueDate, today): bool
+  +{static} Classify(status, dueDate, today): DebtLight
+  +{static} IsCritical(overdueDebt, monthlyBudget, threshold): bool
+}
+
+class FinanceClock <<Domain Service>> {
+  +{static} Today(utcNow?): DateOnly
+  +{static} ToLocalDate(instant): DateOnly
+  +{static} MonthStart(utcNow?): DateOnly
+}
+
+enum FeeStatus <<enumeration>> {
+  Pending
+  Paid
+  Overdue
+}
+enum PaymentMethod <<enumeration>> {
+  MercadoPago = "Mercado Pago"
+  Voucher = "Voucher"
+  BankTransfer = "Transferencia bancaria"
+  Cash = "Efectivo"
+}
+enum ReceiptKind <<enumeration>> {
+  MONTHLY
+  EXTRA
+}
+enum DebtLight {
+  None
+  Paid
+  Pending
+  DueSoon
+  Overdue
+}
+
+interface IReceiptRepository <<Repository>> {
+  +FindByExternalIdAsync(externalId): Receipt?
+  +ListAsync(ownerAdminExternalId?, residentExternalId?): IEnumerable<Receipt>
+  +AddAsync(entity), Update(entity), Remove(entity), AnyAsync()
+}
+interface IMaintenanceCheckoutRepository <<Repository>> {
+  +FindByExternalIdAsync(externalId): MaintenanceCheckout?
+  +FindByMpPaymentIdAsync(mpPaymentId): MaintenanceCheckout?
+  +FindLatestPendingAsync(ownerAdminId, residentExternalId): MaintenanceCheckout?
+  +AddAsync(entity), Update(entity)
+}
+
+note as N1
+  Todos los agregados guardan ownerAdminId (users.id del condominio,
+  IAM; en ResidentExtraCharge, su externalId como texto) y, si aplica,
+  residentExternalId del residente. FeeStatus, PaymentMethod y
+  ReceiptKind son constantes string (no hay enum persistido).
+  Repositorios: IFeeRepository, IPaymentRepository, IReceiptRepository,
+  IFinanceSettingRepository, IKpiRepository,
+  IAdminManagementExpenseRepository, ISharedUtilityServiceRepository,
+  IFixedPayoutRecipientRepository e IMaintenanceCheckoutRepository
+  (ResidentExtraCharge no tiene repositorio).
+end note
+
+MaintenanceCheckout "1" *-- "1..*" Item : itemsJson
+Item ..> "0..1" Receipt : type = receipt
+Item ..> "0..1" Fee : type = fee
+Payment "0..*" --> "0..1" Fee : feeExternalId
+FinanceSetting "1" *-- "0..*" MonthlyCharge : monthlyChargesJson
+Receipt ..> MonthlyCharge : CreateMonthly
+Receipt ..> Period : billingMonth
+FinanceSetting ..> Period : FindCharge
+Receipt "0..*" --> "1" ReceiptKind : kind
+Receipt "0..*" --> "1" FeeStatus : status
+Fee "0..*" --> "1" FeeStatus : status
+Payment "0..*" --> "0..1" PaymentMethod : method
+DelinquencyPolicy ..> FeeStatus : evalúa
+DelinquencyPolicy ..> DebtLight : clasifica
+IReceiptRepository ..> "0..*" Receipt : persiste
+IMaintenanceCheckoutRepository ..> "0..*" MaintenanceCheckout : persiste
+@enduml

@@ -1,0 +1,64 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+skinparam wrapWidth 190
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz para administradores y residentes.")
+Component_Ext(comms, "Módulo Communications", "Módulo de BuildingFex.Api", "ImportUploadsController encola el indexado y retira fragmentos de documentos reemplazados o archivados.")
+
+' Mismo aspecto que Container_Boundary; el título lleva relleno invisible (NBSP) a la derecha para que las flechas no lo crucen
+Boundary(api, "BuildingFex.Api - bounded context Resident Care                                                                                                                                                                          \n<size:12>[container]                                                                                                                                                                                                                                      </size>") {
+  Component(ctrl, "SupportController", "REST Controller", "/api/v1/support: chats, summary, ai-usage, messages (AskQuestion), status, close e incident.")
+  Component(hub, "SupportHub", "SignalR Hub (fuera de AWS Lambda)", "/hubs/support: JoinOwner() y JoinChat(); SupportController envía los avisos en vivo. En Lambda el frontend usa polling.")
+  Component(quota, "AiUsageQuota", "Application Service", "Tope mensual por edificio y límite diario por residente (UPDATE condicional atómico).")
+  Component(idx, "AiContextIndexer", "Application Service", "Fragmenta, genera embeddings, recupera fragmentos de documentos vigentes y retira los de documentos no vigentes.")
+  Component(jobsvc, "AiContextIndexingJob / AiContextIndexingWorker / AiContextIndexingQueue", "Background Job", "Indexado en segundo plano (BackgroundService fuera de Lambda).")
+  Component(notif, "IncidentResolutionNotifier", "Application Service", "IIncidentResolutionNotifier: deja la resolución en el chat de origen y lo cierra.")
+  Component(dm, "Domain Model", "Domain Layer", "SupportChat, SupportMessage, AiContextChunk, AiUsage, AnswerPolicy, QuestionRelevancePolicy")
+  Component(gem, "GeminiClient / GeminiEmbeddingClient / GeminiRateLimiter", "Anticorruption Layer", "Respuestas, títulos y embeddings con timeout, reintento y circuit breaker.")
+  Component(pqc, "PlanQuotaClient", "Anticorruption Layer", "Tope mensual del plan efectivo y módulos incluidos.")
+  Component(lq, "LambdaAiContextIndexingQueue", "Adapter", "En AWS invoca de forma asíncrona el job ai-index.")
+  Component(ctx, "AppDbContext", "EF Core (compartido)", "support_chats, support_messages, ai_context_chunks, ai_usages, resident_ai_usages.")
+}
+
+Component_Ext(inc, "Módulo Incidents", "Módulo de BuildingFex.Api", "IIncidentCommandService (CreateIncidentCommand) e IncidentTriageService; al resolver llama a IIncidentResolutionNotifier.")
+Component_Ext(billing, "Módulo Billing", "Módulo de BuildingFex.Api", "SubscriptionPlans y PlanCatalog.")
+Component_Ext(stor, "IFirebaseStorageService (Communications)", "Adapter compartido", "Descarga los bytes del documento a indexar.")
+Container_Ext(jobs, "Función de jobs", "AWS Lambda + EventBridge Scheduler", "Job ai-index: invocación asíncrona por documento y barrido programado.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Resident Care.")
+System_Ext(gemini, "Google Gemini API", "Proveedor de IA.")
+
+Rel(spa, ctrl, "Usa; en AWS, polling del chat", "JSON/HTTPS")
+Rel(spa, hub, "Chat en vivo (fuera de Lambda)", "WSS")
+Rel_Back(jobsvc, comms, "Encola documento")
+Rel_Back(idx, comms, "RemoveUploadAsync()")
+Rel(ctrl, dm, "Aplica reglas del dominio")
+Rel(ctrl, quota, "Reserva consulta")
+Rel(ctrl, pqc, "Tope del plan")
+Rel(ctrl, idx, "Recupera fragmentos")
+Rel(ctrl, gem, "Genera respuesta")
+Rel_Back(inc, ctrl, "ReportarIncidente")
+Rel(ctrl, ctx, "Lee y escribe")
+Rel(inc, notif, "IncidenteResuelto")
+Rel(notif, ctx, "Escribe")
+Rel(quota, ctx, "SQL atómico")
+Rel(jobsvc, idx, "IndexUploadAsync()")
+Rel(jobsvc, lq, "En AWS")
+Rel(lq, jobs, "Invoke (Event)", "AWS SDK")
+Rel(jobs, jobsvc, "ai-index")
+Rel(idx, gem, "Embeddings")
+Rel(idx, stor, "Descarga archivo")
+Rel(idx, ctx, "Guarda fragmentos")
+Rel(pqc, billing, "Consulta catálogo")
+Rel(gem, gemini, "generateContent y embedContent", "HTTPS")
+Rel(ctx, db, "Lee y escribe", "EF Core")
+Lay_R(hub, ctrl)
+Lay_D(quota, pqc)
+Lay_D(dm, ctx)
+Lay_D(idx, gem)
+Lay_D(jobsvc, lq)
+Lay_D(pqc, billing)
+Lay_D(lq, jobs)
+Lay_D(gem, stor)
+@enduml

@@ -1,0 +1,39 @@
+digraph G {
+  graph [rankdir=TB, newrank=true, splines=true, nodesep=0.14, ranksep=0.32, fontname="Liberation Sans", fontsize=15, pad="0.08", outputorder=edgesfirst];
+  node [fontname="Liberation Sans", fontsize=14, margin="0.10,0.06", penwidth=0];
+  edge [fontname="Liberation Sans", fontsize=14, color="#666666", fontcolor="#333333", arrowsize=0.7, penwidth=1.1];
+  labelloc=t; label=<<b>BuildingFex.Api - módulo Communications: documentos<br/>(azul claro: componentes del módulo; gris: otros)</b>>;
+  admin [shape=box, style="rounded,filled", fillcolor="#08427B", fontcolor="white", label=<<font point-size="15"><b>Administrador</b></font><br/>Publica reglamentos,<br/>actas y documentos.>];
+  spa [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>BuildingFex Web SPA</b></font><br/><i>[Vue 3]</i><br/>Interfaz web para<br/>administradores y<br/>residentes.>];
+  folderCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ImportFoldersController</b></font><br/><i>[API Controller]</i><br/>/api/v1/import/folders:<br/>carpetas del<br/>condominio (inicio y<br/>carpeta de contexto<br/>del asistente).>];
+  uploadCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ImportUploadsController</b></font><br/><i>[API Controller]</i><br/>/api/v1/import/uploads:<br/>signed-url, confirm,<br/>download-url, publish,<br/>archive y delete;<br/>controla tamaño (5<br/>MB), cupo (100<br/>archivos), tipo MIME,<br/>versión y vigencia.>];
+  cleanup [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ImportOrphanCleanup</b></font><br/><i>[Infrastructure]</i><br/>Borra los archivos que<br/>quedaron sin confirmar<br/>(job import-cleanup<br/>cada 30 min; en local,<br/>ImportOrphanCleanupWorker).>];
+  fileStorage [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>File Storage</b></font><br/><i>[S3StorageService<br/>(IFirebaseStorageService)]</i><br/>URL prefirmadas<br/>PUT/GET de 10 min<br/>(máx. 15), metadatos<br/>reales y borrado. Sin<br/>BF_FILES_BUCKET se usa<br/>FirebaseStorageService.>];
+  residentCare [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Resident Care</b></font><br/><i>[IAiContextIndexingQueue<br/>y AiContextIndexer]</i><br/>Encola la indexación<br/>(en AWS invoca el job<br/>ai-index de forma<br/>asíncrona) y retira<br/>los fragmentos del<br/>documento archivado o<br/>reemplazado.>];
+  s3 [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>Almacenamiento de<br/>archivos</b></font><br/><i>[Amazon S3]</i><br/>Bucket privado y<br/>cifrado: reglamentos,<br/>actas e importaciones.>];
+  db [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>TiDB Cloud</b></font><br/><i>[MySQL compatible]</i><br/>import_folders e<br/>import_uploads.>];
+  { rank=same; admin; }
+  { rank=same; spa; }
+  { rank=same; folderCtrl; uploadCtrl; cleanup; }
+  folderCtrl -> uploadCtrl [style=invis, weight=5];
+  uploadCtrl -> cleanup [style=invis, weight=5];
+  { rank=same; residentCare; fileStorage; }
+  residentCare -> fileStorage [style=invis, weight=5];
+  { rank=same; db; s3; }
+  db -> s3 [style=invis, weight=5];
+  admin -> spa [style=invis, weight=0];
+  spa -> folderCtrl [style=invis, weight=0];
+  folderCtrl -> residentCare [style=invis, weight=0];
+  residentCare -> db [style=invis, weight=0];
+  admin -> spa [label=<Sube documentos>];
+  spa -> folderCtrl [label=<JSON/HTTPS>];
+  spa -> uploadCtrl [label=<1. Pide URL<br/>prefirmada / 3.<br/>Confirma>];
+  spa -> s3 [label=<2. Sube el<br/>archivo (PUT<br/>prefirmado)>];
+  uploadCtrl -> fileStorage [label=<Firma, verifica<br/>metadatos y<br/>borra>];
+  uploadCtrl -> residentCare [label=<EnqueueAsync /<br/>RemoveUploadAsync>];
+  cleanup -> fileStorage [label=<Borra huérfanos>];
+  fileStorage -> s3 [label=<Prefirma URL,<br/>lee metadatos y<br/>borra (AWS SDK)>];
+  folderCtrl -> db [label=<AppDbContext>];
+  uploadCtrl -> db [label=<AppDbContext>];
+  cleanup -> db [label=<Lee y borra<br/>pendientes>];
+}

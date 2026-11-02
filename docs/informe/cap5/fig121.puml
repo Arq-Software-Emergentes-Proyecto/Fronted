@@ -1,0 +1,155 @@
+@startuml
+scale 1.5
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam titleFontSize 14
+skinparam titleFontStyle bold
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+skinparam note {
+  BackgroundColor #FFFDE7
+  BorderColor #8A8A8A
+}
+hide empty members
+title Bounded Context Incidents - Domain Layer
+
+class Incident <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -residentExternalId : string?
+  -residentName : string
+  -title : string
+  -description : string
+  -category : string?
+  -priority : string?
+  -status : string
+  -provider : string?
+  -assigneeId : string?
+  -resolutionComment : string?
+  -resolvedAt : DateTimeOffset?
+  -escalatedAt : DateTimeOffset?
+  -aiSuggestedCategory : string?
+  -aiSuggestedPriority : string?
+  -aiSuggestionReason : string?
+  -aiSuggestedAt : DateTimeOffset?
+  -sourceChatId : string?
+  -reportedAt : DateTimeOffset
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  -events : List<IncidentEvent>
+  --
+  +{static} Create(externalId, ownerAdminId, description, status, ..., reporter: IncidentActor?): Incident
+  +UpdateDetails(title, description, category, priority, residentExternalId, residentName): void
+  +Assign(assigneeId: string?, providerName: string?, actor: IncidentActor, advanceStatus: bool): void
+  +ChangeStatus(status: string, comment: string?, actor: IncidentActor): void
+  +Resolve(resolutionComment: string?, actor: IncidentActor): void
+  +AddComment(comment: string?, actor: IncidentActor): IncidentEvent
+  +Escalate(now: DateTimeOffset): bool
+  +LinkSourceChat(chatExternalId: string?): void
+  +RecordTriageSuggestion(category, priority, reason: string?, now: DateTimeOffset): void
+  +ConfirmTriage(category: string?, priority: string?, actor: IncidentActor): void
+  +IsUnassigned : bool
+  +IsEscalationActive : bool
+  +HasPendingTriageSuggestion : bool
+}
+
+class IncidentEvent <<Entity>> {
+  -id : int
+  -incidentId : int
+  -type : string
+  -status : string?
+  -comment : string?
+  -authorId : string?
+  -authorName : string?
+  -authorRole : string?
+  -createdAt : DateTimeOffset
+  --
+  ~{static} Create(type, status, comment, actor: IncidentActor?, at: DateTimeOffset?): IncidentEvent
+}
+
+class IncidentActor <<Value Object>> {
+  -id : string?
+  -name : string?
+  -role : string?
+  --
+  +{static} System : IncidentActor
+  +{static} Assistant : IncidentActor
+}
+
+class BuildingServiceProvider <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : string
+  -name : string
+  -phone : string
+  -specialty : string
+  -createdAt : DateTimeOffset?
+  --
+  +{static} Create(externalId, ownerAdminId, name, phone, specialty): BuildingServiceProvider
+}
+
+class EscalationPolicy <<Domain Service>> {
+  +Threshold = 48 h
+  --
+  +MustEscalate(incident: Incident, now: DateTimeOffset): bool
+}
+
+interface IIncidentRepository <<Repository>> {
+  +FindByExternalIdAsync(externalId: string): Incident
+  +ListByOwnerAdminIdAsync(ownerAdminId: int, residentExternalId: string?, status: string?): IEnumerable<Incident>
+  +ListEscalationCandidatesAsync(reportedBefore: DateTimeOffset, limit: int): IReadOnlyList<Incident>
+  +AnyIncidentsAsync(): bool
+}
+
+interface IServiceProviderRepository <<Repository>> {
+  +FindByExternalIdAsync(ownerAdminExternalId: string, externalId: string): BuildingServiceProvider
+  +ListByOwnerAsync(ownerAdminExternalId: string): IReadOnlyList<BuildingServiceProvider>
+}
+
+enum IncidentStatuses <<constantes string>> {
+  open
+  in-progress
+  resolved
+}
+
+enum IncidentPriorities <<constantes string>> {
+  low
+  medium
+  high
+  critical
+}
+
+enum IncidentEventTypes <<constantes string>> {
+  reported
+  status_changed
+  assigned
+  unassigned
+  resolved
+  comment
+  escalated
+  ai_triage_suggested
+  triage_confirmed
+}
+
+note bottom of BuildingServiceProvider
+  ownerAdminId guarda el external id
+  del administrador; Incident.assigneeId
+  guarda el externalId del proveedor.
+end note
+
+Incident "1" *-- "1..*" IncidentEvent : events
+IncidentEvent ..> "0..1" IncidentActor : autor
+Incident "*" --> "0..1" BuildingServiceProvider : assigneeId
+EscalationPolicy ..> Incident : evalúa
+IIncidentRepository ..> "*" Incident : persiste
+IServiceProviderRepository ..> "*" BuildingServiceProvider : lee
+Incident "*" --> "1" IncidentStatuses : status
+Incident "*" --> "0..1" IncidentPriorities : priority
+IncidentEvent "*" --> "1" IncidentEventTypes : type
+@enduml

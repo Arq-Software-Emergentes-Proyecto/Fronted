@@ -1,0 +1,68 @@
+@startuml
+!$TECHN_FONT_SIZE = 14
+!include <C4/C4_Component>
+!include common_c4.iuml
+skinparam wrapWidth 140
+LAYOUT_TOP_DOWN()
+
+Person(admin, "Administrador", "Titular o admin asignado.")
+Person(board, "Junta directiva", "Solo lectura.")
+Person(resident, "Residente", "Invitación + Google.")
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Envía el ID token y X-Building-Id.")
+
+' Componentes de BuildingFex.Api - módulo IAM
+' sin Container_Boundary: el límite del contenedor alarga las aristas externas
+
+  Component(guards, "AccountStatus y BoardReadOnly Middleware", "Middleware", "403 ACCOUNT_\nDEACTIVATED y 403 BOARD_READ_ONLY (junta).")
+  Component(caller, "CallerContext Accessor", "Service (tenancy)", "Usuario, edificio activo y rol: owner, admin o board_member.")
+  Component(authCtrl, "Authentication Controller", "API Controller", "/api/v1/authentication: me, sign-in, sign-in-google, register-admin, invitar residentes.")
+  Component(usersCtrl, "UsersController", "API Controller", "/api/v1/users: alta, consulta, edición, baja y reactivación.")
+  Component(membersCtrl, "Members Controller", "API Controller", "/api/v1/members: invita admin o junta, anula invitaciones, retira accesos.")
+  Component(minvCtrl, "MemberInvitations Controller", "API Controller", "/api/v1/member-\ninvitations/{token}: consulta y aceptación.")
+  Component(cmdSvc, "UserCommand Service", "Application Service", "Registro del admin, ingreso con Google, alta, baja y credenciales.")
+  Component(qrySvc, "UserQuery Service", "Application Service", "Consulta y búsqueda de cuentas.")
+  Component(verifier, "FirebaseIdToken Verifier", "Infrastructure", "Valida el ID token (JWKS).")
+  Component(fbAdmin, "FirebaseAuth AdminService", "Infrastructure (Admin SDK)", "Asigna claims y revoca sesiones.")
+  Component(userRepo, "UserRepository", "EF Core Repository", "Tabla users.")
+
+
+Component_Ext(billing, "Módulo Billing", "SubscriptionService", "Prueba Free y tope de departamentos.")
+System_Ext(firebaseAuth, "Firebase Authentication", "Correo y contraseña o Google.")
+ContainerDb(db, "TiDB Cloud", "MySQL compatible", "users, building_members, member_invitations.")
+
+Lay_R(guards, caller)
+Lay_R(authCtrl, usersCtrl)
+Lay_R(usersCtrl, membersCtrl)
+Lay_R(membersCtrl, minvCtrl)
+Lay_R(cmdSvc, qrySvc)
+Lay_R(qrySvc, billing)
+Lay_R(verifier, fbAdmin)
+Lay_R(fbAdmin, userRepo)
+Lay_R(firebaseAuth, db)
+
+Rel(admin, spa, "Registro e ingreso")
+Rel(board, spa, "Consulta")
+Rel(resident, spa, "Ingresa")
+Rel(spa, firebaseAuth, "ID token")
+Rel(spa, guards, "Toda petición", "JSON/HTTPS")
+Rel(guards, authCtrl, "")
+Rel(guards, usersCtrl, "")
+Rel(guards, membersCtrl, "")
+Rel(guards, minvCtrl, "")
+Rel_R(guards, caller, "Estado y rol")
+Rel(authCtrl, cmdSvc, "")
+Rel(usersCtrl, cmdSvc, "")
+Rel(usersCtrl, qrySvc, "")
+Rel_U(membersCtrl, caller, "Rol")
+Rel(cmdSvc, verifier, "")
+Rel(cmdSvc, fbAdmin, "")
+Rel(cmdSvc, userRepo, "")
+Rel(qrySvc, userRepo, "")
+Rel(minvCtrl, userRepo, "Cuenta")
+Rel_R(cmdSvc, billing, "StartTrial, CheckRosterGrowth")
+Rel(verifier, firebaseAuth, "JWKS")
+Rel(fbAdmin, firebaseAuth, "Claims")
+Rel(userRepo, db, "EF Core")
+Rel(membersCtrl, db, "Miembros,\ninvitaciones")
+@enduml

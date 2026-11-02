@@ -1,0 +1,66 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+skinparam wrapWidth 230
+skinparam nodesep 30
+skinparam ranksep 60
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz para administradores, junta directiva y residentes. Envía el idToken de Firebase y X-Building-Id.")
+
+Container_Boundary(api, "BuildingFex.Api - bounded context IAM") {
+  Component(authCtrl, "AuthenticationController", "REST Controller", "GET /api/v1/authentication/me, POST .../sign-in-google, GET .../residents/invite y POST .../residents/complete-google.")
+  Component(usersCtrl, "UsersController", "REST Controller", "GET y POST /api/v1/users, GET, PATCH y DELETE /api/v1/users/{id}, PATCH .../deactivate y .../reactivate.")
+  Component(memCtrl, "MembersController", "REST Controller", "GET /api/v1/members, POST y DELETE .../invitations y DELETE /api/v1/members/{userId}.")
+  Component(minvCtrl, "MemberInvitationsController", "REST Controller", "GET /api/v1/member-invitations/{token} (público) y POST .../{token}/accept.")
+  Component(mw, "AccountStatusMiddleware / BoardReadOnlyMiddleware", "Middleware", "403 ACCOUNT_DEACTIVATED (cuenta desactivada) y 403 BOARD_READ_ONLY (escrituras de la junta).")
+  Component(ucs, "UserCommandService", "Application Service", "SignInGoogle, CompleteResidentGoogle, UpsertFirebaseAdmin, CreateResident, PatchResident, DeleteResident, DeactivateAccount, ReactivateAccount.")
+  Component(uqs, "UserQueryService", "Application Service", "GetByExternalId, GetAll, GetResidentsByOwnerExternalId, Search.")
+  Component(cca, "CallerContextAccessor", "Servicio de tenancy", "Usuario, edificio activo (X-Building-Id) y rol: owner, admin, board_member o resident.")
+  Component(dm, "Domain Model", "Domain Layer", "User, BuildingMember, MemberInvitation, Email; UserRoles, AccountStatus, IdentityProvider; IUserRepository.")
+  Component(repo, "UserRepository", "Repository (EF Core)", "Implementa IUserRepository sobre la tabla users.")
+  Component(ver, "FirebaseIdTokenVerifier", "Adapter", "Valida el idToken de Firebase (JWKS) en los endpoints anónimos.")
+  Component(fadm, "FirebaseAuthAdminService", "Anticorruption Layer", "Asigna custom claims (rol y ownerAdminId) y revoca sesiones.")
+}
+
+Component_Ext(dbctx, "AppDbContext", "Infraestructura compartida (EF Core)", "DbContext único de BuildingFex.Api.")
+Component_Ext(billing, "Módulo Billing", "Módulo de BuildingFex.Api", "ISubscriptionService: límite de residentes del plan.")
+Component_Ext(others, "Profiles, Finances y demás módulos", "Módulos de BuildingFex.Api", "Usan IUserRepository, IUserCommandService, IUserQueryService y CallerContextAccessor.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de IAM: users, building_members, member_invitations.")
+System_Ext(fbauth, "Firebase Authentication", "Identidad: correo y contraseña o Google.")
+
+Rel(spa, authCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, usersCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, memCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, minvCtrl, "Usa", "JSON/HTTPS")
+
+Rel(authCtrl, ucs, "Envía comando")
+Rel(authCtrl, cca, "Usuario actual")
+Rel(usersCtrl, ucs, "Envía comando")
+Rel(usersCtrl, uqs, "Consulta")
+Rel(memCtrl, cca, "Edificio y rol")
+Rel(memCtrl, dbctx, "building_members, member_invitations")
+Rel(minvCtrl, dbctx, "Acepta la invitación")
+Rel(mw, cca, "Consulta el rol")
+
+Rel(ucs, dm, "Aplica reglas del dominio")
+Rel(ucs, repo, "Persiste")
+Rel(ucs, ver, "Verifica idToken")
+Rel(ucs, fadm, "Claims y revocación")
+Rel(ucs, billing, "CheckRosterGrowthAsync")
+Rel(uqs, repo, "Lee")
+Rel(cca, repo, "Lee")
+Rel(repo, dbctx, "EF Core")
+Rel_R(dbctx, db, "Lee y escribe", "MySQL")
+Rel(ver, fbauth, "Claves públicas (JWKS)", "HTTPS")
+Rel(fadm, fbauth, "Admin SDK", "HTTPS")
+Rel_U(others, cca, "Usan")
+
+Lay_R(authCtrl, usersCtrl)
+Lay_R(usersCtrl, memCtrl)
+Lay_R(memCtrl, minvCtrl)
+Lay_D(memCtrl, mw)
+Lay_D(repo, dbctx)
+Lay_R(dbctx, db)
+Lay_R(billing, others)
+@enduml

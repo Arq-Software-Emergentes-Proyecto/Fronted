@@ -1,0 +1,148 @@
+@startuml
+!include common_class.iuml
+left to right direction
+hide empty members
+title Bounded Context Incidents - Domain Layer
+
+class Incident <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -residentExternalId : string?
+  -residentName : string
+  -title : string
+  -description : string
+  -category : string?
+  -priority : string?
+  -status : string
+  -provider : string?
+  -assigneeId : string?
+  -resolutionComment : string?
+  -resolvedAt : DateTimeOffset?
+  -escalatedAt : DateTimeOffset?
+  -aiSuggestedCategory : string?
+  -aiSuggestedPriority : string?
+  -aiSuggestionReason : string?
+  -aiSuggestedAt : DateTimeOffset?
+  -sourceChatId : string?
+  -reportedAt : DateTimeOffset
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  -events : List<IncidentEvent>
+  --
+  +{static} Create(...): Incident
+  +UpdateDetails(...): void
+  +Assign(...): void
+  +ChangeStatus(...): void
+  +Resolve(resolutionComment, actor): void
+  +AddComment(...): IncidentEvent
+  +Escalate(now): bool
+  +LinkSourceChat(chatExternalId): void
+  +RecordTriageSuggestion(...): void
+  +ConfirmTriage(...): void
+  +IsUnassigned : bool
+  +IsEscalationActive : bool
+  +HasPendingTriageSuggestion : bool
+}
+
+class IncidentEvent <<Entity>> {
+  -id : int
+  -incidentId : int
+  -type : string
+  -status : string?
+  -comment : string?
+  -authorId : string?
+  -authorName : string?
+  -authorRole : string?
+  -createdAt : DateTimeOffset
+  --
+  ~{static} Create(...): IncidentEvent
+}
+
+class IncidentActor <<Value Object>> {
+  -id : string?
+  -name : string?
+  -role : string?
+  --
+  +{static} System : IncidentActor
+  +{static} Assistant : IncidentActor
+}
+
+class BuildingServiceProvider <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : string
+  -name : string
+  -phone : string
+  -specialty : string
+  -createdAt : DateTimeOffset?
+  --
+  +{static} Create(...)
+}
+
+class EscalationPolicy <<Domain Service>> {
+  +Threshold = 48 h
+  --
+  +MustEscalate(incident, now): bool
+}
+
+interface IIncidentRepository <<Repository>> {
+  +FindByExternalIdAsync(...): Incident
+  +ListByOwnerAdminIdAsync(...)
+  +ListEscalationCandidatesAsync(...)
+  +AnyIncidentsAsync(): bool
+}
+
+interface IServiceProviderRepository <<Repository>> {
+  +FindByExternalIdAsync(...)
+  +ListByOwnerAsync(...)
+}
+
+enum IncidentStatuses <<constantes string>> {
+  open
+  in-progress
+  resolved
+}
+
+enum IncidentPriorities <<constantes string>> {
+  low
+  medium
+  high
+  critical
+}
+
+enum IncidentEventTypes <<constantes string>> {
+  reported
+  status_changed
+  assigned
+  unassigned
+  resolved
+  comment
+  escalated
+  ai_triage_suggested
+  triage_confirmed
+}
+
+note bottom of BuildingServiceProvider
+  ownerAdminId guarda el external id
+  del administrador; Incident.assigneeId
+  guarda el externalId del proveedor.
+end note
+
+Incident "1" *-[norank]- "1..*" IncidentEvent : events
+IncidentEvent .[norank].> "0..1" IncidentActor : autor
+Incident "*" -[norank]-> "0..1" BuildingServiceProvider : assigneeId
+EscalationPolicy .[norank].> Incident : evalúa
+IIncidentRepository .[norank].> "*" Incident : persiste
+IServiceProviderRepository .[norank].> "*" BuildingServiceProvider : lee
+Incident "*" -[norank]-> "1" IncidentStatuses : status
+Incident "*" -[norank]-> "0..1" IncidentPriorities : priority
+IncidentEvent "*" -[norank]-> "1" IncidentEventTypes : type
+' --- disposición en columnas (aristas ocultas); las relaciones usan [norank]
+IIncidentRepository -[hidden]- Incident
+Incident -[hidden]- IncidentEvent
+Incident -[hidden]- IncidentActor
+Incident -[hidden]- IncidentStatuses
+Incident -[hidden]- IncidentPriorities
+Incident -[hidden]- IncidentEventTypes
+@enduml

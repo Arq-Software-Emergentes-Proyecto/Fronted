@@ -1,0 +1,79 @@
+@startuml
+!include common_class.iuml
+left to right direction
+hide circle
+hide methods
+title Bounded Context Incidents - Database Design (TiDB Cloud · compatible con MySQL)
+
+entity "users (IAM)" as users #F2F2F2 {
+  * id : INT «PK»
+  --
+  external_id : VARCHAR(128) «UQ»
+  ...
+}
+
+entity incidents {
+  * id : INT AUTO_INCREMENT «PK»
+  --
+  external_id : VARCHAR(64) NOT NULL «UQ»
+  owner_admin_id : INT NOT NULL «FK, IDX»
+  resident_external_id : VARCHAR(64) NULL
+  resident_name : VARCHAR(200) NOT NULL
+  title : VARCHAR(200) NOT NULL DEFAULT ''
+  description : VARCHAR(2000) NOT NULL
+  category : VARCHAR(50) NULL
+  priority : VARCHAR(20) NULL
+  status : VARCHAR(20) NOT NULL
+  provider : VARCHAR(200) NULL
+  assignee_id : VARCHAR(128) NULL
+  resolution_comment : VARCHAR(2000) NULL
+  resolved_at : DATETIME(6) NULL
+  escalated_at : DATETIME(6) NULL
+  ai_suggested_category : VARCHAR(50) NULL
+  ai_suggested_priority : VARCHAR(20) NULL
+  ai_suggestion_reason : VARCHAR(300) NULL
+  ai_suggested_at : DATETIME(6) NULL
+  source_chat_id : VARCHAR(128) NULL
+  reported_at : DATETIME NOT NULL
+  created_at : DATETIME NULL
+  updated_at : DATETIME NULL
+}
+
+entity incident_events {
+  * id : INT AUTO_INCREMENT «PK»
+  --
+  incident_id : INT NOT NULL «FK, IDX»
+  type : VARCHAR(32) NOT NULL
+  status : VARCHAR(20) NULL
+  comment : VARCHAR(2000) NULL
+  author_id : VARCHAR(128) NULL
+  author_name : VARCHAR(200) NULL
+  author_role : VARCHAR(20) NULL
+  created_at : DATETIME(6) NOT NULL
+}
+
+entity service_providers {
+  * id : INT AUTO_INCREMENT «PK»
+  --
+  external_id : VARCHAR(128) NOT NULL «UQ»
+  owner_admin_id : VARCHAR(128) NOT NULL
+  name : VARCHAR(256) NULL
+  phone : VARCHAR(64) NULL
+  specialty : VARCHAR(128) NULL
+  created_at : DATETIME(6) NULL
+}
+
+legend bottom left
+  incidents.owner_admin_id → users.id: ON DELETE RESTRICT.
+  incident_events.incident_id → incidents.id: ON DELETE CASCADE.
+  service_providers.owner_admin_id guarda users.external_id e incidents.assignee_id
+  guarda service_providers.external_id; ambas relaciones son lógicas, sin FK.
+endlegend
+
+users "1" -[norank]- "0..*" incidents : owner_admin_id
+incidents "1" -[norank]- "1..*" incident_events : incident_id
+users "1" .[norank]. "0..*" service_providers : owner_admin_id =\nexternal_id (sin FK)
+service_providers "0..1" .[norank]. "0..*" incidents : assignee_id =\nexternal_id (sin FK)
+' --- disposición en columnas (aristas ocultas); las relaciones usan [norank]
+users -[hidden]- incidents
+@enduml

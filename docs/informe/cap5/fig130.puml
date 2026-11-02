@@ -1,0 +1,149 @@
+@startuml
+scale 1.5
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam titleFontSize 14
+skinparam titleFontStyle bold
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+skinparam note {
+  BackgroundColor #FFFDE7
+  BorderColor #8A8A8A
+}
+hide empty members
+title Bounded Context Resident Care - Domain Layer
+
+class SupportChat <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : string
+  -residentId : string
+  -residentName : string
+  -topic : string
+  -status : string
+  -kind : string
+  -source : string
+  -linkedChatId : string?
+  -incidentExternalId : string?
+  -titleSummarized : bool
+  -closedAt : DateTimeOffset?
+  -createdAt : DateTimeOffset
+  -updatedAt : DateTimeOffset
+  -messages : List<SupportMessage>
+  --
+  +{static} CreateAi(externalId, ownerAdminId, residentId, residentName, topic): SupportChat
+  +{static} CreateAdmin(externalId, ownerAdminId, residentId, residentName, topic, source, linkedAiChatId): SupportChat
+  +SetTopic(topic: string, summarized: bool): void
+  +LinkTo(otherChatExternalId: string): void
+  +UpdateStatus(status: string): void
+  +MarkPending(): void
+  +MarkAnswered(): void
+  +Derive(adminChatExternalId: string): void
+  +Close(): void
+  +LinkIncident(incidentExternalId: string): void
+  +AddMessage(sender: Sender, body: string, authorName: string?): SupportMessage
+  +CopyMessage(source: SupportMessage): SupportMessage
+}
+
+class SupportMessage <<Entity>> {
+  -id : int
+  -externalId : string
+  -chatId : int
+  -authorRole : string
+  -body : string
+  -authorName : string?
+  -citedDocumentId : string?
+  -citedSource : string?
+  -createdAt : DateTimeOffset
+  --
+  +{static} Create(chat, authorRole, body, authorName, citedDocumentId, citedSource, createdAt): SupportMessage
+  +GetSender(): Sender?
+}
+
+enum ConversationStatus <<constantes>> {
+  open
+  answered
+  derived
+  closed
+}
+
+enum Sender {
+  Resident
+  Assistant
+  Admin
+}
+
+class AiContextChunk <<Entity>> {
+  -id : int
+  -ownerAdminId : string
+  -uploadExternalId : string
+  -fileName : string
+  -chunkIndex : int
+  -content : string
+  -embeddingJson : string
+  -embeddingModel : string
+  -createdAt : DateTimeOffset
+  --
+  +{static} Create(ownerAdminId, uploadExternalId, fileName, chunkIndex, content, embeddingJson, embeddingModel): AiContextChunk
+}
+
+class AiUsage <<Entity>> {
+  -id : int
+  -ownerAdminId : string
+  -period : string
+  -queryCount : int
+  -filteredCount : int
+  -createdAt : DateTimeOffset
+  -updatedAt : DateTimeOffset
+}
+
+class AnswerPolicy <<Domain Service>> {
+  +ResidentDailyAiQueries : int = 15
+  +{static} MustDerive(sources: IReadOnlyCollection<KnowledgeSource>): bool
+  +{static} IsEmergency(text: string): bool
+  +{static} BuildContext(sources: IReadOnlyList<KnowledgeSource>): string
+  +{static} ToAnswer(rawReply: string, sources: IReadOnlyList<KnowledgeSource>): Answer
+  +{static} WithCitation(body, citedSource, locale): string
+}
+
+class QuestionRelevancePolicy <<Domain Service>> {
+  +{static} Classify(text: string): QuestionScope
+  +{static} IsThanks(text: string): bool
+}
+
+enum QuestionScope {
+  Building
+  SmallTalk
+  OffTopic
+  Unclear
+}
+
+class Answer <<Value Object>> {
+  -text : string
+  -sourceDocumentId : string?
+  -sourceName : string?
+  -grounded : bool
+  -mustDerive : bool
+}
+
+class KnowledgeSource <<Value Object>> {
+  -documentId : string
+  -fileName : string
+  -content : string
+  -score : double
+}
+
+SupportChat "1" *-- "0..*" SupportMessage : messages
+SupportChat "0..1" --> "0..1" SupportChat : linkedChatId
+SupportChat "*" --> "1" ConversationStatus : status
+SupportMessage "*" --> "1" Sender : authorRole
+AnswerPolicy ..> "*" KnowledgeSource : evalúa
+AnswerPolicy ..> Answer : crea
+QuestionRelevancePolicy ..> QuestionScope : clasifica
+KnowledgeSource ..> "0..1" AiContextChunk : se obtiene de
+@enduml

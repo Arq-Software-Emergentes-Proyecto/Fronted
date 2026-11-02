@@ -1,0 +1,69 @@
+@startuml
+skinparam dpi 200
+skinparam defaultFontName "DejaVu Sans"
+skinparam shadowing false
+hide circle
+hide methods
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+title Bounded Context Social Spaces - Database Design (TiDB Cloud · compatible con MySQL)
+
+entity "users (IAM)" as users #F2F2F2 {
+  * id : INT «PK»
+  --
+  external_id : VARCHAR(128) «UQ»
+  ...
+}
+
+entity social_spaces {
+  * id : INT AUTO_INCREMENT «PK»
+  --
+  external_id : VARCHAR(64) NOT NULL «UQ»
+  owner_admin_id : INT NOT NULL «FK, IDX»
+  name : VARCHAR(200) NOT NULL
+  description : VARCHAR(2000) NOT NULL
+  capacity : INT NULL
+  image_url : LONGTEXT NOT NULL
+  rules : VARCHAR(2000) NOT NULL DEFAULT ''
+  status : VARCHAR(20) NOT NULL DEFAULT 'AVAILABLE'
+  max_reservations_per_day : INT NULL
+  created_at : DATETIME NULL
+  updated_at : DATETIME NULL
+}
+
+entity reservations {
+  * id : INT AUTO_INCREMENT «PK»
+  --
+  external_id : VARCHAR(64) NOT NULL «UQ»
+  owner_admin_id : INT NOT NULL «FK, IDX¹, UQ²»
+  space_external_id : VARCHAR(64) NOT NULL «IDX¹»
+  resident_external_id : VARCHAR(64) NOT NULL
+  resident_name : VARCHAR(200) NOT NULL
+  resident_code : VARCHAR(20) NOT NULL
+  date : VARCHAR(20) NOT NULL «IDX¹»
+  start_time : VARCHAR(10) NOT NULL
+  end_time : VARCHAR(10) NOT NULL
+  guests_json : LONGTEXT NOT NULL
+  guest_invite_token : VARCHAR(64) NULL «IDX»
+  guest_invite_expires_at : DATETIME(6) NULL
+  status : VARCHAR(20) NOT NULL DEFAULT 'CONFIRMED'
+  slot_key : VARCHAR(160) NULL «UQ²»
+  cancelled_at : DATETIME(6) NULL
+  created_at : DATETIME NULL
+  updated_at : DATETIME NULL
+}
+
+legend bottom left
+  IDX¹: ix_reservations_owner_space_date (owner_admin_id, space_external_id, date).
+  UQ²: ux_reservations_owner_slot (owner_admin_id, slot_key); slot_key = "espacio|fecha|inicio"
+  mientras la reserva está activa y NULL al cancelarla. FK hacia users: ON DELETE RESTRICT.
+endlegend
+
+users "1" -- "0..*" social_spaces : owner_admin_id
+users "1" -- "0..*" reservations : owner_admin_id
+social_spaces "1" .right. "0..*" reservations : space_external_id = external_id\n(sin FK)
+@enduml

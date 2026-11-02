@@ -1,0 +1,43 @@
+digraph G {
+  graph [rankdir=TB, newrank=true, splines=true, nodesep=0.12, ranksep=0.32, fontname="Liberation Sans", fontsize=15, pad="0.08", outputorder=edgesfirst];
+  node [fontname="Liberation Sans", fontsize=14, margin="0.10,0.06", penwidth=0];
+  edge [fontname="Liberation Sans", fontsize=14, color="#666666", fontcolor="#333333", arrowsize=0.7, penwidth=1.1];
+  labelloc=t; label=<<b>BuildingFex.Api - bounded context Social Spaces (azul claro:<br/>componentes; gris: otros módulos)</b>>;
+  spa [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>BuildingFex Web SPA</b></font><br/><i>[Vue 3]</i><br/>Interfaz para<br/>administradores,<br/>residentes y la<br/>página pública del<br/>invitado.>];
+  spCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>SocialSpacesCompat<br/>Controller</b></font><br/><i>[REST Controller]</i><br/>GET, POST<br/>/socialSpaces; GET,<br/>PATCH, DELETE<br/>/socialSpaces/{id}.>];
+  resCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ReservationsCompat<br/>Controller</b></font><br/><i>[REST Controller]</i><br/>GET, POST<br/>/reservations; GET,<br/>PATCH, DELETE<br/>/reservations/{id};<br/>POST<br/>.../{id}/cancel.>];
+  gpCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>GuestPassesController</b></font><br/><i>[REST Controller]</i><br/>GET<br/>/api/v1/guest-passes/{token}<br/>(público) y POST<br/>.../{token}/check-in<br/>(portería).>];
+  svc [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ReservationCommand<br/>Service</b></font><br/><i>[Application Service]</i><br/>CreateAsync,<br/>UpdateGuestsAsync,<br/>CancelAsync,<br/>PurgeAsync,<br/>CheckInByTokenAsync.<br/>Usa<br/>GuestListSanitizer y<br/>SocialSpacesClock.>];
+  dm [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>Domain Model</b></font><br/><i>[Domain Layer]</i><br/>SocialSpace,<br/>Reservation (con el<br/>pase QR), TimeSlot y<br/>ReservationPolicy.>];
+  acl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>FinancesAccountStatusAcl</b></font><br/><i>[Anticorruption Layer<br/>(IAccountStatusAcl)]</i><br/>¿El reglamento<br/>impide reservar al<br/>residente moroso?>];
+  repo [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>SocialSpaceRepository<br/>/<br/>ReservationRepository</b></font><br/><i>[Repository (EF Core)]</i><br/>BeginBookingAsync<br/>bloquea el espacio<br/>(SELECT ... FOR<br/>UPDATE).>];
+  finances [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Finances</b></font><br/><i>[BuildingFex.Api]</i><br/>IAccountStatusQueryService:<br/>estado de cuenta y<br/>regla de morosidad.>];
+  db [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>TiDB Cloud</b></font><br/><i>[MySQL compatible]</i><br/>social_spaces,<br/>reservations.>];
+  { rank=same; spa; }
+  { rank=same; spCtrl; resCtrl; gpCtrl; }
+  spCtrl -> resCtrl [style=invis, weight=5];
+  resCtrl -> gpCtrl [style=invis, weight=5];
+  { rank=same; svc; }
+  { rank=same; dm; repo; acl; }
+  dm -> repo [style=invis, weight=5];
+  repo -> acl [style=invis, weight=5];
+  { rank=same; db; finances; }
+  db -> finances [style=invis, weight=5];
+  spa -> spCtrl [style=invis, weight=0];
+  spCtrl -> svc [style=invis, weight=0];
+  svc -> dm [style=invis, weight=0];
+  dm -> db [style=invis, weight=0];
+  spa -> spCtrl [];
+  spa -> resCtrl [label=<JSON/HTTPS>];
+  spa -> gpCtrl [];
+  resCtrl -> svc [label=<Crea, edita<br/>invitados,<br/>cancela>];
+  gpCtrl -> svc [label=<Check-in>];
+  spCtrl -> repo [label=<Lee y escribe<br/>espacios>];
+  resCtrl -> repo [label=<Consulta<br/>reservas>];
+  gpCtrl -> repo [label=<Valida el pase>];
+  svc -> dm [label=<Reglas del<br/>dominio>];
+  svc -> acl [label=<BlocksReservations<br/>Async>];
+  svc -> repo [label=<Persiste>];
+  acl -> finances [label=<Consulta<br/>estado de<br/>cuenta>];
+  repo -> db [label=<EF Core>];
+}

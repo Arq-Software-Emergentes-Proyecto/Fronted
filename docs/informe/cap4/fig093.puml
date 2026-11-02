@@ -1,0 +1,32 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+skinparam wrapWidth 220
+LAYOUT_TOP_DOWN()
+
+Person(admin, "Administrador", "Publica reglamentos, actas y documentos.")
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz web para administradores y residentes.")
+
+Container_Boundary(api, "BuildingFex.Api - módulo Communications (documentos)") {
+  Component(folderCtrl, "ImportFoldersController", "ASP.NET Core API Controller", "/api/v1/import/folders: carpetas del condominio (inicio y carpeta de contexto del asistente).")
+  Component(uploadCtrl, "ImportUploadsController", "ASP.NET Core API Controller", "/api/v1/import/uploads: signed-url, confirm, download-url, publish, archive y delete; controla tamaño (5 MB), cupo (100 archivos), tipo MIME, versión y vigencia.")
+  Component(cleanup, "ImportOrphanCleanup", "C# Infrastructure", "Borra los archivos que quedaron sin confirmar (job import-cleanup cada 30 min; en local, ImportOrphanCleanupWorker).")
+}
+
+Component_Ext(fileStorage, "File Storage", "S3StorageService (IFirebaseStorageService)", "URL prefirmadas PUT/GET de 10 min, metadatos reales y borrado. Sin BF_FILES_BUCKET se usa FirebaseStorageService.")
+Component_Ext(residentCare, "Módulo Resident Care", "IAiContextIndexingQueue y AiContextIndexer", "Encola la indexación (en AWS invoca el job ai-index de forma asíncrona) y retira los fragmentos del documento archivado o reemplazado.")
+ContainerDb(s3, "Almacenamiento de archivos", "Amazon S3", "Bucket privado y cifrado: reglamentos, actas e importaciones.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Communications: import_folders e import_uploads.")
+
+Rel(admin, spa, "Sube documentos", "HTTPS")
+Rel(spa, folderCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, uploadCtrl, "1. Pide URL prefirmada /\n3. Confirma", "JSON/HTTPS")
+Rel(spa, s3, "2. Sube el archivo (PUT prefirmado)", "HTTPS")
+Rel(uploadCtrl, fileStorage, "Firma, verifica metadatos y borra")
+Rel(uploadCtrl, residentCare, "EnqueueAsync / RemoveUploadAsync")
+Rel(cleanup, fileStorage, "Borra huérfanos")
+Rel(fileStorage, s3, "Prefirma URL, lee metadatos y borra", "AWS SDK/HTTPS")
+Rel(folderCtrl, db, "Lee y escribe (AppDbContext)", "EF Core")
+Rel(uploadCtrl, db, "Lee y escribe (AppDbContext)", "EF Core")
+Rel(cleanup, db, "Lee y borra pendientes", "EF Core")
+@enduml

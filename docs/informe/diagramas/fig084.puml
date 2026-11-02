@@ -1,0 +1,17 @@
+@startuml
+!include <C4/C4_Context>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+
+Person(admin, "Administrador", "Empresa administradora, administrador asignado o la junta que creó la cuenta. Gestiona uno o varios edificios (Portafolio).")
+Person(board, "Junta directiva", "Miembro de la junta invitado al edificio. Ve su información en solo lectura.")
+Person(resident, "Residente", "Habitante de una unidad. Cuotas, pagos, reservas, incidencias y atención al residente (Resident Care).")
+Person(guest, "Invitado de residente", "Externo invitado a una reserva. Sin cuenta.")
+
+System(bf, "BuildingFex", "Gestión de condominios.")
+
+Rel(admin, bf, "Inicia sesión o se registra (/login, /register) y gestiona el edificio activo en /app/*", "HTTPS")
+Rel(board, bf, "Acepta la invitación (/equipo/invitacion/:token) y revisa el resumen en /app/board", "HTTPS")
+Rel(resident, bf, "Acepta la invitación, ingresa con Google y usa /app/resident/*", "HTTPS")
+Rel(guest, bf, "Abre su pase en /invite/:token (sin iniciar sesión)", "HTTPS")
+@enduml

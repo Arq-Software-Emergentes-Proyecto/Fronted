@@ -1,0 +1,51 @@
+digraph G {
+  graph [rankdir=TB, newrank=true, splines=true, nodesep=0.12, ranksep=0.3, fontname="Liberation Sans", fontsize=15, pad="0.08", outputorder=edgesfirst];
+  node [fontname="Liberation Sans", fontsize=14, margin="0.10,0.06", penwidth=0];
+  edge [fontname="Liberation Sans", fontsize=14, color="#666666", fontcolor="#333333", arrowsize=0.7, penwidth=1.1];
+  subgraph cluster_1 { label=<<b>Equipo del desarrollador</b><br/><font point-size="14">[Windows, macOS o Linux]</font>>; style="dashed,rounded"; color="#444444"; fontcolor="#222222"; fontsize=15; margin=8;
+    subgraph cluster_2 { label=<<b>Navegador web</b><br/><font point-size="14">[Chrome, Edge o Firefox]</font>>; style="dashed,rounded"; color="#444444"; fontcolor="#222222"; fontsize=15; margin=8;
+      spa [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>BuildingFex Web SPA</b></font><br/><i>[Vue 3]</i><br/>http://localhost:5173.<br/>La cuenta demo test /<br/>123456 funciona sin<br/>la API (datos de<br/>ejemplo).>];
+    }
+    subgraph cluster_3 { label=<<b>Vite dev server</b><br/><font point-size="14">[Node.js, puerto 5173]</font>>; style="dashed,rounded"; color="#444444"; fontcolor="#222222"; fontsize=15; margin=8;
+      devserver [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>Servidor de<br/>desarrollo</b></font><br/><i>[Vite]</i><br/>Sirve la SPA y<br/>reenvía /api, /hubs y<br/>rutas de<br/>compatibilidad a<br/>:5001.>];
+    }
+    subgraph cluster_4 { label=<<b>dotnet run</b><br/><font point-size="14">[Kestrel, http://localhost:5001]</font>>; style="dashed,rounded"; color="#444444"; fontcolor="#222222"; fontsize=15; margin=8;
+      api [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>BuildingFex.Api</b></font><br/><i>[ASP.NET Core (.NET 10)]</i><br/>Monolito modular con<br/>9 módulos. Swagger UI<br/>en /swagger. Aplica<br/>el esquema al<br/>arrancar.>];
+      workers [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>Workers</b></font><br/><i>[BackgroundService]</i><br/>Indexación IA,<br/>limpieza de<br/>importaciones, cobro<br/>mensual y<br/>escalamiento de<br/>incidencias, en el<br/>mismo proceso.>];
+      hub [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>Hub SignalR</b></font><br/><i>[/hubs/support]</i><br/>Mensajes y avisos en<br/>vivo (soporte e<br/>incidencias). Solo<br/>existe en local.>];
+    }
+    subgraph cluster_5 { label=<<b>Docker Compose</b><br/><font point-size="14">[Docker]</font>>; style="dashed,rounded"; color="#444444"; fontcolor="#222222"; fontsize=15; margin=8;
+      mysql [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>MySQL 8.4</b></font><br/><i>[Contenedor<br/>buildingfex-mysql,<br/>puerto 3306]</i><br/>Base de datos local<br/>buildingfex (en<br/>producción, TiDB<br/>Cloud).>];
+    }
+  }
+  subgraph cluster_6 { label=<<b>Servicios en la nube</b><br/><font point-size="14">[Claves de desarrollo o sandbox]</font>>; style="dashed,rounded"; color="#444444"; fontcolor="#222222"; fontsize=15; margin=8;
+    fbauth [shape=box, style="rounded,filled", fillcolor="#999999", fontcolor="white", label=<<font point-size="15"><b>Firebase<br/>Authentication</b></font><br/>Proyecto<br/>emergentes-36306.>];
+    gemini [shape=box, style="rounded,filled", fillcolor="#999999", fontcolor="white", label=<<font point-size="15"><b>Google Gemini API</b></font><br/>Clave de desarrollo.>];
+    mp [shape=box, style="rounded,filled", fillcolor="#999999", fontcolor="white", label=<<font point-size="15"><b>Mercado Pago<br/>(sandbox)</b></font><br/>Checkout Pro con<br/>credenciales de<br/>prueba.>];
+    s3 [shape=box, style="rounded,filled", fillcolor="#999999", fontcolor="white", label=<<font point-size="15"><b>Amazon S3 (opcional)</b></font><br/>Solo con<br/>BF_FILES_BUCKET; si<br/>no, la API usa el<br/>adaptador heredado de<br/>Firebase Storage.>];
+  }
+  { rank=same; spa; }
+  { rank=same; devserver; fbauth; }
+  devserver -> fbauth [style=invis, weight=5];
+  { rank=same; hub; api; workers; }
+  hub -> api [style=invis, weight=5];
+  api -> workers [style=invis, weight=5];
+  { rank=same; mysql; gemini; }
+  mysql -> gemini [style=invis, weight=5];
+  { rank=same; mp; s3; }
+  mp -> s3 [style=invis, weight=5];
+  spa -> devserver [style=invis, weight=0];
+  devserver -> hub [style=invis, weight=0];
+  hub -> mysql [style=invis, weight=0];
+  mysql -> mp [style=invis, weight=0];
+  spa -> devserver [label=<Carga la SPA y<br/>llama a /api<br/>(HTTP :5173)>];
+  devserver -> api [label=<Proxy de /api y<br/>rutas de<br/>compatibilidad<br/>(HTTP :5001)>];
+  devserver -> hub [label=<Proxy de<br/>/hubs/support<br/>(WebSocket)>];
+  spa -> fbauth [label=<Inicia sesión y<br/>obtiene el ID<br/>token (HTTPS)>];
+  api -> mysql [label=<EF Core, TCP<br/>3306>];
+  workers -> mysql [label=<EF Core>];
+  fbauth -> api [dir=back, label=<Verifica el ID<br/>token>];
+  api -> gemini [label=<Chat y<br/>embeddings>];
+  api -> mp [label=<Crea pagos de<br/>prueba>];
+  api -> s3 [label=<URL prefirmadas<br/>(opcional)>];
+}

@@ -1,0 +1,52 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+skinparam wrapWidth 220
+skinparam nodesep 30
+skinparam ranksep 80
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz para administradores, junta directiva y residentes. Envía X-Building-Id.")
+
+Container_Boundary(api, "BuildingFex.Api - bounded context Profiles") {
+  Component(bldCtrl, "BuildingsController", "REST Controller", "POST /api/v1/buildings, GET .../mine, GET y PUT .../{id} y GET .../{id}/residents.")
+  Component(profCtrl, "ProfilesController", "REST Controller", "POST /api/v1/profiles, GET /api/v1/profiles/me y GET /api/v1/profiles/{userId}.")
+  Component(impCtrl, "ResidentImportController", "REST Controller", "POST /api/v1/residents/import (Excel o CSV, todo o nada) y GET .../template.")
+  Component(portCtrl, "PortfolioController", "REST Controller", "GET /api/v1/me/buildings, GET y POST /api/v1/portfolio/buildings.")
+  Component(imp, "ResidentRosterImportService", "Application Service", "Valida todas las filas y registra a los residentes en una sola transacción (RosterImportResult, RosterRowError).")
+  Component(dm, "Domain Model", "Domain Layer", "Building, Profile; IBuildingRepository.")
+  Component(repo, "BuildingRepository", "Repository (EF Core)", "Implementa IBuildingRepository sobre la tabla buildings.")
+  Component(xls, "ExcelRosterReader", "Adapter", "Lee en memoria el Excel o CSV (RosterSheet, RosterRawRow) y genera la plantilla.")
+}
+
+Component_Ext(iam, "Módulo IAM", "Módulo de BuildingFex.Api", "UserCommandService (CreateResident, UpsertFirebaseAdmin), UserQueryService, IUserRepository y CallerContextAccessor.")
+Component_Ext(billing, "Módulo Billing", "Módulo de BuildingFex.Api", "ISubscriptionService: límite del plan y vínculo del edificio con la suscripción.")
+Component_Ext(dbctx, "AppDbContext", "Infraestructura compartida (EF Core)", "DbContext único de BuildingFex.Api.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Profiles: buildings, profiles.")
+
+Rel(spa, bldCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, profCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, impCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, portCtrl, "Usa", "JSON/HTTPS")
+
+Rel(bldCtrl, dm, "Building.Register / Update")
+Rel(bldCtrl, repo, "Lee y persiste")
+Rel(bldCtrl, iam, "Residentes del edificio")
+Rel(bldCtrl, billing, "LinkBuildingAsync")
+Rel(profCtrl, iam, "UpsertFirebaseAdminCommand")
+Rel(profCtrl, dbctx, "profiles (Profile.Create / Update)")
+Rel(impCtrl, xls, "Lee el archivo")
+Rel(impCtrl, imp, "ImportAsync")
+Rel(imp, iam, "CreateResidentCommand")
+Rel(imp, billing, "CheckRosterGrowthAsync")
+Rel(imp, dbctx, "Transacción")
+Rel(portCtrl, iam, "Edificios y rol (CallerContextAccessor)")
+Rel(portCtrl, dbctx, "buildings y cuentas del Portafolio")
+Rel(repo, dbctx, "EF Core")
+Rel(dbctx, db, "Lee y escribe", "MySQL")
+
+Lay_R(bldCtrl, profCtrl)
+Lay_R(profCtrl, impCtrl)
+Lay_R(impCtrl, portCtrl)
+Lay_D(iam, billing)
+@enduml

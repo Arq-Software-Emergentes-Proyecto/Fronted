@@ -1,0 +1,73 @@
+digraph G {
+  graph [rankdir=TB, newrank=true, splines=true, nodesep=0.06, ranksep=0.32, fontname="Liberation Sans", fontsize=15, pad="0.08", outputorder=edgesfirst];
+  node [fontname="Liberation Sans", fontsize=14, margin="0.10,0.06", penwidth=0];
+  edge [fontname="Liberation Sans", fontsize=14, color="#666666", fontcolor="#333333", arrowsize=0.7, penwidth=1.1];
+  labelloc=t; label=<<b>BuildingFex.Api - bounded context Resident Care (azul claro:<br/>componentes; gris: otros módulos)</b>>;
+  spa [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>BuildingFex Web<br/>SPA</b></font><br/><i>[Vue 3]</i><br/>Interfaz para<br/>administradores y<br/>residentes.>];
+  comms [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo<br/>Communications</b></font><br/><i>[BuildingFex.Api]</i><br/>ImportUploadsController<br/>encola el indexado<br/>y retira<br/>fragmentos de<br/>documentos<br/>reemplazados o<br/>archivados.>];
+  jobs [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>Función de jobs</b></font><br/><i>[AWS Lambda +<br/>EventBridge<br/>Scheduler]</i><br/>Job ai-index:<br/>invocación<br/>asíncrona por<br/>documento y<br/>barrido<br/>programado.>];
+  ctrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>SupportController</b></font><br/><i>[REST Controller]</i><br/>/api/v1/support:<br/>chats, summary,<br/>ai-usage, messages<br/>(AskQuestion),<br/>status, close e<br/>incident.>];
+  hub [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>SupportHub</b></font><br/><i>[SignalR Hub (fuera<br/>de AWS Lambda)]</i><br/>/hubs/support:<br/>JoinOwner() y<br/>JoinChat(); avisos<br/>en vivo. En Lambda<br/>el frontend<br/>consulta<br/>periódicamente.>];
+  quota [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>AiUsageQuota</b></font><br/><i>[Application Service]</i><br/>Tope mensual por<br/>edificio y límite<br/>diario por<br/>residente (UPDATE<br/>condicional<br/>atómico).>];
+  idx [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>AiContextIndexer</b></font><br/><i>[Application Service]</i><br/>Fragmenta, genera<br/>embeddings,<br/>recupera<br/>fragmentos de<br/>documentos<br/>vigentes y retira<br/>los no vigentes.>];
+  jobsvc [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>AiContextIndexing<br/>Job / Worker /<br/>Queue</b></font><br/><i>[Background Job]</i><br/>Indexado en<br/>segundo plano<br/>(BackgroundService<br/>fuera de Lambda).>];
+  notif [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>IncidentResolution<br/>Notifier</b></font><br/><i>[Application Service]</i><br/>IIncidentResolutionNotifier:<br/>deja la resolución<br/>en el chat de<br/>origen y lo<br/>cierra.>];
+  dm [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>Domain Model</b></font><br/><i>[Domain Layer]</i><br/>SupportChat,<br/>SupportMessage,<br/>AiContextChunk,<br/>AiUsage,<br/>AnswerPolicy,<br/>QuestionRelevancePolicy.>];
+  gem [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>GeminiClient /<br/>Embedding Client /<br/>RateLimiter</b></font><br/><i>[Anticorruption Layer]</i><br/>Respuestas,<br/>títulos y<br/>embeddings con<br/>timeout, reintento<br/>y circuit breaker.>];
+  pqc [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>PlanQuotaClient</b></font><br/><i>[Anticorruption Layer]</i><br/>Tope mensual del<br/>plan efectivo y<br/>módulos incluidos.>];
+  lq [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>LambdaAiContext<br/>IndexingQueue</b></font><br/><i>[Adapter]</i><br/>En AWS invoca de<br/>forma asíncrona el<br/>job ai-index.>];
+  ctx [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>AppDbContext</b></font><br/><i>[EF Core (compartido)]</i><br/>support_chats,<br/>support_messages,<br/>ai_context_chunks,<br/>ai_usages,<br/>resident_ai_usages.>];
+  inc [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Incidents</b></font><br/><i>[BuildingFex.Api]</i><br/>CreateIncidentCommand<br/>e<br/>IncidentTriageService;<br/>al resolver llama<br/>a<br/>IIncidentResolutionNotifier.>];
+  billing [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Billing</b></font><br/><i>[BuildingFex.Api]</i><br/>SubscriptionPlans<br/>y PlanCatalog.>];
+  stor [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>IFirebaseStorage<br/>Service<br/>(Communications)</b></font><br/><i>[Adapter compartido]</i><br/>Descarga los bytes<br/>del documento a<br/>indexar.>];
+  db [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>TiDB Cloud</b></font><br/><i>[MySQL compatible]</i><br/>Esquema de<br/>Resident Care.>];
+  gemini [shape=box, style="rounded,filled", fillcolor="#999999", fontcolor="white", label=<<font point-size="15"><b>Google Gemini API</b></font><br/>Proveedor de IA.>];
+  { rank=same; spa; comms; jobs; }
+  spa -> comms [style=invis, weight=5];
+  comms -> jobs [style=invis, weight=5];
+  { rank=same; hub; ctrl; jobsvc; }
+  hub -> ctrl [style=invis, weight=5];
+  ctrl -> jobsvc [style=invis, weight=5];
+  { rank=same; inc; quota; pqc; lq; }
+  inc -> quota [style=invis, weight=5];
+  quota -> pqc [style=invis, weight=5];
+  pqc -> lq [style=invis, weight=5];
+  { rank=same; notif; dm; billing; idx; }
+  notif -> dm [style=invis, weight=5];
+  dm -> billing [style=invis, weight=5];
+  billing -> idx [style=invis, weight=5];
+  { rank=same; ctx; gem; stor; }
+  ctx -> gem [style=invis, weight=5];
+  gem -> stor [style=invis, weight=5];
+  { rank=same; db; gemini; }
+  db -> gemini [style=invis, weight=5];
+  spa -> hub [style=invis, weight=0];
+  hub -> inc [style=invis, weight=0];
+  inc -> notif [style=invis, weight=0];
+  notif -> ctx [style=invis, weight=0];
+  ctx -> db [style=invis, weight=0];
+  spa -> ctrl [label=<JSON/HTTPS;<br/>en AWS,<br/>consulta<br/>periódica>];
+  spa -> hub [label=<Chat en vivo,<br/>WSS (fuera de<br/>Lambda)>];
+  comms -> jobsvc [label=<Encola<br/>documento>];
+  comms -> idx [label=<RemoveUpload<br/>Async>];
+  ctrl -> dm [label=<Reglas>];
+  ctrl -> quota [label=<Reserva<br/>consulta>];
+  ctrl -> pqc [label=<Tope del plan>];
+  ctrl -> idx [label=<Recupera<br/>fragmentos>];
+  ctrl -> gem [label=<Genera<br/>respuesta>];
+  ctrl -> inc [label=<Reportar<br/>incidente>];
+  ctrl -> ctx [];
+  inc -> notif [label=<IncidenteResuelto>];
+  notif -> ctx [];
+  quota -> ctx [label=<SQL atómico>];
+  jobsvc -> idx [label=<IndexUpload<br/>Async>];
+  jobsvc -> lq [label=<En AWS>];
+  jobs -> lq [dir=back, label=<Invoke<br/>(Event)>];
+  jobs -> jobsvc [label=<ai-index>];
+  idx -> gem [label=<Embeddings>];
+  idx -> stor [label=<Descarga<br/>archivo>];
+  idx -> ctx [label=<Guarda<br/>fragmentos>];
+  pqc -> billing [label=<Catálogo>];
+  gem -> gemini [label=<generateContent<br/>y<br/>embedContent>];
+  ctx -> db [label=<EF Core>];
+}

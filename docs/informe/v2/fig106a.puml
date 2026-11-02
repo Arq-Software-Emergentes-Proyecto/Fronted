@@ -1,0 +1,114 @@
+@startuml
+!include common_class.iuml
+title Bounded Context IAM - Domain Layer (1 de 2: User)
+left to right direction
+hide circle
+
+class User <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -name : string
+  -email : string
+  -passwordHash : string
+  -role : string
+  -authProvider : string
+  -googleSub : string?
+  -dni : string?
+  -address : string?
+  -company : string?
+  -ruc : string?
+  -floor : string?
+  -code : string?
+  -inviteToken : string?
+  -inviteExpiresAt : DateTimeOffset?
+  -inviteUsedAt : DateTimeOffset?
+  -inviteEmail : string?
+  -admissionDate : DateOnly?
+  -billFromNextMonth : bool
+  -ownerAdminId : int?
+  -parentAdminId : int?
+  -accountKind : string?
+  -subscriptionPlanId : string
+  -subscriptionPaidUntil : DateTimeOffset?
+  -accountStatus : string
+  -deactivatedAt : DateTimeOffset?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} CreateAdmin(...): User
+  +{static} CreateResident(...): User
+  +{static} CreateBoardMember(...): User
+  +{static} CreateManagedBuildingAccount(...)
+  +{static} GenerateInviteToken(): string
+  +SetAccountKind(kind)
+  +IsInviteValid(token): bool
+  +ConsumeInvite()
+  +ActivateGoogle(...)
+  +ActivateFirebasePassword(...)
+  +UpdateCredentials(...)
+  +UpdateAdminProfile(...)
+  +UpdateResidentProfile(...)
+  +SetBillFromNextMonth(value)
+  +Deactivate()
+  +Reactivate()
+  +UpdateSubscription(...)
+  +IsActive : bool {derivada}
+  +IdentityProvider : string {derivada}
+  +HasCredentials : bool {derivada}
+}
+
+
+
+class Email <<Value Object>> {
+  -value : string
+  --
+  +{static} Create(raw): Email
+  +{static} TryCreate(raw, out email): bool
+  +{static} IsValid(raw): bool
+  +{static} Normalize(raw): string
+}
+
+
+enum UserRoles <<enumeration>> {
+  ADMIN = "admin"
+  RESIDENT = "resident"
+  BOARD_MEMBER = "board_member"
+  STAFF = "staff"
+}
+enum AccountStatus <<enumeration>> {
+  ACTIVE
+  DEACTIVATED
+}
+enum IdentityProvider <<enumeration>> {
+  EMAIL_PASSWORD
+  GOOGLE
+}
+
+note bottom of UserRoles
+  Enumeraciones: clases
+  estáticas con constantes
+  string; se guardan
+  como texto.
+end note
+
+note as N2
+  ownerAdmin: condominio
+  del residente.
+  parentAdmin: cuenta matriz
+  de un edificio del Portafolio.
+end note
+' --- columnas (aristas ocultas): 1) MemberInvitation, BuildingMember, MemberRoles, IUserRepository, Email  2) User  3) enumeraciones y notas
+' --- columnas (aristas ocultas)
+User -[hidden]- UserRoles
+User -[hidden]- AccountStatus
+User -[hidden]- IdentityProvider
+User -[hidden]- Email
+User -[hidden]- N2
+' --- relaciones (sin fijar rango)
+User "0..*" -[norank]-> "0..1" User : ownerAdmin
+User "0..*" -[norank]-> "0..1" User : parentAdmin
+User .[norank].> Email : valida el correo
+User "0..*" -[norank]-> "1" UserRoles : role
+User "0..*" -[norank]-> "1" AccountStatus : accountStatus
+User .[norank].> IdentityProvider : deriva de\nauthProvider
+@enduml

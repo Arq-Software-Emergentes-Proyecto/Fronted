@@ -1,0 +1,940 @@
+/** Demo tenant used by local preview login (`preview-admin-1` / `preview-resident-1`). */
+export const MOCK_OWNER_ID = 'preview-admin-1'
+/** Segundo edificio de la cuenta demo (Portafolio): un condominio aparte con sus propios datos. */
+export const MOCK_SECOND_BUILDING_ID = 'preview-bldg-2'
+/** Miembro de la junta directiva del edificio demo (usuario "junta", solo lectura). */
+export const MOCK_BOARD_USER_ID = 'preview-board-1'
+export const MOCK_DB_VERSION = 9
+
+function pad(n) {
+  return String(n).padStart(2, '0')
+}
+
+function ymd(offsetDays = 0) {
+  const d = new Date()
+  d.setDate(d.getDate() + offsetDays)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function monthEnd(offsetMonths = 0) {
+  const d = new Date()
+  d.setMonth(d.getMonth() + offsetMonths + 1, 0)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function monthStart(offsetMonths = 0) {
+  const d = new Date()
+  d.setMonth(d.getMonth() + offsetMonths, 1)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-01`
+}
+
+function isoHoursAgo(hours) {
+  return new Date(Date.now() - hours * 3600_000).toISOString()
+}
+
+function monthKey(offsetMonths = 0) {
+  return monthStart(offsetMonths).slice(0, 7)
+}
+
+/** Charge for month M: period = M, payment opens M+1 day 1 and is due M+1 day 7 (computeChargeDates). */
+function monthlyCharge(offsetMonths, amount) {
+  const month = monthKey(offsetMonths)
+  return {
+    id: `charge-${month}`,
+    month,
+    amount,
+    billingStart: monthStart(offsetMonths),
+    billingEnd: monthEnd(offsetMonths),
+    paymentOpen: monthStart(offsetMonths + 1),
+    paymentDue: `${monthKey(offsetMonths + 1)}-07`,
+  }
+}
+
+/** ISO date-time for today (local) at hh:00 + offset days. */
+function isoAt(offsetDays, hour) {
+  const d = new Date()
+  d.setDate(d.getDate() + offsetDays)
+  d.setHours(hour, 0, 0, 0)
+  return d.toISOString()
+}
+
+/**
+ * Today's demo reservation: a 2 h slot inside the space's hours (7:00–21:00) that is still upcoming
+ * or under way (18:00–20:00, or 19:00–21:00 late in the evening), so its guest pass stays valid.
+ */
+function todaySlot() {
+  const start = Math.min(Math.max(new Date().getHours(), 18), 19)
+  return { startTime: `${pad(start)}:00`, endTime: `${pad(start + 2)}:00` }
+}
+
+/** The first guest of today's reservation checks in 15 min after it starts (none before it starts). */
+function todaySlotArrival() {
+  const d = new Date()
+  d.setHours(Number(todaySlot().startTime.slice(0, 2)), 15, 0, 0)
+  return d.getTime() <= Date.now() ? d.toISOString() : null
+}
+
+export function createSeedDb() {
+  const owner = MOCK_OWNER_ID
+
+  return {
+    version: MOCK_DB_VERSION,
+    users: [
+      {
+        id: owner,
+        name: 'Admin demo',
+        email: 'admin@demo.test',
+        password: 'demo',
+        dni: '12345678',
+        address: 'Av. Principal 123, Lima',
+        company: 'BuildingFex Demo',
+        ruc: '20123456789',
+        role: 'admin',
+      },
+      {
+        id: 'preview-resident-1',
+        name: 'Ana Torres',
+        floor: '3',
+        code: '302',
+        email: 'resident@demo.test',
+        password: 'demo',
+        role: 'resident',
+        admissionDate: '2025-03-12',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'preview-resident-2',
+        name: 'Luis Vega',
+        floor: '4',
+        code: '401',
+        email: 'luis.vega@demo.test',
+        password: 'demo',
+        role: 'resident',
+        admissionDate: '2025-06-01',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'preview-resident-3',
+        name: 'Carla Ríos',
+        floor: '5',
+        code: '505',
+        email: 'carla.rios@demo.test',
+        password: 'demo',
+        role: 'resident',
+        admissionDate: '2024-11-20',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'preview-resident-4',
+        name: 'Diego Soto',
+        floor: '2',
+        code: '201',
+        email: '',
+        password: '',
+        role: 'resident',
+        // Ingresó este mes: así la demo muestra la tendencia de residentes/unidades en el panel.
+        admissionDate: monthStart(0),
+        ownerAdminId: owner,
+      },
+      {
+        id: MOCK_BOARD_USER_ID,
+        name: 'Lucía Paredes',
+        email: 'junta@demo.test',
+        role: 'board_member',
+      },
+      {
+        // Cuenta del segundo edificio: la administra la cuenta demo y se cobra en su suscripción.
+        id: MOCK_SECOND_BUILDING_ID,
+        name: 'Residencial Los Olivos',
+        email: '',
+        role: 'admin',
+        authProvider: 'managed',
+        parentAdminId: owner,
+      },
+      {
+        id: 'preview-resident-21',
+        name: 'Marco Salas',
+        floor: '1',
+        code: '101',
+        email: 'marco.salas@demo.test',
+        password: 'demo',
+        role: 'resident',
+        admissionDate: '2025-01-15',
+        ownerAdminId: MOCK_SECOND_BUILDING_ID,
+      },
+      {
+        id: 'preview-resident-22',
+        name: 'Rosa Huamán',
+        floor: '2',
+        code: '203',
+        email: 'rosa.huaman@demo.test',
+        password: 'demo',
+        role: 'resident',
+        admissionDate: '2025-04-02',
+        ownerAdminId: MOCK_SECOND_BUILDING_ID,
+      },
+    ],
+    buildings: [
+      {
+        id: 1,
+        name: 'Edificio Las Palmeras',
+        address: 'Av. Principal 123, Miraflores',
+        departmentCount: 12,
+        ownerAdminId: owner,
+        createdAt: isoHoursAgo(24 * 200),
+      },
+      {
+        id: 2,
+        name: 'Residencial Los Olivos',
+        address: 'Jr. Los Olivos 456, San Isidro',
+        departmentCount: 24,
+        ownerAdminId: MOCK_SECOND_BUILDING_ID,
+        createdAt: isoHoursAgo(24 * 40),
+      },
+    ],
+    buildingMembers: [
+      {
+        id: 'member-1',
+        ownerAdminId: owner,
+        userId: MOCK_BOARD_USER_ID,
+        role: 'board_member',
+        createdAt: isoHoursAgo(24 * 30),
+      },
+    ],
+    memberInvitations: [
+      {
+        id: 'minv-demo-1',
+        ownerAdminId: owner,
+        email: 'tesoreria@demo.test',
+        name: 'Jorge Medina',
+        role: 'board_member',
+        token: 'demo0invitation0token0000000000000000000000000000000000000000001',
+        expiresAt: new Date(Date.now() + 5 * 86400000).toISOString(),
+        acceptedAt: null,
+        revokedAt: null,
+        createdAt: isoHoursAgo(48),
+      },
+    ],
+    socialSpaces: [
+      {
+        id: 'space-pool',
+        name: 'Piscina',
+        description: 'Piscina climatizada. Horario 7:00–21:00.',
+        capacity: 20,
+        imageUrl: '',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'space-salon',
+        name: 'Salón de usos múltiples',
+        description: 'Eventos, reuniones de junta y celebraciones.',
+        capacity: 40,
+        imageUrl: '',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'space-gym',
+        name: 'Gimnasio',
+        description: 'Máquinas de cardio y pesas.',
+        capacity: 12,
+        imageUrl: '',
+        ownerAdminId: owner,
+      },
+    ],
+    reservations: [
+      {
+        id: 'res-today-pool',
+        spaceId: 'space-pool',
+        residentId: 'preview-resident-1',
+        residentName: 'Ana Torres',
+        residentCode: '302',
+        date: ymd(0),
+        ...todaySlot(),
+        guests: [
+          { id: 'guest-1', name: 'Mario Torres', checkedIn: Boolean(todaySlotArrival()), checkedInAt: todaySlotArrival() },
+          { id: 'guest-2', name: 'Lucía Pérez', checkedIn: false, checkedInAt: null },
+        ],
+        guestInviteToken: 'demo-invite-302',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'res-tomorrow-salon',
+        spaceId: 'space-salon',
+        residentId: 'preview-resident-2',
+        residentName: 'Luis Vega',
+        residentCode: '401',
+        date: ymd(1),
+        startTime: '18:00',
+        endTime: '21:00',
+        guests: [],
+        guestInviteToken: 'demo-invite-401',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'res-past-gym',
+        spaceId: 'space-gym',
+        residentId: 'preview-resident-3',
+        residentName: 'Carla Ríos',
+        residentCode: '505',
+        date: ymd(-3),
+        startTime: '07:00',
+        endTime: '08:00',
+        guests: [],
+        guestInviteToken: null,
+        ownerAdminId: owner,
+      },
+    ],
+    incidents: [
+      {
+        id: 'inc-1',
+        residentId: 'preview-resident-1',
+        residentName: 'Ana Torres',
+        title: 'Fuga de agua en baño',
+        description: 'Fuga de agua en el baño principal del dpto. 302.',
+        status: 'open',
+        provider: 'Plomería Andes',
+        providerId: 'provider-1',
+        createdAt: isoHoursAgo(20),
+        events: [
+          { id: 9001, type: 'reported', status: 'open', comment: null, authorId: 'preview-resident-1', authorName: 'Ana Torres', authorRole: 'resident', createdAt: isoHoursAgo(20) },
+          { id: 9002, type: 'assigned', status: 'open', comment: 'Plomería Andes', authorId: owner, authorName: 'Admin demo', authorRole: 'admin', createdAt: isoHoursAgo(18) },
+        ],
+        ownerAdminId: owner,
+      },
+      {
+        id: 'inc-2',
+        residentId: 'preview-resident-2',
+        residentName: 'Luis Vega',
+        title: 'Ascensor bloque A detenido',
+        description: 'Ascensor del bloque A se detiene entre pisos 3 y 4.',
+        status: 'in-progress',
+        provider: 'Elevadores del Sur',
+        providerId: 'provider-2',
+        createdAt: isoHoursAgo(48),
+        events: [
+          { id: 9011, type: 'reported', status: 'open', comment: null, authorId: 'preview-resident-2', authorName: 'Luis Vega', authorRole: 'resident', createdAt: isoHoursAgo(48) },
+          { id: 9012, type: 'assigned', status: 'in-progress', comment: 'Elevadores del Sur', authorId: owner, authorName: 'Admin demo', authorRole: 'admin', createdAt: isoHoursAgo(46) },
+          { id: 9013, type: 'comment', status: 'in-progress', comment: 'El técnico visitará el edificio mañana a las 9:00.', authorId: owner, authorName: 'Admin demo', authorRole: 'admin', createdAt: isoHoursAgo(30) },
+        ],
+        ownerAdminId: owner,
+      },
+      {
+        id: 'inc-3',
+        residentId: 'preview-resident-3',
+        residentName: 'Carla Ríos',
+        title: 'Luminaria pasillo 5to piso',
+        description: 'Luminaria del pasillo 5to piso no enciende.',
+        status: 'resolved',
+        provider: 'Eléctricos Lima',
+        providerId: 'provider-3',
+        createdAt: isoHoursAgo(120),
+        resolvedAt: isoHoursAgo(100),
+        resolutionComment: 'Se reemplazó el balastro y la luminaria del pasillo.',
+        events: [
+          { id: 9021, type: 'reported', status: 'open', comment: null, authorId: 'preview-resident-3', authorName: 'Carla Ríos', authorRole: 'resident', createdAt: isoHoursAgo(120) },
+          { id: 9022, type: 'assigned', status: 'in-progress', comment: 'Eléctricos Lima', authorId: owner, authorName: 'Admin demo', authorRole: 'admin', createdAt: isoHoursAgo(118) },
+          { id: 9023, type: 'resolved', status: 'resolved', comment: 'Se reemplazó el balastro y la luminaria del pasillo.', authorId: owner, authorName: 'Admin demo', authorRole: 'admin', createdAt: isoHoursAgo(100) },
+        ],
+        ownerAdminId: owner,
+      },
+      {
+        id: 'inc-4',
+        residentId: 'preview-resident-3',
+        residentName: 'Carla Ríos',
+        title: 'Puerta de la cochera no cierra',
+        description: 'La puerta levadiza de la cochera se queda abierta después de pasar.',
+        status: 'open',
+        provider: '',
+        providerId: null,
+        createdAt: isoHoursAgo(60),
+        events: [
+          { id: 9031, type: 'reported', status: 'open', comment: null, authorId: 'preview-resident-3', authorName: 'Carla Ríos', authorRole: 'resident', createdAt: isoHoursAgo(60) },
+        ],
+        ownerAdminId: owner,
+      },
+      {
+        id: 'inc-21',
+        residentId: 'preview-resident-21',
+        residentName: 'Marco Salas',
+        title: 'Bomba de agua hace ruido',
+        description: 'La bomba de agua del sótano hace un ruido fuerte por las noches.',
+        status: 'open',
+        provider: '',
+        providerId: null,
+        createdAt: isoHoursAgo(10),
+        events: [
+          { id: 9101, type: 'reported', status: 'open', comment: null, authorId: 'preview-resident-21', authorName: 'Marco Salas', authorRole: 'resident', createdAt: isoHoursAgo(10) },
+        ],
+        ownerAdminId: MOCK_SECOND_BUILDING_ID,
+      },
+    ],
+    announcements: [
+      {
+        id: 'ann-1',
+        title: 'Corte de agua programado',
+        body: 'El martes de 9:00 a 13:00 se realizará mantenimiento de cisternas. Almacena agua con anticipación.',
+        priority: 'urgent',
+        duration: 5,
+        authorId: owner,
+        authorName: 'Admin demo',
+        createdAt: isoHoursAgo(6),
+        expiresAt: `${ymd(4)}T23:59:59.000Z`,
+        ownerAdminId: owner,
+      },
+      {
+        id: 'ann-2',
+        title: 'Junta de propietarios',
+        body: 'Reunión el sábado 10:00 en el salón de usos múltiples. Agenda: presupuesto 2026 y áreas comunes.',
+        priority: 'normal',
+        duration: 14,
+        authorId: owner,
+        authorName: 'Admin demo',
+        createdAt: isoHoursAgo(30),
+        expiresAt: `${ymd(10)}T23:59:59.000Z`,
+        ownerAdminId: owner,
+      },
+      {
+        id: 'ann-3',
+        title: 'Nuevo horario de gimnasio',
+        body: 'El gimnasio abre de 6:00 a 22:00 de lunes a domingo.',
+        priority: 'normal',
+        duration: 30,
+        authorId: owner,
+        authorName: 'Admin demo',
+        createdAt: isoHoursAgo(80),
+        expiresAt: `${ymd(20)}T23:59:59.000Z`,
+        ownerAdminId: owner,
+      },
+      {
+        id: 'ann-4',
+        title: 'Fumigación de áreas comunes',
+        body: 'Se fumigaron pasillos, estacionamiento y depósitos. Mantén las mascotas en casa durante la mañana.',
+        priority: 'important',
+        duration: 7,
+        authorId: owner,
+        authorName: 'Admin demo',
+        createdAt: isoHoursAgo(24 * 12),
+        expiresAt: `${ymd(-5)}T23:59:59.000Z`,
+        ownerAdminId: owner,
+      },
+    ],
+    receipts: [
+      {
+        id: 'rcpt-ana-prev',
+        billingMonth: monthKey(-1),
+        residentId: 'preview-resident-1',
+        issueDate: monthStart(-1),
+        dueDate: monthEnd(-1),
+        amount: 180,
+        status: 'Paid',
+        lateFee: 0,
+        extraCharges: 0,
+        concept: 'Mantenimiento',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'rcpt-ana-curr',
+        billingMonth: monthKey(0),
+        residentId: 'preview-resident-1',
+        issueDate: monthStart(0),
+        dueDate: monthEnd(0),
+        amount: 180,
+        status: 'Pending',
+        lateFee: 0,
+        extraCharges: 25,
+        concept: 'Mantenimiento + Servicios compartidos',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'rcpt-luis-overdue',
+        billingMonth: monthKey(-2),
+        residentId: 'preview-resident-2',
+        issueDate: monthStart(-2),
+        dueDate: `${monthKey(-1)}-07`,
+        amount: 180,
+        status: 'Pending',
+        lateFee: 25,
+        extraCharges: 0,
+        concept: 'Mantenimiento',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'rcpt-luis-curr',
+        billingMonth: monthKey(0),
+        residentId: 'preview-resident-2',
+        issueDate: monthStart(0),
+        dueDate: monthEnd(0),
+        amount: 180,
+        status: 'Pending',
+        lateFee: 0,
+        extraCharges: 0,
+        concept: 'Mantenimiento',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'rcpt-carla-curr',
+        billingMonth: monthKey(0),
+        residentId: 'preview-resident-3',
+        issueDate: monthStart(0),
+        dueDate: monthEnd(0),
+        amount: 180,
+        status: 'Paid',
+        lateFee: 0,
+        extraCharges: 0,
+        concept: 'Mantenimiento',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'rcpt-diego-curr',
+        billingMonth: monthKey(0),
+        residentId: 'preview-resident-4',
+        issueDate: monthStart(0),
+        dueDate: monthEnd(0),
+        amount: 180,
+        status: 'Pending',
+        lateFee: 9,
+        extraCharges: 0,
+        concept: 'Mantenimiento',
+        ownerAdminId: owner,
+      },
+    ],
+    fees: [
+      {
+        id: 'fee-ana-aug',
+        residentId: 'preview-resident-1',
+        month: 'Agosto 2026',
+        amount: 180,
+        dueDate: '2026-08-31',
+        status: 'Pagado',
+        concept: 'Cuota Mantenimiento',
+        ownerAdminId: owner,
+      },
+    ],
+    payments: [
+      {
+        id: 'pay-1',
+        residentId: 'preview-resident-1',
+        feeId: 'rcpt-ana-prev',
+        feeMonth: monthEnd(-1),
+        concept: 'Mantenimiento',
+        amount: 180,
+        paidAt: `${monthEnd(-1)}T15:20:00.000Z`,
+        method: 'Yape',
+        reference: 'YAPE-88421',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'pay-2',
+        residentId: 'preview-resident-3',
+        feeId: 'rcpt-carla-curr',
+        feeMonth: monthEnd(0),
+        concept: 'Mantenimiento',
+        amount: 180,
+        paidAt: isoHoursAgo(10),
+        method: 'Transferencia',
+        reference: 'TRX-11029',
+        ownerAdminId: owner,
+      },
+    ],
+    financeSettings: [
+      {
+        id: 'fs-1',
+        ownerAdminId: owner,
+        baseMonthlyExpense: 180,
+        lateFeeRate: 0,
+        lateFeePerDay: 5,
+        admissionPayFromDay: 1,
+        admissionPayToDay: 7,
+        monthlyCharges: [monthlyCharge(-2, 180), monthlyCharge(-1, 180), monthlyCharge(0, 180)],
+      },
+    ],
+    kpi: [
+      {
+        id: 'kpi-1',
+        ownerAdminId: owner,
+        totalResidents: 4,
+        occupiedUnits: 4,
+        emptyUnits: 8,
+        totalDebt: 0,
+      },
+    ],
+    adminManagementExpenses: [
+      {
+        id: 'exp-1',
+        name: 'Limpieza de cisternas',
+        amount: 450,
+        purchaseDate: ymd(-12),
+        invoicePhotoUrl: '',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'exp-2',
+        name: 'Repuestos de bomba de agua',
+        amount: 220,
+        purchaseDate: ymd(-4),
+        invoicePhotoUrl: '',
+        ownerAdminId: owner,
+      },
+    ],
+    sharedUtilityServices: [
+      {
+        id: 'util-1',
+        type: 'water',
+        amount: 320,
+        month: monthStart(0).slice(0, 7),
+        residentCount: 4,
+        perResidentShare: 80,
+        ownerAdminId: owner,
+      },
+    ],
+    fixedPayoutRecipients: [
+      {
+        id: 'fp-1',
+        name: 'Rosa Mendoza',
+        dni: '45678912',
+        phone: '987654321',
+        salary: 1200,
+        intervalDays: 30,
+        nextPaymentDate: ymd(18),
+        photoUrl: '',
+        paymentHistory: [
+          { id: 'fp-pay-1', paidOn: ymd(-12), amount: 1200 },
+        ],
+        createdAt: isoHoursAgo(800),
+        ownerAdminId: owner,
+      },
+    ],
+    teamWorkers: [
+      {
+        id: 'tw-1',
+        name: 'Jorge Huamán',
+        phone: '912345678',
+        dni: '70881234',
+        salary: 1800,
+        photoUrl: '',
+        position: 'MAINTENANCE',
+        status: 'ACTIVE',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'tw-2',
+        name: 'Rosa Quispe',
+        phone: '934567812',
+        dni: '71234598',
+        salary: 1500,
+        photoUrl: '',
+        position: 'CONCIERGE',
+        status: 'ACTIVE',
+        ownerAdminId: owner,
+      },
+    ],
+    maintenanceTasks: [
+      {
+        id: 'task-1',
+        ownerAdminId: owner,
+        staffId: 'tw-1',
+        incidentId: 'inc-2',
+        description: 'Coordinar con Elevadores del Sur la revisión del ascensor del bloque A.',
+        scheduledFor: isoAt(1, 9),
+        status: 'IN_PROGRESS',
+        startedAt: isoHoursAgo(20),
+        completedAt: null,
+        createdAt: isoHoursAgo(30),
+        updatedAt: isoHoursAgo(20),
+      },
+      {
+        id: 'task-2',
+        ownerAdminId: owner,
+        staffId: 'tw-1',
+        incidentId: null,
+        description: 'Limpiar filtros de la bomba de agua.',
+        scheduledFor: isoAt(2, 10),
+        status: 'PENDING',
+        startedAt: null,
+        completedAt: null,
+        createdAt: isoHoursAgo(6),
+        updatedAt: null,
+      },
+    ],
+    shifts: [
+      {
+        id: 'shift-1',
+        ownerAdminId: owner,
+        staffId: 'tw-2',
+        start: isoAt(1, 7),
+        end: isoAt(1, 15),
+        notes: 'Portería principal',
+        createdAt: isoHoursAgo(10),
+      },
+      {
+        id: 'shift-2',
+        ownerAdminId: owner,
+        staffId: 'tw-1',
+        start: isoAt(1, 8),
+        end: isoAt(1, 17),
+        notes: null,
+        createdAt: isoHoursAgo(10),
+      },
+    ],
+    supportChats: [
+      {
+        id: 'chat-admin-1',
+        ownerAdminId: owner,
+        residentId: 'preview-resident-1',
+        residentName: 'Ana Torres',
+        topic: 'Recibo de septiembre',
+        title: 'Recibo de septiembre',
+        titleSummarized: true,
+        kind: 'admin',
+        source: 'resident',
+        status: 'open',
+        linkedChatId: '',
+        escalatedChatId: '',
+        messages: [
+          {
+            id: 'msg-1',
+            role: 'resident',
+            authorRole: 'resident',
+            authorName: 'Ana Torres',
+            body: 'Hola, el recibo de este mes incluye un cargo extra. ¿Pueden confirmarlo?',
+            createdAt: isoHoursAgo(5),
+          },
+          {
+            id: 'msg-2',
+            role: 'admin',
+            authorRole: 'admin',
+            authorName: 'Admin demo',
+            body: 'Sí, es el prorrateo de agua potable. Cualquier duda avísanos.',
+            createdAt: isoHoursAgo(3),
+          },
+        ],
+        createdAt: isoHoursAgo(5),
+        updatedAt: isoHoursAgo(3),
+      },
+      {
+        id: 'chat-admin-2',
+        ownerAdminId: owner,
+        residentId: 'preview-resident-2',
+        residentName: 'Luis Vega',
+        topic: 'Ruido en el piso 5 por las noches',
+        title: 'Ruido en el piso 5 por las noches',
+        titleSummarized: true,
+        kind: 'admin',
+        source: 'ai-escalation',
+        status: 'open',
+        linkedChatId: 'chat-ai-2',
+        aiChatId: 'chat-ai-2',
+        escalatedChatId: '',
+        messages: [
+          {
+            id: 'msg-esc-seed-1',
+            role: 'resident',
+            authorRole: 'resident',
+            authorName: 'Luis Vega',
+            body: 'Hay ruido fuerte en el piso de arriba después de las 23:00 casi todas las noches. ¿Qué puedo hacer?',
+            createdAt: isoHoursAgo(1.2),
+          },
+          {
+            id: 'msg-esc-seed-2',
+            role: 'ai',
+            authorRole: 'assistant',
+            authorName: 'Asistente BuildingFlex',
+            body: 'El reglamento fija horario de silencio de 23:00 a 7:00. Como pide una gestión con el vecino, derivé la consulta a administración.',
+            createdAt: isoHoursAgo(1.2),
+          },
+          {
+            id: 'msg-esc-seed-3',
+            role: 'resident',
+            authorRole: 'resident',
+            authorName: 'Luis Vega',
+            body: 'Gracias. Quiero hablar con el administrador para que lo revisen.',
+            createdAt: isoHoursAgo(1.1),
+          },
+        ],
+        createdAt: isoHoursAgo(1.2),
+        updatedAt: isoHoursAgo(1.1),
+      },
+      {
+        id: 'chat-admin-3',
+        ownerAdminId: owner,
+        residentId: 'preview-resident-3',
+        residentName: 'Carla Ríos',
+        topic: 'Llave del salón de usos múltiples',
+        title: 'Llave del salón de usos múltiples',
+        titleSummarized: true,
+        kind: 'admin',
+        source: 'resident',
+        status: 'answered',
+        linkedChatId: '',
+        escalatedChatId: '',
+        messages: [
+          {
+            id: 'msg-c3-1',
+            role: 'resident',
+            authorRole: 'resident',
+            authorName: 'Carla Ríos',
+            body: '¿Dónde recojo la llave del salón para mi reserva del sábado?',
+            createdAt: isoHoursAgo(26),
+          },
+          {
+            id: 'msg-c3-2',
+            role: 'admin',
+            authorRole: 'admin',
+            authorName: 'Admin demo',
+            body: 'En portería, desde las 9:00 del mismo día. Solo muestra tu QR de reserva.',
+            createdAt: isoHoursAgo(25),
+          },
+        ],
+        createdAt: isoHoursAgo(26),
+        updatedAt: isoHoursAgo(25),
+      },
+      {
+        id: 'chat-admin-4',
+        ownerAdminId: owner,
+        residentId: 'preview-resident-4',
+        residentName: 'Diego Soto',
+        topic: 'Alta de estacionamiento',
+        title: 'Alta de estacionamiento',
+        titleSummarized: true,
+        kind: 'admin',
+        source: 'resident',
+        status: 'closed',
+        closedAt: isoHoursAgo(70),
+        linkedChatId: '',
+        escalatedChatId: '',
+        messages: [
+          {
+            id: 'msg-c4-1',
+            role: 'resident',
+            authorRole: 'resident',
+            authorName: 'Diego Soto',
+            body: 'Me mudé este mes, ¿cómo registro mi auto para el estacionamiento?',
+            createdAt: isoHoursAgo(96),
+          },
+          {
+            id: 'msg-c4-2',
+            role: 'admin',
+            authorRole: 'admin',
+            authorName: 'Admin demo',
+            body: 'Listo, ya quedó registrado tu espacio E-12. ¡Bienvenido!',
+            createdAt: isoHoursAgo(72),
+          },
+        ],
+        createdAt: isoHoursAgo(96),
+        updatedAt: isoHoursAgo(70),
+      },
+      {
+        id: 'chat-ai-1',
+        ownerAdminId: owner,
+        residentId: 'preview-resident-1',
+        residentName: 'Ana Torres',
+        topic: 'Consulta general',
+        title: 'Consulta general',
+        titleSummarized: true,
+        kind: 'ai',
+        source: 'resident',
+        status: 'open',
+        linkedChatId: '',
+        escalatedChatId: '',
+        messages: [
+          {
+            id: 'msg-ai-1',
+            role: 'user',
+            authorRole: 'resident',
+            authorName: 'Ana Torres',
+            body: '¿Cómo veo mis recibos pendientes?',
+            createdAt: isoHoursAgo(2),
+          },
+          {
+            id: 'msg-ai-2',
+            role: 'ai',
+            authorRole: 'assistant',
+            authorName: 'Asistente BuildingFlex',
+            body: 'Tus recibos y pagos están en Finanzas. Los pendientes aparecen con estado “Por pagar”. Si un cargo no cuadra, avísame el mes y el monto.',
+            createdAt: isoHoursAgo(2),
+          },
+        ],
+        createdAt: isoHoursAgo(2),
+        updatedAt: isoHoursAgo(2),
+      },
+    ],
+    profiles: [
+      {
+        id: owner,
+        name: 'Admin demo',
+        email: 'admin@demo.test',
+        role: 'admin',
+        dni: '12345678',
+        address: 'Av. Principal 123, Lima',
+        company: 'BuildingFex Demo',
+        ruc: '20123456789',
+      },
+    ],
+    serviceProviders: [
+      {
+        id: 'provider-1',
+        name: 'Plomería Andes',
+        phone: '987654321',
+        specialty: 'Plomería',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'provider-2',
+        name: 'Elevadores del Sur',
+        phone: '912345678',
+        specialty: 'Ascensores',
+        ownerAdminId: owner,
+      },
+      {
+        id: 'provider-3',
+        name: 'Eléctricos Lima',
+        phone: '999111222',
+        specialty: 'Electricidad',
+        ownerAdminId: owner,
+      },
+    ],
+    importFolders: [
+      {
+        id: `folder-home-${owner}`,
+        name: 'Home',
+        isHome: true,
+        createdAt: isoHoursAgo(120),
+        ownerAdminId: owner,
+      },
+      {
+        id: 'folder-regs',
+        name: 'Reglamento',
+        isHome: false,
+        createdAt: isoHoursAgo(100),
+        ownerAdminId: owner,
+      },
+    ],
+    importUploads: [
+      {
+        id: 'import-demo-1',
+        ownerAdminId: owner,
+        fileName: 'reglamento-interno.pdf',
+        mimeType: 'application/pdf',
+        size: 245760,
+        storagePath: `owners/${owner}/import/import-demo-1/reglamento-interno.pdf`,
+        folderId: 'folder-regs',
+        uploadStatus: 'confirmed',
+        uploadedAt: isoHoursAgo(90),
+        documentType: 'REGULATION',
+        documentStatus: 'PUBLISHED',
+        version: 1,
+        publishedAt: isoHoursAgo(90),
+      },
+    ],
+    residentExtraCharges: [],
+    subscriptions: [
+      {
+        // Portafolio: la cuenta demo administra dos edificios con una sola suscripción.
+        ownerAdminId: owner,
+        planId: 'portafolio',
+        paidUntil: ymd(25),
+        isPaid: true,
+      },
+    ],
+  }
+}

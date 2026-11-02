@@ -1,0 +1,142 @@
+@startuml
+scale 1.5
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam titleFontSize 14
+skinparam titleFontStyle bold
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+skinparam note {
+  BackgroundColor #FFFDE7
+  BorderColor #8A8A8A
+}
+hide empty members
+title Bounded Context Communications - Domain Layer
+
+class Announcement <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -title : string
+  -body : string
+  -priority : string
+  -duration : int
+  -authorName : string
+  -status : string
+  -publishedAt : DateTimeOffset?
+  -expiresAt : DateTimeOffset?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(externalId, ownerAdminId, title, body, priority, duration, authorName): Announcement
+  +Update(title, body, priority, duration): void
+  +IsActive(now: DateTimeOffset): bool
+  +EffectiveStatus(now: DateTimeOffset): string
+  +{static} IsValidDuration(duration: int): bool
+}
+
+interface IAnnouncementRepository <<Repository>> {
+  +FindByExternalIdAsync(externalId: string): Announcement?
+  +ListByOwnerAdminIdAsync(ownerAdminId: int, activeAt: DateTimeOffset?): IEnumerable<Announcement>
+  +AnyAnnouncementsAsync(): bool
+}
+
+enum AnnouncementPriorities <<constantes>> {
+  normal
+  important
+  urgent
+}
+
+enum AnnouncementStatuses <<constantes>> {
+  draft
+  published
+  archived
+  expired [derivado de expiresAt]
+}
+
+class ImportUpload <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : string
+  -fileName : string
+  -mimeType : string
+  -size : long
+  -storagePath : string
+  -downloadUrl : string
+  -dataUrl : string
+  -folderId : string?
+  -uploadStatus : string
+  -indexingStatus : string
+  -indexingError : string?
+  -uploadedAt : DateTimeOffset
+  -documentType : string
+  -version : int
+  -publishedAt : DateTimeOffset?
+  -documentStatus : string
+  -supersedesId : string?
+  --
+  +IsCurrent : bool
+  +{static} CreatePending(externalId, ownerAdminId, fileName, mimeType, size, storagePath, folderId, documentType): ImportUpload
+  +Confirm(needsIndexing: bool): void
+  +Patch(fileName: string?, folderId: string?): void
+  +SetIndexingStatus(status: string, error: string?): void
+  +SetDocumentType(documentType: string): void
+  +Publish(supersedes: ImportUpload?, documentType: string?): void
+  +Supersede(): void
+  +Archive(): void
+}
+
+class ImportFolder <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : string
+  -name : string
+  -isHome : bool
+  -isContext : bool
+  -createdAt : DateTimeOffset
+  --
+  +{static} Create(externalId, ownerAdminId, name, isHome, isContext): ImportFolder
+  +Patch(name: string?, isHome: bool?, isContext: bool?): void
+}
+
+enum OfficialDocumentType <<constantes>> {
+  REGULATION
+  MINUTES
+  OTHER
+}
+
+enum OfficialDocumentStatus <<constantes>> {
+  PENDING_UPLOAD
+  PUBLISHED
+  SUPERSEDED
+  ARCHIVED
+}
+
+enum ImportUploadStatus <<constantes>> {
+  pending_upload
+  confirmed
+}
+
+enum ImportIndexingStatus <<constantes>> {
+  none
+  pending
+  indexing
+  done
+  failed
+}
+
+IAnnouncementRepository ..> "*" Announcement : persiste
+Announcement "*" --> "1" AnnouncementPriorities : priority
+Announcement "*" --> "1" AnnouncementStatuses : status
+ImportFolder "0..1" <-- "*" ImportUpload : folderId
+ImportUpload "0..1" <-- "0..1" ImportUpload : supersedesId
+ImportUpload "*" --> "1" OfficialDocumentType : documentType
+ImportUpload "*" --> "1" OfficialDocumentStatus : documentStatus
+ImportUpload "*" --> "1" ImportUploadStatus : uploadStatus
+ImportUpload "*" --> "1" ImportIndexingStatus : indexingStatus
+@enduml

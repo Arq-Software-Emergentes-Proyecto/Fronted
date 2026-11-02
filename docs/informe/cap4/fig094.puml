@@ -1,0 +1,52 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+skinparam wrapWidth 200
+LAYOUT_TOP_DOWN()
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz web para el administrador.")
+
+Container_Boundary(api, "BuildingFex.Api - módulo Team") {
+  Component(staffCtrl, "TeamWorkersCompatController", "ASP.NET Core API Controller", "/teamWorkers y /api/v1/staff: alta, edición, baja y reactivación del personal.")
+  Component(shiftCtrl, "ShiftsController", "ASP.NET Core API Controller", "/api/v1/shifts: turnos del personal.")
+  Component(taskCtrl, "TasksController", "ASP.NET Core API Controller", "/api/v1/tasks: crea, inicia, completa y reasigna tareas.")
+  Component(staffSvc, "TeamWorkerCommandService", "C# Application Service", "Registra y edita al personal; al dar de baja reasigna sus tareas abiertas.")
+  Component(shiftSvc, "ShiftCommandService", "C# Application Service", "Crea, reprograma y elimina turnos.")
+  Component(taskSvc, "MaintenanceTaskCommandService", "C# Application Service", "Tareas ligadas o no a una incidencia; al completar la última abierta, resuelve la incidencia.")
+  Component(policy, "WorkloadPolicy", "Domain Service", "Máximo 10 tareas abiertas por trabajador activo.")
+  Component(staffRepo, "TeamWorkerRepository", "EF Core Repository", "Acceso al personal.")
+  Component(shiftRepo, "ShiftRepository", "EF Core Repository", "Acceso a los turnos.")
+  Component(taskRepo, "MaintenanceTaskRepository", "EF Core Repository", "Acceso a las tareas.")
+}
+
+Component_Ext(incidents, "Módulo Incidents", "IIncidentRepository e IIncidentCommandService", "Valida la incidencia ligada y la resuelve (ResolveIncidentCommand).")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Team: team_workers, shifts y maintenance_tasks.")
+
+Lay_R(staffCtrl, shiftCtrl)
+Lay_R(shiftCtrl, taskCtrl)
+Lay_R(staffSvc, shiftSvc)
+Lay_R(shiftSvc, taskSvc)
+Lay_R(staffRepo, shiftRepo)
+Lay_R(shiftRepo, taskRepo)
+Lay_R(db, incidents)
+
+Rel(spa, staffCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, shiftCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, taskCtrl, "Usa", "JSON/HTTPS")
+Rel(staffCtrl, staffSvc, "Usa")
+Rel(shiftCtrl, shiftSvc, "Usa")
+Rel(taskCtrl, taskSvc, "Usa")
+Rel(staffSvc, policy, "Aplica")
+Rel(taskSvc, policy, "Aplica")
+Rel(staffSvc, staffRepo, "Usa")
+Rel(staffSvc, taskRepo, "Reasigna")
+Rel(staffSvc, shiftRepo, "Usa")
+Rel(shiftSvc, shiftRepo, "Usa")
+Rel(shiftSvc, staffRepo, "Valida trabajador")
+Rel(taskSvc, taskRepo, "Usa")
+Rel(taskSvc, staffRepo, "Valida trabajador")
+Rel(taskSvc, incidents, "ResolveIncidentCommand")
+Rel(staffRepo, db, "Lee y escribe", "EF Core")
+Rel(shiftRepo, db, "Lee y escribe", "EF Core")
+Rel(taskRepo, db, "Lee y escribe", "EF Core")
+@enduml

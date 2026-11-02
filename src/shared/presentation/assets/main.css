@@ -1,0 +1,240 @@
+@import './bf-actions.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  /* RNF007 style guide: Inter for functional content, Montserrat for titles (loaded in index.html). */
+  --bf-font-body:
+    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --bf-font-heading:
+    'Montserrat', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --apple-font: var(--bf-font-body);
+  --apple-text: #1d1d1f;
+  --apple-text-secondary: #86868b;
+  --apple-text-tertiary: #6e6e73;
+  --apple-link: #06c;
+  --apple-link-hover: #147ce5;
+  --apple-bg: #ffffff;
+  --apple-bg-secondary: #f5f5f7;
+  --apple-bg-tertiary: #fbfbfd;
+  --apple-border: rgba(0, 0, 0, 0.08);
+  --apple-border-hairline: #d2d2d7;
+  --apple-radius-sm: 12px;
+  --apple-radius-md: 18px;
+  --apple-radius-pill: 980px;
+  --apple-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --apple-shadow-md: 0 4px 24px rgba(0, 0, 0, 0.06);
+  /* Azul corporativo oscuro (CTA, focos, acentos) */
+  --apple-blue: #1e3a8a;
+  --apple-blue-hover: #172554;
+  --apple-blue-rgb: 30, 58, 138;
+
+  /* Global chrome — header / top bar (Apple) */
+  --apple-header-bar-bg: rgba(251, 251, 253, 0.82);
+  --apple-header-bar-bg-solid: rgba(255, 255, 255, 0.94);
+  --apple-header-blur: saturate(180%) blur(20px);
+  --apple-header-min-height: 3.25rem;
+  --apple-header-nav-size: 12px;
+  --apple-header-nav-weight: 400;
+  --apple-header-nav-weight-active: 500;
+  --apple-header-nav-tracking: -0.01em;
+  --apple-header-nav-leading: 1.33337;
+  --apple-header-cta-size: 12px;
+  --apple-header-cta-weight: 500;
+  --apple-header-segment-label-size: 11px;
+  --apple-header-segment-label-weight: 500;
+  --apple-focus-ring: 2px solid var(--apple-blue);
+  --apple-focus-ring-offset: 2px;
+
+  /* Altura reservada al header fijo (barra + nav en móvil) — padding del hero y scroll-margin de anclas */
+  --landing-header-height: 4rem;
+
+  /* Aliases used across Vue components */
+  --bg: var(--apple-bg);
+  --bg-elevated: var(--apple-bg-secondary);
+  --text: var(--apple-text);
+  --muted: var(--apple-text-secondary);
+  --accent: var(--apple-link);
+  --accent-dim: rgba(var(--apple-blue-rgb), 0.08);
+  --border: var(--apple-border);
+  --radius: var(--apple-radius-md);
+  --shadow: var(--apple-shadow-md);
+
+  font-family: var(--apple-font);
+  color-scheme: light;
+}
+
+@media (max-width: 899px) {
+  :root {
+    --landing-header-height: 7.5rem;
+  }
+}
+
+/* Anclas: el contenido no queda bajo el header fijo */
+:where(section[id], main[id]) {
+  scroll-margin-top: calc(var(--landing-header-height) + 0.35rem);
+}
+
+.md-elevation-1 {
+  box-shadow: var(--apple-shadow-sm);
+}
+
+.md-elevation-2 {
+  box-shadow: var(--apple-shadow-md);
+}
+
+html {
+  scroll-behavior: smooth;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  background: var(--apple-bg);
+  color: var(--apple-text);
+  font-size: 17px;
+  line-height: 1.47059;
+  letter-spacing: -0.022em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--bf-font-heading);
+}
+
+/* PrimeVue form controls and buttons inherit the body font (Inter) instead of the theme default. */
+button,
+input,
+select,
+textarea,
+.p-component {
+  font-family: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/*
+ * RNF003: one invalid-field look across forms. Mark the control with aria-invalid="true"
+ * (PrimeVue: also :invalid), link the message with aria-describedby and render it as .bf-field-error.
+ * !important so it wins over component-scoped border / focus styles.
+ */
+input[aria-invalid='true'],
+textarea[aria-invalid='true'],
+select[aria-invalid='true'],
+.p-inputtext[aria-invalid='true'],
+.p-select[aria-invalid='true'],
+.p-select.p-invalid,
+.p-inputnumber[aria-invalid='true'] .p-inputtext,
+.p-datepicker[aria-invalid='true'] .p-inputtext {
+  border-color: #d70015 !important;
+  background-color: #fff6f6;
+  box-shadow: 0 0 0 3px rgba(215, 0, 21, 0.12) !important;
+}
+
+.bf-field--invalid > label,
+.bf-field--invalid > span:first-child,
+.bf-field--invalid .bf-field-label {
+  color: #b42318;
+}
+
+.bf-field-error {
+  display: block;
+  margin: 0.3rem 0 0;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.35;
+  color: #b42318;
+  text-align: left;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* ── Landing: shared entrance motion (fade + rise, WhatsApp-style easing) ── */
+@keyframes lp-rise-title {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 32px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes lp-rise-block {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 28px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes lp-rise-card {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 48px, 0) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes lp-rise-soft {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* Visually hidden but read by screen readers (e.g. page titles not shown on screen). */
+.bf-sr-only {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Menú del celular abierto: la página de atrás no se desplaza. */
+html.bf-menu-open,
+html.bf-menu-open body {
+  overflow: hidden;
+}

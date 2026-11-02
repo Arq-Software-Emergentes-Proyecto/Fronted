@@ -1,0 +1,93 @@
+@startuml
+!include common_class.iuml
+left to right direction
+hide circle
+hide methods
+skinparam class<<ext>> {
+  BackgroundColor #F2F2F2
+  HeaderBackgroundColor #D9D9D9
+  BorderColor #8A8A8A
+}
+hide stereotype
+title Bounded Context Resident Care - Database Design (TiDB Cloud · compatible con MySQL)
+
+entity support_chats {
+  * id : INT «PK» AUTO_INCREMENT
+  --
+  external_id : VARCHAR(128) «UQ»
+  owner_admin_id : VARCHAR(128) «IDX»
+  resident_id : VARCHAR(128) «IDX»
+  resident_name : VARCHAR(256)
+  topic : VARCHAR(256)
+  status : VARCHAR(32)
+  kind : VARCHAR(16) «IDX»
+  source : VARCHAR(32)
+  linked_chat_id : VARCHAR(128)
+  incident_external_id : VARCHAR(64)
+  title_summarized : TINYINT(1)
+  closed_at : DATETIME(6)
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+  ..
+  «IDX» (owner_admin_id, kind, status)
+}
+
+entity support_messages {
+  * id : INT «PK» AUTO_INCREMENT
+  --
+  external_id : VARCHAR(64) «UQ»
+  chat_id : INT «FK» «IDX»
+  author_role : VARCHAR(32)
+  body : LONGTEXT
+  author_name : VARCHAR(256)
+  cited_document_id : VARCHAR(128)
+  cited_source : VARCHAR(512)
+  created_at : DATETIME(6) «IDX»
+}
+
+entity ai_context_chunks {
+  * id : INT «PK» AUTO_INCREMENT
+  --
+  owner_admin_id : VARCHAR(128) «IDX»
+  upload_external_id : VARCHAR(128) «IDX»
+  file_name : VARCHAR(512)
+  chunk_index : INT
+  content : LONGTEXT
+  embedding_json : LONGTEXT
+  embedding_model : VARCHAR(64)
+  created_at : DATETIME(6)
+}
+
+entity ai_usages {
+  * id : INT «PK» AUTO_INCREMENT
+  --
+  owner_admin_id : VARCHAR(128)
+  period : VARCHAR(7)
+  query_count : INT
+  filtered_count : INT
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+  ..
+  «UQ» (owner_admin_id, period)
+}
+
+entity resident_ai_usages {
+  * id : INT «PK» AUTO_INCREMENT
+  --
+  owner_admin_id : VARCHAR(128)
+  resident_id : VARCHAR(128)
+  day : VARCHAR(10)
+  query_count : INT
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+  ..
+  «UQ» (owner_admin_id, resident_id, day)
+  (SQL directo desde AiUsageQuota)
+}
+
+support_chats "1" -[norank]- "0..*" support_messages : chat_id\n(ON DELETE CASCADE)
+support_chats "0..1   " .[norank]. "   0..1" support_chats : linked_chat_id →\nexternal_id (sin FK)
+' --- disposición en columnas (aristas ocultas); las relaciones usan [norank]
+support_chats -[hidden]- support_messages
+support_chats -[hidden]- ai_context_chunks
+@enduml

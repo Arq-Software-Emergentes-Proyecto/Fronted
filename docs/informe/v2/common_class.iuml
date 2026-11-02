@@ -1,0 +1,31 @@
+' Estilo común v2 para diagramas de clases y de base de datos (todos los textos 14 px base)
+skinparam defaultFontName "Liberation Sans"
+skinparam defaultFontSize 14
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam titleFontSize 15
+skinparam titleFontStyle bold
+skinparam nodesep 14
+skinparam ranksep 26
+skinparam padding 1
+skinparam class {
+  FontSize 15
+  FontStyle bold
+  AttributeFontSize 14
+  StereotypeFontSize 14
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+  ArrowFontSize 14
+}
+skinparam note {
+  FontSize 14
+  BackgroundColor #FFFDE7
+  BorderColor #8A8A8A
+}
+skinparam package {
+  FontSize 15
+}
+hide empty members
+hide circle

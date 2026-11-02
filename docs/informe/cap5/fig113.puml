@@ -1,0 +1,198 @@
+@startuml
+skinparam dpi 200
+skinparam defaultFontName "DejaVu Sans"
+skinparam shadowing false
+hide circle
+hide methods
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+title Bounded Context Finances - Database Design (TiDB Cloud · compatible con MySQL)
+
+entity receipts {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  external_id : VARCHAR(64) «UQ»
+  owner_admin_id : INT «FK»
+  resident_external_id : VARCHAR(64)
+  issue_date : VARCHAR(20)
+  due_date : VARCHAR(20)
+  amount : DECIMAL(18,2)
+  status : VARCHAR(20)
+  late_fee : DECIMAL(18,2)
+  extra_charges : DECIMAL(18,2)
+  concept : VARCHAR(200)
+  billing_month : VARCHAR(7)
+  kind : VARCHAR(16) = 'MONTHLY'
+  monthly_key : VARCHAR(7)
+  payment_open : VARCHAR(20)
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+  ..
+  UQ ux_receipts_owner_resident_monthly_key
+   (owner_admin_id, resident_external_id, monthly_key)
+  IDX ix_receipts_owner_resident_billing_month
+   (owner_admin_id, resident_external_id, billing_month)
+}
+
+entity fees {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  external_id : VARCHAR(64) «UQ»
+  owner_admin_id : INT «FK»
+  resident_external_id : VARCHAR(64)
+  month : VARCHAR(40)
+  amount : DECIMAL(18,2)
+  due_date : VARCHAR(20)
+  status : VARCHAR(20)
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+}
+
+entity payments {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  external_id : VARCHAR(64) «UQ»
+  owner_admin_id : INT «FK»
+  resident_external_id : VARCHAR(64)
+  fee_external_id : VARCHAR(64)
+  fee_month : VARCHAR(40)
+  amount : DECIMAL(18,2)
+  paid_at : VARCHAR(40)
+  method : VARCHAR(80)
+  reference : VARCHAR(80)
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+}
+
+entity maintenance_checkouts {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  external_id : VARCHAR(64) «UQ»
+  owner_admin_id : INT «IDX(owner_admin_id, resident_external_id)»
+  resident_external_id : VARCHAR(128)
+  items_json : LONGTEXT
+  total_amount : DECIMAL(18,2)
+  status : VARCHAR(20)
+  mp_payment_id : VARCHAR(64) «UQ»
+  preference_id : VARCHAR(128)
+  paid_at : DATETIME(6)
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+}
+
+entity finance_settings {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  external_id : VARCHAR(64) «UQ»
+  owner_admin_id : INT «FK»
+  base_monthly_expense : DECIMAL(18,2)
+  late_fee_rate : DECIMAL(8,4)
+  late_fee_per_day : DECIMAL(18,2)
+  admission_pay_from_day : INT
+  admission_pay_to_day : INT
+  monthly_charges_json : LONGTEXT
+  restrict_reservations_when_delinquent : TINYINT(1)
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+}
+
+entity "users (IAM)" as users #F2F2F2 {
+  * id : INT «PK»
+  --
+  external_id : VARCHAR(128) «UQ»
+  ...
+}
+
+entity kpi_records {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  external_id : VARCHAR(64) «UQ»
+  owner_admin_id : INT «FK»
+  total_residents : INT
+  occupied_units : INT
+  empty_units : INT
+  total_debt : DECIMAL(18,2)
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+}
+
+entity admin_management_expenses {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  external_id : VARCHAR(64) «UQ»
+  owner_admin_id : INT «FK»
+  name : VARCHAR(200)
+  amount : DECIMAL(18,2)
+  purchase_date : VARCHAR(20)
+  invoice_photo_url : LONGTEXT
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+}
+
+entity shared_utility_services {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  external_id : VARCHAR(64) «UQ»
+  owner_admin_id : INT «FK»
+  type : VARCHAR(40)
+  amount : DECIMAL(18,2)
+  month : VARCHAR(10)
+  resident_count : INT
+  per_resident_share : DECIMAL(18,2)
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+}
+
+entity fixed_payout_recipients {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  external_id : VARCHAR(64) «UQ»
+  owner_admin_id : INT «FK»
+  name : VARCHAR(200)
+  dni : VARCHAR(80)
+  phone : VARCHAR(40)
+  salary : DECIMAL(18,2)
+  interval_days : INT
+  next_payment_date : VARCHAR(20)
+  photo_url : LONGTEXT
+  payment_history_json : LONGTEXT
+  created_at_iso : VARCHAR(40)
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+}
+
+entity resident_extra_charges {
+  * id : INT «PK, AUTO_INCREMENT»
+  --
+  external_id : VARCHAR(128) «UQ»
+  owner_admin_id : VARCHAR(128)
+  resident_id : VARCHAR(128)
+  title : VARCHAR(256)
+  amount : DECIMAL(18,2)
+  description : LONGTEXT
+  created_at : DATETIME(6)
+}
+
+users "1" -up- "0..*" receipts : owner_admin_id
+users "1" -up- "0..*" fees : owner_admin_id
+users "1" -up- "0..*" payments : owner_admin_id
+users "1" -up- "0..*" finance_settings : owner_admin_id
+users "1" -- "0..*" kpi_records : owner_admin_id
+users "1" -- "0..*" admin_management_expenses : owner_admin_id
+users "1" -- "0..*" shared_utility_services : owner_admin_id
+users "1" -- "0..*" fixed_payout_recipients : owner_admin_id
+fees "0..1" .. "0..*" payments : fee_external_id\n(sin FK)
+
+note as N1
+  Todas las FK owner_admin_id → users.id: ON DELETE RESTRICT.
+  maintenance_checkouts.owner_admin_id no tiene FK;
+  resident_extra_charges guarda los identificadores externos
+  del condominio y del residente como texto (sin FK).
+  resident_external_id identifica al residente (users.external_id)
+  sin clave foránea.
+end note
+@enduml

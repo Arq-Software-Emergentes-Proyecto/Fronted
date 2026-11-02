@@ -1,0 +1,170 @@
+@startuml
+scale 1.5
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam titleFontSize 14
+skinparam titleFontStyle bold
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+skinparam note {
+  BackgroundColor #FFFDE7
+  BorderColor #8A8A8A
+}
+hide empty members
+title Bounded Context Social Spaces - Domain Layer
+
+class SocialSpace <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -name : string
+  -description : string
+  -capacity : int?
+  -imageUrl : string
+  -rules : string
+  -status : string
+  -maxReservationsPerDay : int?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(externalId, ownerAdminId, name, description, capacity, imageUrl): SocialSpace
+  +Patch(name: string, description: string, capacity: int?, imageUrl: string?): void
+  +SetRules(rules: string?): void
+  +SetMaxReservationsPerDay(max: int?): void
+  +IsAvailable(): bool
+  +SetUnderMaintenance(): void
+  +SetAvailable(): void
+  +SetStatus(status: string?): void
+}
+
+class Reservation <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -spaceExternalId : string
+  -residentExternalId : string
+  -residentName : string
+  -residentCode : string
+  -date : string
+  -startTime : string
+  -endTime : string
+  -guestsJson : string
+  -guestInviteToken : string?
+  -guestInviteExpiresAt : DateTimeOffset?
+  -status : string
+  -slotKey : string?
+  -cancelledAt : DateTimeOffset?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(externalId, ownerAdminId, spaceExternalId, residentExternalId, ..., guestsJson, guestInviteToken): Reservation
+  +IsActive : bool
+  +Slot : TimeSlot?
+  +PatchGuests(guestsJson: string, guestInviteToken: string?): void
+  +IssueGuestInvite(token: string, expiresAt: DateTimeOffset?): void
+  +Cancel(now: DateTimeOffset): void
+  +ComputeGuestInviteExpiry(tz: TimeZoneInfo): DateTimeOffset?
+  +GuestPassValidFrom(tz: TimeZoneInfo): DateTimeOffset?
+  +GuestPassStatusAt(now: DateTimeOffset, tz: TimeZoneInfo): string
+  +SetGuestCheckedIn(guestId: string, checkedIn: bool, now: DateTimeOffset): bool
+  +{static} CountGuests(guestsJson: string?): int
+}
+
+class TimeSlot <<Value Object>> {
+  -date : DateOnly
+  -start : TimeOnly
+  -end : TimeOnly
+  --
+  +{static} TryCreate(date: string?, startTime: string?, endTime: string?): TimeSlot?
+  +Overlaps(other: TimeSlot): bool
+  +DateKey : string
+  +StartKey : string
+  +EndKey : string
+  +DurationMinutes : int
+}
+
+class ReservationPolicy <<Domain Service>> {
+  +MaxGuests = 5
+  --
+  +CanReserve(space: SocialSpace, slot: TimeSlot, guestCount: int, sameSpaceReservations: IEnumerable<Reservation>): ReservationPolicyResult
+  +CanHostGuests(space: SocialSpace?, guestCount: int): ReservationPolicyResult
+}
+
+class ReservationPolicyResult <<Value Object>> {
+  -violation : ReservationViolation
+  --
+  +IsAllowed : bool
+}
+
+enum ReservationViolation {
+  None
+  SpaceUnderMaintenance
+  Overlap
+  DailyLimitReached
+  CapacityExceeded
+  TooManyGuests
+  ResidentDelinquent
+}
+
+interface ISocialSpaceRepository <<Repository>> {
+  +FindByExternalIdAsync(externalId: string): SocialSpace
+  +ListByOwnerExternalIdAsync(ownerAdminExternalId: string?): IEnumerable<SocialSpace>
+  +AddAsync(entity: SocialSpace): void
+  +Update(entity: SocialSpace): void
+  +Remove(entity: SocialSpace): void
+}
+
+interface IReservationRepository <<Repository>> {
+  +FindByExternalIdAsync(externalId: string): Reservation
+  +FindByGuestInviteTokenAsync(token: string): Reservation
+  +FindBySpaceAndDateAsync(ownerAdminId: int, spaceExternalId: string, date: string): IReadOnlyList<Reservation>
+  +ListAsync(...): IEnumerable<Reservation>
+  +BeginBookingAsync(ownerAdminId: int, spaceExternalId: string): IReservationBookingScope
+  +AddAsync(entity: Reservation): void
+  +Update(entity: Reservation): void
+  +Remove(entity: Reservation): void
+}
+
+enum ReservationStatus <<constantes string>> {
+  PENDING
+  CONFIRMED
+  CANCELLED
+}
+
+enum SocialSpaceStatus <<constantes string>> {
+  AVAILABLE
+  MAINTENANCE
+}
+
+enum GuestPassStatus <<constantes string>> {
+  VALID
+  NOT_YET_VALID
+  EXPIRED
+  CANCELLED
+  USED
+}
+
+note right of Reservation
+  Pase de visita con QR: guestInviteToken
+  (uno por reserva), guestInviteExpiresAt
+  (fin + 2 h) y guestsJson (hasta 5
+  invitados con su marca de ingreso).
+end note
+
+ISocialSpaceRepository ..> "*" SocialSpace : persiste
+IReservationRepository ..> "*" Reservation : persiste
+SocialSpace "1" -- "0..*" Reservation : spaceExternalId
+Reservation "1" --> "0..1" TimeSlot : Slot
+ReservationPolicy ..> SocialSpace : evalúa
+ReservationPolicy ..> "*" Reservation : evalúa
+ReservationPolicy ..> ReservationPolicyResult : devuelve
+ReservationPolicyResult --> "1" ReservationViolation
+Reservation "*" --> "1" ReservationStatus : status
+Reservation ..> GuestPassStatus : GuestPassStatusAt()
+SocialSpace "*" --> "1" SocialSpaceStatus : status
+@enduml

@@ -1,0 +1,174 @@
+@startuml
+scale 1.5
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam titleFontSize 14
+skinparam titleFontStyle bold
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+skinparam note {
+  BackgroundColor #FFFDE7
+  BorderColor #8A8A8A
+}
+hide empty members
+left to right direction
+title Bounded Context IAM - Domain Layer
+
+class User <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -name : string
+  -email : string
+  -passwordHash : string
+  -role : string
+  -authProvider : string
+  -googleSub : string?
+  -dni : string?
+  -address : string?
+  -company : string?
+  -ruc : string?
+  -floor : string?
+  -code : string?
+  -inviteToken : string?
+  -inviteExpiresAt : DateTimeOffset?
+  -inviteUsedAt : DateTimeOffset?
+  -inviteEmail : string?
+  -admissionDate : DateOnly?
+  -billFromNextMonth : bool
+  -ownerAdminId : int?
+  -parentAdminId : int?
+  -accountKind : string?
+  -subscriptionPlanId : string
+  -subscriptionPaidUntil : DateTimeOffset?
+  -accountStatus : string
+  -deactivatedAt : DateTimeOffset?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} CreateAdmin(externalId, name, email, passwordHash, ...): User
+  +{static} CreateResident(externalId, name, email, passwordHash, floor, code, ownerAdminId, ...): User
+  +{static} CreateBoardMember(firebaseUid, name, email): User
+  +{static} CreateManagedBuildingAccount(parent: User, buildingName): User
+  +{static} GenerateInviteToken(): string
+  +SetAccountKind(kind: string?): void
+  +IsInviteValid(token: string): bool
+  +ConsumeInvite(): void
+  +ActivateGoogle(email, googleSub, name?): void
+  +ActivateFirebasePassword(email, firebaseUid, name?): void
+  +UpdateCredentials(email, passwordHash): void
+  +UpdateAdminProfile(name, dni, address, company, ruc): void
+  +UpdateResidentProfile(name?, floor?, code?): void
+  +SetBillFromNextMonth(value: bool): void
+  +Deactivate(): void
+  +Reactivate(): void
+  +UpdateSubscription(planId, paidUntil?): void
+  +IsActive : bool {derivada}
+  +IdentityProvider : string {derivada}
+  +HasCredentials : bool {derivada}
+}
+
+class BuildingMember <<Aggregate Root>> {
+  -id : int
+  -ownerAdminId : int
+  -userId : int
+  -role : string
+  -createdAt : DateTimeOffset
+  --
+  +{static} Create(ownerAdminId: int, userId: int, role: string): BuildingMember
+  +ChangeRole(role: string): void
+}
+
+class MemberInvitation <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -email : string
+  -name : string
+  -role : string
+  -token : string
+  -expiresAt : DateTimeOffset
+  -acceptedAt : DateTimeOffset?
+  -revokedAt : DateTimeOffset?
+  -invitedByUserId : int
+  -createdAt : DateTimeOffset
+  --
+  +{static} Issue(ownerAdminId, email, name?, role, invitedByUserId): MemberInvitation
+  +IsPending(now: DateTimeOffset): bool
+  +IsExpired(now: DateTimeOffset): bool
+  +Accept(): void
+  +Revoke(): void
+}
+
+class Email <<Value Object>> {
+  -value : string
+  --
+  +{static} Create(raw: string?): Email
+  +{static} TryCreate(raw: string?, out email): bool
+  +{static} IsValid(raw: string?): bool
+  +{static} Normalize(raw: string?): string
+}
+
+interface IUserRepository <<Repository>> {
+  +FindByEmailAsync(email): User?
+  +FindByExternalIdAsync(externalId): User?
+  +FindByGoogleSubAsync(googleSub): User?
+  +FindByInviteTokenAsync(inviteToken): User?
+  +ExistsByEmailAsync(email): bool
+  +ListByOwnerAdminIdAsync(ownerAdminId): IEnumerable<User>
+  +SearchAsync(email?, role?, code?, ownerAdminId?): IEnumerable<User>
+  +ExistsResidentByCodeAsync(code, ownerAdminId?): bool
+  +CountResidentsByOwnerAdminIdAsync(ownerAdminId): int
+  +ListPortfolioBuildingsAsync(parentAdminId): IReadOnlyList<User>
+  +AnyUsersAsync(): bool
+  +AnyAdminAsync(): bool
+  .. heredados de IBaseRepository<User> ..
+  +AddAsync(), FindByIdAsync(), Update(), Remove(), ListAsync()
+}
+
+enum UserRoles <<enumeration>> {
+  ADMIN = "admin"
+  RESIDENT = "resident"
+  BOARD_MEMBER = "board_member"
+  STAFF = "staff"
+}
+enum MemberRoles <<enumeration>> {
+  Admin = "admin"
+  Board = "board_member"
+}
+enum AccountStatus <<enumeration>> {
+  ACTIVE
+  DEACTIVATED
+}
+enum IdentityProvider <<enumeration>> {
+  EMAIL_PASSWORD
+  GOOGLE
+}
+
+note "ownerAdmin: condominio al que pertenece el residente.\nparentAdmin: cuenta matriz de un edificio del Portafolio." as N2
+N2 .. User
+note bottom of UserRoles
+  Las enumeraciones son clases estáticas
+  con constantes string; las entidades
+  guardan el valor como texto.
+end note
+
+IUserRepository ..> "0..*" User : persiste
+User "0..*" --> "0..1" User : ownerAdmin
+User "0..*" --> "0..1" User : parentAdmin
+BuildingMember "0..*" --> "1" User : ownerAdmin
+BuildingMember "0..*" --> "1" User : user
+MemberInvitation "0..*" --> "1" User : ownerAdmin
+MemberInvitation ..> BuildingMember : al aceptarse se registra
+User ..> Email : valida el correo
+MemberInvitation ..> Email : valida el correo
+User "0..*" --> "1" UserRoles : role
+User "0..*" --> "1" AccountStatus : accountStatus
+User ..> IdentityProvider : deriva de authProvider
+BuildingMember "0..*" --> "1" MemberRoles : role
+MemberInvitation "0..*" --> "1" MemberRoles : role
+@enduml

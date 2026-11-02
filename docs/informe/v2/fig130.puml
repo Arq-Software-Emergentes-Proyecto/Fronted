@@ -1,0 +1,146 @@
+@startuml
+!include common_class.iuml
+left to right direction
+hide empty members
+title Bounded Context Resident Care - Domain Layer
+
+class SupportChat <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : string
+  -residentId : string
+  -residentName : string
+  -topic : string
+  -status : string
+  -kind : string
+  -source : string
+  -linkedChatId : string?
+  -incidentExternalId : string?
+  -titleSummarized : bool
+  -closedAt : DateTimeOffset?
+  -createdAt : DateTimeOffset
+  -updatedAt : DateTimeOffset
+  -messages : List<SupportMessage>
+  --
+  +{static} CreateAi(...): SupportChat
+  +{static} CreateAdmin(...): SupportChat
+  +SetTopic(topic, summarized): void
+  +LinkTo(otherChatExternalId): void
+  +UpdateStatus(status): void
+  +MarkPending(): void
+  +MarkAnswered(): void
+  +Derive(adminChatExternalId): void
+  +Close(): void
+  +LinkIncident(incidentExternalId): void
+  +AddMessage(...): SupportMessage
+  +CopyMessage(source): SupportMessage
+}
+
+class SupportMessage <<Entity>> {
+  -id : int
+  -externalId : string
+  -chatId : int
+  -authorRole : string
+  -body : string
+  -authorName : string?
+  -citedDocumentId : string?
+  -citedSource : string?
+  -createdAt : DateTimeOffset
+  --
+  +{static} Create(...): SupportMessage
+  +GetSender(): Sender?
+}
+
+enum ConversationStatus <<constantes>> {
+  open
+  answered
+  derived
+  closed
+}
+
+enum Sender {
+  Resident
+  Assistant
+  Admin
+}
+
+class AiContextChunk <<Entity>> {
+  -id : int
+  -ownerAdminId : string
+  -uploadExternalId : string
+  -fileName : string
+  -chunkIndex : int
+  -content : string
+  -embeddingJson : string
+  -embeddingModel : string
+  -createdAt : DateTimeOffset
+  --
+  +{static} Create(...): AiContextChunk
+}
+
+class AiUsage <<Entity>> {
+  -id : int
+  -ownerAdminId : string
+  -period : string
+  -queryCount : int
+  -filteredCount : int
+  -createdAt : DateTimeOffset
+  -updatedAt : DateTimeOffset
+}
+
+class AnswerPolicy <<Domain Service>> {
+  +ResidentDailyAiQueries : int = 15
+  +{static} MustDerive(sources): bool
+  +{static} IsEmergency(text): bool
+  +{static} BuildContext(sources): string
+  +{static} ToAnswer(...): Answer
+  +{static} WithCitation(...): string
+}
+
+class QuestionRelevancePolicy <<Domain Service>> {
+  +{static} Classify(text): QuestionScope
+  +{static} IsThanks(text): bool
+}
+
+enum QuestionScope {
+  Building
+  SmallTalk
+  OffTopic
+  Unclear
+}
+
+class Answer <<Value Object>> {
+  -text : string
+  -sourceDocumentId : string?
+  -sourceName : string?
+  -grounded : bool
+  -mustDerive : bool
+}
+
+class KnowledgeSource <<Value Object>> {
+  -documentId : string
+  -fileName : string
+  -content : string
+  -score : double
+}
+
+SupportChat "1" *-[norank]- "0..*" SupportMessage : messages
+SupportChat "0..1" -[norank]-> "0..1" SupportChat : linkedChatId
+SupportChat "*" -[norank]-> "1" ConversationStatus : status
+SupportMessage "*" -[norank]-> "1" Sender : authorRole
+AnswerPolicy .[norank].> "*" KnowledgeSource : evalúa
+AnswerPolicy .[norank].> Answer : crea
+QuestionRelevancePolicy .[norank].> QuestionScope : clasifica
+KnowledgeSource .[norank].> "0..1" AiContextChunk : se obtiene de
+' --- disposición en columnas (aristas ocultas); las relaciones usan [norank]
+SupportChat -[hidden]- SupportMessage
+SupportChat -[hidden]- ConversationStatus
+SupportChat -[hidden]- Sender
+SupportChat -[hidden]- AiUsage
+SupportMessage -[hidden]- AnswerPolicy
+SupportMessage -[hidden]- Answer
+SupportMessage -[hidden]- KnowledgeSource
+SupportMessage -[hidden]- AiContextChunk
+SupportMessage -[hidden]- QuestionRelevancePolicy
+SupportMessage -[hidden]- QuestionScope
+@enduml

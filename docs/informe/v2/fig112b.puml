@@ -1,0 +1,104 @@
+@startuml
+!include common_class.iuml
+title Bounded Context Finances - Domain Layer (2 de 3: checkout, morosidad y repositorios)
+left to right direction
+hide empty members
+
+
+class Receipt <<Aggregate Root>> #F2F2F2 {
+  .. detalle en la otra parte ..
+}
+
+class Fee <<Aggregate Root>> #F2F2F2 {
+  .. detalle en la otra parte ..
+}
+
+
+class MaintenanceCheckout <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -residentExternalId : string
+  -itemsJson : string
+  -totalAmount : decimal
+  -status : string
+  -mpPaymentId : string?
+  -preferenceId : string?
+  -paidAt : DateTimeOffset?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...): MaintenanceCheckout
+  +GetItems(): IReadOnlyList<Item>
+  +AttachPreference(preferenceId?): void
+  +MarkPaid(...): void
+  +AmountMatches(paidAmount): bool
+}
+
+class "MaintenanceCheckout.Item" as Item <<Value Object>> {
+  -type : string
+  -externalId : string
+  -amount : decimal
+}
+
+
+
+
+
+
+
+
+
+
+class DelinquencyPolicy <<Domain Service>> {
+  {static} +DueSoonDays : int = 5
+  {static} +DelinquencyDays : int = 30
+  {static} +DefaultCriticalThreshold : decimal = 0.15
+  --
+  +{static} IsOverdue(...): bool
+  +{static} DaysOverdue(...): int
+  +{static} IsDelinquent(...): bool
+  +{static} Classify(...): DebtLight
+  +{static} IsCritical(...): bool
+}
+
+class FinanceClock <<Domain Service>> {
+  +{static} Today(utcNow?): DateOnly
+  +{static} ToLocalDate(instant): DateOnly
+  +{static} MonthStart(utcNow?): DateOnly
+}
+
+enum FeeStatus <<enumeration>> {
+  Pending
+  Paid
+  Overdue
+}
+enum DebtLight {
+  None
+  Paid
+  Pending
+  DueSoon
+  Overdue
+}
+
+interface IMaintenanceCheckoutRepository <<Repository>> {
+  +FindByExternalIdAsync(...)
+  +FindByMpPaymentIdAsync(...)
+  +FindLatestPendingAsync(...)
+  +AddAsync(entity), Update(entity)
+}
+
+
+MaintenanceCheckout "1" *-[norank]- "1..*" Item : itemsJson
+Item .[norank].> "0..1" Receipt : type = receipt
+Item .[norank].> "0..1" Fee : type = fee
+DelinquencyPolicy .[norank].> FeeStatus : evalúa
+DelinquencyPolicy .[norank].> DebtLight : clasifica
+IMaintenanceCheckoutRepository .[norank].> "0..*" MaintenanceCheckout : persiste
+' --- columnas (aristas ocultas); relaciones con [norank]
+MaintenanceCheckout -[hidden]- Item
+MaintenanceCheckout -[hidden]- DebtLight
+MaintenanceCheckout -[hidden]- FeeStatus
+Item -[hidden]- Receipt
+Item -[hidden]- Fee
+@enduml

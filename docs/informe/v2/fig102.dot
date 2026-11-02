@@ -1,0 +1,70 @@
+digraph G {
+  graph [rankdir=TB, newrank=true, splines=true, nodesep=0.1, ranksep=0.3, fontname="Liberation Sans", fontsize=15, pad="0.08", outputorder=edgesfirst];
+  node [fontname="Liberation Sans", fontsize=14, margin="0.10,0.06", penwidth=0];
+  edge [fontname="Liberation Sans", fontsize=14, color="#666666", fontcolor="#333333", arrowsize=0.7, penwidth=1.1];
+  subgraph cluster_1 { label=<<b>Navegador del usuario</b><br/><font point-size="14">[Escritorio o móvil]</font>>; style="dashed,rounded"; color="#444444"; fontcolor="#222222"; fontsize=15; margin=8;
+    spa [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>BuildingFex Web SPA</b></font><br/><i>[Vue 3]</i><br/>Compilada con<br/>VITE_REALTIME=false:<br/>el chat de soporte<br/>usa consulta<br/>periódica (polling).>];
+  }
+  subgraph cluster_2 { label=<<b>Vercel</b><br/><font point-size="14">[CDN global, fronted-seven-opal.vercel.app]</font>>; style="dashed,rounded"; color="#444444"; fontcolor="#222222"; fontsize=15; margin=8;
+    static [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>SPA estática</b></font><br/><i>[Vite build (dist/)]</i><br/>HTML, JS y CSS<br/>servidos desde la<br/>CDN.>];
+    rewrites [shape=box, style="filled", fillcolor="#FFFFFF", fontcolor="black", label=<<font point-size="15"><b>Rewrites</b></font><br/><i>[vercel.json]</i><br/>Reenvían /api/v1/* y<br/>las rutas de<br/>compatibilidad a API<br/>Gateway.> penwidth=1, color="#8A8A8A"];
+  }
+  subgraph cluster_3 { label=<<b>Mercado Pago</b>>; style="dashed,rounded"; color="#444444"; fontcolor="#222222"; fontsize=15; margin=8;
+    mp [shape=box, style="rounded,filled", fillcolor="#999999", fontcolor="white", label=<<font point-size="15"><b>Checkout Pro</b></font><br/>Cuotas y suscripción.>];
+  }
+  subgraph cluster_4 { label=<<b>Amazon Web Services</b><br/><font point-size="14">[us-east-2 (Ohio)]</font>>; style="dashed,rounded"; color="#444444"; fontcolor="#222222"; fontsize=15; margin=8;
+    apigw [shape=box, style="filled", fillcolor="#FFFFFF", fontcolor="black", label=<<font point-size="15"><b>Amazon API Gateway</b></font><br/><i>[HTTP API]</i><br/>Ruta ANY /{proxy+};<br/>50 req/s, ráfaga de<br/>100.> penwidth=1, color="#8A8A8A"];
+    logs [shape=box, style="filled", fillcolor="#FFFFFF", fontcolor="black", label=<<font point-size="15"><b>Amazon CloudWatch<br/>Logs</b></font><br/><i>[Un grupo por función]</i><br/>Logs de ApiFunction y<br/>JobsFunction;<br/>retención de 14 días.> penwidth=1, color="#8A8A8A"];
+    scheduler [shape=box, style="filled", fillcolor="#FFFFFF", fontcolor="black", label=<<font point-size="15"><b>Amazon EventBridge<br/>Scheduler</b></font><br/><i>[4 schedules]</i><br/>monthly-billing<br/>diario 06:15 (Lima);<br/>incident-escalation<br/>cada hora;<br/>import-cleanup y<br/>ai-index cada 30 min.> penwidth=1, color="#8A8A8A"];
+    files [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>Almacenamiento de<br/>archivos</b></font><br/><i>[Amazon S3 (FilesBucket)]</i><br/>Privado y cifrado;<br/>CORS solo del<br/>frontend.>];
+    subgraph cluster_5 { label=<<b>AWS Lambda: ApiFunction</b><br/><font point-size="14">[dotnet10, arm64, 1024 MB, 30 s]</font>>; style="dashed,rounded"; color="#444444"; fontcolor="#222222"; fontsize=15; margin=8;
+      api [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>BuildingFex.Api</b></font><br/><i>[ASP.NET Core (.NET 10)]</i><br/>Monolito modular (9<br/>módulos). Valida el<br/>ID token. Sin<br/>SignalR.>];
+    }
+    subgraph cluster_6 { label=<<b>AWS Lambda: JobsFunction</b><br/><font point-size="14">[dotnet10, arm64, 600 s]</font>>; style="dashed,rounded"; color="#444444"; fontcolor="#222222"; fontsize=15; margin=8;
+      jobs [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>Función de jobs</b></font><br/><i>[Mismo paquete .NET]</i><br/>migrate,<br/>monthly-billing,<br/>incident-escalation,<br/>import-cleanup y<br/>ai-index.>];
+    }
+  }
+  subgraph cluster_7 { label=<<b>Google Cloud</b>>; style="dashed,rounded"; color="#444444"; fontcolor="#222222"; fontsize=15; margin=8;
+    fbauth [shape=box, style="rounded,filled", fillcolor="#999999", fontcolor="white", label=<<font point-size="15"><b>Firebase<br/>Authentication</b></font><br/>Proyecto<br/>emergentes-36306. La<br/>API verifica el ID<br/>token (Admin SDK).>];
+    gemini [shape=box, style="rounded,filled", fillcolor="#999999", fontcolor="white", label=<<font point-size="15"><b>Google Gemini API</b></font><br/>Chat del asistente y<br/>triaje (API);<br/>embeddings (job<br/>ai-index).>];
+  }
+  subgraph cluster_8 { label=<<b>TiDB Cloud</b><br/><font point-size="14">[AWS us-east-1]</font>>; style="dashed,rounded"; color="#444444"; fontcolor="#222222"; fontsize=15; margin=8;
+    db [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>Base de datos TiDB<br/>Cloud</b></font><br/><i>[TiDB Cloud Starter<br/>(compatible con MySQL)]</i><br/>Base buildingfex; TLS<br/>con<br/>SslMode=VerifyFull.>];
+  }
+  { rank=same; spa; }
+  { rank=same; static; rewrites; mp; }
+  static -> rewrites [style=invis, weight=5];
+  rewrites -> mp [style=invis, weight=5];
+  { rank=same; apigw; logs; }
+  apigw -> logs [style=invis, weight=5];
+  { rank=same; scheduler; api; fbauth; }
+  scheduler -> api [style=invis, weight=5];
+  api -> fbauth [style=invis, weight=5];
+  { rank=same; jobs; gemini; }
+  jobs -> gemini [style=invis, weight=5];
+  { rank=same; files; db; }
+  files -> db [style=invis, weight=5];
+  spa -> static [style=invis, weight=0];
+  static -> apigw [style=invis, weight=0];
+  apigw -> scheduler [style=invis, weight=0];
+  scheduler -> jobs [style=invis, weight=0];
+  jobs -> files [style=invis, weight=0];
+  spa -> static [label=<Descarga la SPA<br/>(HTTPS)>];
+  spa -> rewrites [label=</api/v1 y rutas<br/>de<br/>compatibilidad<br/>(HTTPS/JSON)>];
+  spa -> fbauth [label=<Inicia sesión y<br/>obtiene el ID<br/>token (HTTPS)>];
+  spa -> files [label=<Sube y descarga<br/>con URL<br/>prefirmada (10<br/>min, máx. 15)>];
+  spa -> mp [label=<Paga en<br/>Checkout Pro>];
+  rewrites -> apigw [label=<Reenvía (HTTPS)>];
+  apigw -> api [label=<Invoca (proxy)>];
+  api -> db [label=<EF Core, TLS>];
+  api -> files [label=<Firma URL y<br/>verifica<br/>metadatos>];
+  api -> jobs [label=<Invoca ai-index<br/>(asíncrono)>];
+  api -> fbauth [];
+  api -> gemini [label=<Chat y triaje>];
+  mp -> api [dir=back, label=<Crea el cobro y<br/>consulta el<br/>pago>];
+  mp -> apigw [label=<Webhook POST<br/>/api/v1/payments/webhook<br/>(x-signature)>];
+  scheduler -> jobs [label=<Programa los<br/>jobs>];
+  jobs -> db [label=<EF Core, TLS>];
+  jobs -> files [label=<Lee y borra<br/>objetos>];
+  jobs -> gemini [];
+}

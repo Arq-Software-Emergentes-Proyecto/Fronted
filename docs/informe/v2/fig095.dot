@@ -1,0 +1,74 @@
+digraph G {
+  graph [rankdir=TB, newrank=true, splines=true, nodesep=0.05, ranksep=0.32, fontname="Liberation Sans", fontsize=15, pad="0.08", outputorder=edgesfirst];
+  node [fontname="Liberation Sans", fontsize=14, margin="0.10,0.06", penwidth=0];
+  edge [fontname="Liberation Sans", fontsize=14, color="#666666", fontcolor="#333333", arrowsize=0.7, penwidth=1.1];
+  labelloc=t; label=<<b>BuildingFex.Api - módulo Resident Care (azul claro: componentes del módulo;<br/>gris: otros módulos)</b>>;
+  resident [shape=box, style="rounded,filled", fillcolor="#08427B", fontcolor="white", label=<<font point-size="15"><b>Residente</b></font><br/>Hace consultas al<br/>asistente.>];
+  admin [shape=box, style="rounded,filled", fillcolor="#08427B", fontcolor="white", label=<<font point-size="15"><b>Administrador</b></font><br/>Atiende las<br/>consultas<br/>derivadas.>];
+  spa [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>BuildingFex Web<br/>SPA</b></font><br/><i>[Vue 3]</i><br/>Interfaz web para<br/>administradores y<br/>residentes.>];
+  communications [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo<br/>Communications</b></font><br/><i>[ImportUploads<br/>Controller]</i><br/>Encola el<br/>documento<br/>confirmado o<br/>publicado y<br/>retira el<br/>archivado.>];
+  jobs [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>Función de jobs</b></font><br/><i>[AWS Lambda +<br/>EventBridge]</i><br/>Job ai-index:<br/>invocación<br/>asíncrona y<br/>barrido cada 30<br/>min.>];
+  rcCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>SupportController</b></font><br/><i>[API Controller]</i><br/>/api/v1/support:<br/>chats, mensajes,<br/>estado, cierre,<br/>uso de IA y<br/>«Reportar como<br/>incidencia».<br/>Filtra, aplica<br/>cupos, recupera<br/>contexto,<br/>responde y deriva<br/>al admin.>];
+  rcHub [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>SupportHub</b></font><br/><i>[SignalR<br/>(/hubs/support,<br/>solo fuera de<br/>Lambda)]</i><br/>Avisos en vivo de<br/>mensajes y<br/>derivaciones; en<br/>AWS el chat usa<br/>consulta<br/>periódica.>];
+  policies [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>Políticas del<br/>dominio</b></font><br/><i>[Domain Services]</i><br/>QuestionRelevancePolicy,<br/>AnswerPolicy,<br/>SupportEscalate y<br/>ResidentAssistantPrompt.>];
+  quota [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>AiUsageQuota</b></font><br/><i>[Application Service]</i><br/>Tope mensual por<br/>condominio<br/>(ai_usages) y<br/>diario por<br/>residente<br/>(resident_ai_usages).>];
+  planQuota [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>PlanQuotaClient</b></font><br/><i>[Anticorruption<br/>Layer]</i><br/>Tope de consultas<br/>y módulos del<br/>plan, publicado<br/>por Billing.>];
+  indexer [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>AiContextIndexer</b></font><br/><i>[Application Service]</i><br/>Divide el<br/>documento, guarda<br/>embeddings en<br/>ai_context_chunks<br/>y recupera los<br/>fragmentos más<br/>parecidos.>];
+  indexJob [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>AiContextIndexingJob</b></font><br/><i>[Application Service]</i><br/>Indexa los<br/>pendientes; en<br/>local lo dispara<br/>AiContextIndexingWorker<br/>desde<br/>AiContextIndexingQueue.>];
+  notifier [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>IncidentResolution<br/>Notifier</b></font><br/><i>[Application Service]</i><br/>Implementa<br/>IIncidentResolutionNotifier:<br/>deja un aviso en<br/>el chat de<br/>origen.>];
+  gateway [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Gateway de IA</b></font><br/><i>[GeminiClient,<br/>GeminiEmbedding<br/>Client, GeminiRate<br/>Limiter]</i><br/>Único acceso a<br/>Gemini.>];
+  gemini [shape=box, style="rounded,filled", fillcolor="#999999", fontcolor="white", label=<<font point-size="15"><b>Google Gemini API</b></font><br/>Proveedor de IA<br/>externo.>];
+  incidents [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Incidents</b></font><br/><i>[IncidentCommand<br/>Service e<br/>IncidentTriage<br/>Service]</i><br/>Registra la<br/>incidencia del<br/>chat y avisa al<br/>resolverla.>];
+  billing [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Billing</b></font><br/><i>[SubscriptionPlans y<br/>PlanCatalog]</i><br/>Plan efectivo y<br/>tope mensual de<br/>consultas.>];
+  storage [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>File Storage</b></font><br/><i>[S3StorageService]</i><br/>Descarga del<br/>documento.>];
+  db [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>TiDB Cloud</b></font><br/><i>[MySQL compatible]</i><br/>support_chats,<br/>support_messages,<br/>ai_context_chunks,<br/>ai_usages,<br/>resident_ai_usages.>];
+  { rank=same; resident; admin; communications; jobs; }
+  resident -> admin [style=invis, weight=5];
+  admin -> communications [style=invis, weight=5];
+  communications -> jobs [style=invis, weight=5];
+  { rank=same; spa; incidents; indexJob; }
+  spa -> incidents [style=invis, weight=5];
+  incidents -> indexJob [style=invis, weight=5];
+  { rank=same; rcCtrl; }
+  { rank=same; policies; quota; planQuota; notifier; }
+  policies -> quota [style=invis, weight=5];
+  quota -> planQuota [style=invis, weight=5];
+  planQuota -> notifier [style=invis, weight=5];
+  { rank=same; rcHub; indexer; billing; }
+  rcHub -> indexer [style=invis, weight=5];
+  indexer -> billing [style=invis, weight=5];
+  { rank=same; gateway; db; storage; }
+  gateway -> db [style=invis, weight=5];
+  db -> storage [style=invis, weight=5];
+  { rank=same; gemini; }
+  resident -> spa [style=invis, weight=0];
+  spa -> rcCtrl [style=invis, weight=0];
+  rcCtrl -> policies [style=invis, weight=0];
+  policies -> rcHub [style=invis, weight=0];
+  rcHub -> gateway [style=invis, weight=0];
+  gateway -> gemini [style=invis, weight=0];
+  resident -> spa [label=<Consulta al<br/>asistente>];
+  admin -> spa [label=<Responde<br/>consultas<br/>derivadas>];
+  spa -> rcCtrl [label=<JSON/HTTPS<br/>(en AWS,<br/>consulta<br/>periódica)>];
+  spa -> rcHub [label=<Avisos<br/>(local, WSS)>];
+  rcCtrl -> policies [label=<Aplica>];
+  rcCtrl -> quota [label=<Reserva y<br/>libera cupo>];
+  rcCtrl -> planQuota [label=<Tope del plan>];
+  rcCtrl -> indexer [label=<RetrieveAsync>];
+  rcCtrl -> gateway [label=<GenerateReply<br/>Async>];
+  rcCtrl -> rcHub [label=<Avisa>];
+  incidents -> rcCtrl [dir=back, label=<CreateIncident<br/>Command>];
+  incidents -> notifier [label=<NotifyResolved<br/>Async>];
+  communications -> indexJob [label=<Encola<br/>ai-index>];
+  communications -> indexer [label=<RemoveUpload<br/>Async>];
+  jobs -> indexJob [label=<Ejecuta<br/>ai-index>];
+  indexJob -> indexer [label=<IndexUpload<br/>Async>];
+  indexer -> gateway [label=<EmbedAsync>];
+  indexer -> storage [label=<DownloadBytes<br/>Async>];
+  planQuota -> billing [label=<Lee el plan>];
+  gateway -> gemini [label=<generateContent<br/>y embeddings<br/>(HTTPS)>];
+  rcCtrl -> db [label=<Chats y<br/>mensajes<br/>(AppDbContext)>];
+  quota -> db [];
+  indexer -> db [];
+  notifier -> db [label=<Escribe el<br/>aviso>];
+}

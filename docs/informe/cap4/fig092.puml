@@ -1,0 +1,27 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+skinparam wrapWidth 220
+LAYOUT_TOP_DOWN()
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz web para administradores y residentes.")
+
+Container_Boundary(api, "BuildingFex.Api - módulo Communications") {
+  Component(annCtrl, "AnnouncementsCompatController", "ASP.NET Core API Controller", "/announcements: lista, crea, edita y elimina comunicados del condominio.")
+  Component(annCmd, "AnnouncementCommandService", "C# Application Service", "Create, Update y Delete: el comunicado queda publicado de inmediato; controla prioridad, duración y vencimiento.")
+  Component(annQry, "AnnouncementQueryService", "C# Query Service", "Comunicados del condominio y los vigentes para el residente.")
+  Component(annRepo, "AnnouncementRepository", "EF Core Repository", "Acceso a los comunicados.")
+}
+
+Component_Ext(iam, "Módulo IAM", "UserRepository", "Resuelve el condominio (owner_admin_id).")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Communications: announcements.")
+
+Rel(spa, annCtrl, "Usa", "JSON/HTTPS")
+Rel(annCtrl, annCmd, "Usa")
+Rel(annCtrl, annQry, "Usa")
+Rel(annCmd, annRepo, "Usa")
+Rel(annQry, annRepo, "Usa")
+' Flecha escrita a mano (mismo formato que Rel) para que el borde del módulo no corte la etiqueta
+annCmd -->> iam : <color:transparent>.</color>                          **Busca el administrador**
+Rel(annRepo, db, "Lee y escribe", "EF Core")
+@enduml

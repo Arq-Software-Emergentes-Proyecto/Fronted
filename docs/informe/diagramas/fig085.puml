@@ -1,0 +1,26 @@
+@startuml
+!include <C4/C4_Context>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+
+Person(admin, "Administrador", "Empresa administradora, administrador asignado o la junta que creó la cuenta.")
+Person(board, "Junta directiva", "Ve la información del edificio en solo lectura.")
+Person(resident, "Residente", "Vive en el condominio; paga cuotas y reserva espacios.")
+Person(guest, "Invitado de residente", "Visita una reserva con un pase QR. Sin cuenta.")
+
+System(bf, "BuildingFex", "SaaS de gestión de condominios: cobros, gastos, áreas comunes, incidencias, comunicados, atención al residente y equipo. Aplicación web en Vercel y API serverless en AWS.")
+
+System_Ext(fbauth, "Firebase Authentication", "Identidad: correo y contraseña (administrador) o Google (residente). Emite el ID token.")
+System_Ext(gemini, "Google Gemini API", "Asistente de Resident Care (chat), triaje de incidencias y embeddings de documentos.")
+System_Ext(mp, "Mercado Pago", "Checkout Pro: cuotas del residente y suscripción del administrador.")
+
+Rel(admin, bf, "Gestiona residentes, cobros, gastos, espacios, incidencias y comunicados; invita a la junta o a otro administrador", "HTTPS")
+Rel(board, bf, "Revisa cobranza, balance, incidencias, avisos y documentos", "HTTPS")
+Rel(resident, bf, "Paga cuotas, reserva espacios, reporta incidencias y consulta al asistente", "HTTPS")
+Rel(guest, bf, "Abre su pase de reserva (/invite/:token)", "HTTPS")
+
+Rel(bf, fbauth, "Autentica a los usuarios y verifica el ID token", "HTTPS")
+Rel(bf, gemini, "Asistente, triaje de incidencias y embeddings", "HTTPS/JSON")
+Rel(bf, mp, "Crea el cobro (el usuario paga en Checkout Pro) y confirma el pago", "HTTPS/JSON")
+Rel_U(mp, bf, "Notifica el pago (webhook firmado con x-signature)", "HTTPS")
+@enduml

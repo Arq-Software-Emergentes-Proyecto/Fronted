@@ -1,0 +1,141 @@
+@startuml
+scale 1.5
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam titleFontSize 14
+skinparam titleFontStyle bold
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+skinparam note {
+  BackgroundColor #FFFDE7
+  BorderColor #8A8A8A
+}
+hide empty members
+title Bounded Context Team - Domain Layer
+
+class TeamWorker <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : string
+  -name : string
+  -phone : string
+  -dni : string
+  -salary : decimal
+  -photoUrl : string
+  -position : string
+  -status : string
+  -deactivatedAt : DateTimeOffset?
+  -createdAt : DateTimeOffset
+  --
+  +IsActive : bool
+  +{static} Create(externalId, ownerAdminId, name, phone, dni, salary, photoUrl, position): TeamWorker
+  +UpdateDetails(name, phone, dni, salary, photoUrl, position): void
+  +Deactivate(): void
+  +Reactivate(): void
+}
+
+class MaintenanceTask <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : string
+  -staffId : string
+  -incidentId : string?
+  -description : string
+  -scheduledFor : DateTimeOffset?
+  -status : string
+  -startedAt : DateTimeOffset?
+  -completedAt : DateTimeOffset?
+  -createdAt : DateTimeOffset
+  -updatedAt : DateTimeOffset?
+  --
+  +IsOpen : bool
+  +{static} Create(externalId, ownerAdminId, staffId, description, scheduledFor, incidentId): MaintenanceTask
+  +AssignTo(staffId: string): void
+  +Start(): void
+  +Complete(): void
+  +Reassign(staffId: string): void
+  +Reschedule(scheduledFor: DateTimeOffset?, description: string?): void
+}
+
+class Shift <<Entity>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : string
+  -staffId : string
+  -startsAt : DateTimeOffset
+  -endsAt : DateTimeOffset
+  -notes : string?
+  -createdAt : DateTimeOffset
+  --
+  +{static} Create(externalId, ownerAdminId, staffId, start, end, notes): Shift
+  +Reschedule(start, end, notes): void
+  +{static} EnsureValidRange(start, end): void
+  +Overlaps(other: Shift): bool
+}
+
+class WorkloadPolicy <<Domain Service>> {
+  +MaxOpenTasksPerWorker : int = 10
+  +CanTakeTask(worker: TeamWorker, currentOpenTasks: int, additionalTasks: int): WorkloadViolation
+}
+
+enum WorkloadViolation {
+  None
+  WorkerInactive
+  MaxOpenTasksReached
+}
+
+enum StaffPosition <<constantes>> {
+  CONCIERGE
+  MAINTENANCE
+  CLEANING
+  SECURITY
+}
+
+enum StaffStatus <<constantes>> {
+  ACTIVE
+  INACTIVE
+}
+
+enum MaintenanceTaskStatus <<constantes>> {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+interface ITeamWorkerRepository <<Repository>> {
+  +FindByIdentifierAsync(id: string): TeamWorker?
+  +FindInTenantAsync(ownerAdminId, id): TeamWorker?
+  +ListByOwnerAsync(ownerAdminId, status): IReadOnlyList<TeamWorker>
+}
+
+interface IMaintenanceTaskRepository <<Repository>> {
+  +FindInTenantAsync(ownerAdminId, id): MaintenanceTask?
+  +ListAsync(ownerAdminId, staffId, status, incidentId, openOnly): IReadOnlyList<MaintenanceTask>
+  +FindOpenByStaffAsync(ownerAdminId, staffId): IReadOnlyList<MaintenanceTask>
+  +CountOpenByStaffAsync(ownerAdminId, staffId): int
+  +CountOpenGroupedByStaffAsync(ownerAdminId): IReadOnlyDictionary<string, int>
+}
+
+interface IShiftRepository <<Repository>> {
+  +FindInTenantAsync(ownerAdminId, id): Shift?
+  +ListAsync(ownerAdminId, staffId, from, to): IReadOnlyList<Shift>
+  +FindOverlappingAsync(ownerAdminId, staffId, start, end, excludeExternalId): IReadOnlyList<Shift>
+  +ListByStaffAsync(ownerAdminId, staffId): IReadOnlyList<Shift>
+}
+
+TeamWorker "1" <-- "0..*" MaintenanceTask : staffId
+TeamWorker "1" <-- "0..*" Shift : staffId
+TeamWorker "*" --> "1" StaffPosition : position
+TeamWorker "*" --> "1" StaffStatus : status
+MaintenanceTask "*" --> "1" MaintenanceTaskStatus : status
+WorkloadPolicy ..> "1" TeamWorker : evalúa
+WorkloadPolicy ..> WorkloadViolation : devuelve
+ITeamWorkerRepository ..> "*" TeamWorker : persiste
+IMaintenanceTaskRepository ..> "*" MaintenanceTask : persiste
+IShiftRepository ..> "*" Shift : persiste
+@enduml

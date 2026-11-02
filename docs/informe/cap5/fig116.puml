@@ -1,0 +1,77 @@
+@startuml
+skinparam dpi 200
+skinparam defaultFontName "DejaVu Sans"
+skinparam shadowing false
+hide circle
+hide methods
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+title Bounded Context Billing - Database Design (TiDB Cloud · compatible con MySQL)
+
+entity "users (IAM)" as users #F2F2F2 {
+  * id : INT «PK»
+  --
+  ...
+}
+
+entity subscriptions {
+  * id : INT AUTO_INCREMENT «PK»
+  --
+  owner_admin_id : INT NOT NULL «FK, UQ»
+  building_id : INT NULL
+  plan_id : VARCHAR(20) NOT NULL DEFAULT 'free'
+  status : VARCHAR(20) NOT NULL DEFAULT 'TRIAL' «IDX*»
+  trial_ends_at : DATETIME(6) NULL «IDX*»
+  paid_until : DATETIME(6) NULL
+  failed_charges : INT NOT NULL DEFAULT 0
+  billed_departments : INT NULL
+  created_at : DATETIME(6) NULL
+  updated_at : DATETIME(6) NULL
+}
+
+entity subscription_payments {
+  * id : INT AUTO_INCREMENT «PK»
+  --
+  mp_payment_id : VARCHAR(64) NOT NULL «UQ»
+  owner_admin_id : INT NOT NULL «FK, IDX»
+  plan_id : VARCHAR(20) NOT NULL
+  amount : DECIMAL(18,2) NOT NULL
+  expected_amount : DECIMAL(18,2) NOT NULL
+  currency : VARCHAR(8) NULL
+  department_count : INT NULL
+  checkout_external_id : VARCHAR(64) NULL
+  status : VARCHAR(32) NOT NULL
+  source : VARCHAR(16) NOT NULL
+  paid_until : DATETIME(6) NULL
+  created_at : DATETIME(6) NULL
+  updated_at : DATETIME(6) NULL
+}
+
+entity subscription_checkouts {
+  * id : INT AUTO_INCREMENT «PK»
+  --
+  external_id : VARCHAR(64) NOT NULL «UQ»
+  owner_admin_id : INT NOT NULL «FK, IDX»
+  plan_id : VARCHAR(20) NOT NULL
+  department_count : INT NULL
+  amount : DECIMAL(18,2) NOT NULL
+  status : VARCHAR(20) NOT NULL
+  mp_payment_id : VARCHAR(64) NULL
+  created_at : DATETIME(6) NULL
+  updated_at : DATETIME(6) NULL
+}
+
+legend bottom left
+  Todas las FK hacia users: ON DELETE CASCADE.
+  IDX*: índice compuesto de subscriptions (status, trial_ends_at).
+endlegend
+
+users "1" -- "0..1" subscriptions : owner_admin_id
+users "1" -- "0..*" subscription_payments : owner_admin_id
+users "1" -- "0..*" subscription_checkouts : owner_admin_id
+subscription_checkouts "1" .. "0..1" subscription_payments : checkout_external_id = external_id\n(sin FK)
+@enduml

@@ -1,0 +1,12 @@
+# Optional: New → Blueprint → Connect repo to create/update the static frontend.
+# Set VITE_API_BASE_URL in the build environment to your BuildingFex.Api URL.
+services:
+  - type: web
+    name: fronted-spa
+    runtime: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

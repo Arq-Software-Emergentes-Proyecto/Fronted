@@ -1,0 +1,53 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz para administradores y residentes.")
+
+Container_Boundary(api, "BuildingFex.Api - bounded context Communications") {
+  Component(annCtrl, "AnnouncementsCompatController", "REST Controller", "GET y POST /announcements, PUT y DELETE /announcements/{id}.")
+  Component(uplCtrl, "ImportUploadsController", "REST Controller", "/api/v1/import/uploads: signed-url, confirm, download-url, publish, archive, PATCH y DELETE.")
+  ' separador invisible (oculto): evita que las flechas de la SPA crucen el título del límite
+  Component(sp, "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", "", "")
+  Component(fldCtrl, "ImportFoldersController", "REST Controller", "GET y POST /api/v1/import/folders, PATCH y DELETE /api/v1/import/folders/{id}.")
+  Component(svc, "AnnouncementCommandService / AnnouncementQueryService", "Application Services", "Crean, editan, eliminan y listan comunicados (vigentes por prioridad y fecha).")
+  Component(dm, "Domain Model", "Domain Layer", "Announcement, ImportUpload, ImportFolder")
+  Component(cleanup, "ImportOrphanCleanup / ImportOrphanCleanupWorker", "Background Job", "Borra cargas pending_upload sin confirmar tras 2 h (worker cada 30 min fuera de Lambda).")
+  Component(repo, "AnnouncementRepository", "Repository (EF Core)", "Implementa IAnnouncementRepository.")
+  Component(ctx, "AppDbContext", "EF Core (compartido)", "import_uploads e import_folders se leen y escriben directamente.")
+  Component(storage, "S3StorageService / FirebaseStorageService", "Adapter (IFirebaseStorageService)", "URL firmadas de subida y descarga, metadatos y borrado.")
+}
+
+Component_Ext(iam, "Módulo IAM", "Módulo de BuildingFex.Api", "IUserRepository: resuelve el administrador del condominio.")
+Component_Ext(rc, "Módulo Resident Care", "Módulo de BuildingFex.Api", "IAiContextIndexingQueue e IAiContextIndexer: indexa los documentos de la carpeta Contexto IA.")
+Container_Ext(jobs, "Función de jobs", "AWS Lambda + EventBridge Scheduler", "Job import-cleanup en AWS.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "announcements, import_uploads, import_folders.")
+System_Ext(s3, "Amazon S3 / Firebase Storage", "Bucket privado con los archivos de los documentos.")
+
+Rel(spa, annCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, uplCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, fldCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, s3, "PUT / GET con URL firmada", "HTTPS")
+Rel(annCtrl, svc, "Comandos y consultas")
+Rel(svc, dm, "Aplica reglas")
+Rel(svc, repo, "Persiste")
+Rel(svc, iam, "Resuelve administrador")
+Rel(uplCtrl, dm, "Confirm, Publish, Supersede, Archive")
+Rel(uplCtrl, ctx, "Lee y escribe")
+Rel(fldCtrl, ctx, "Lee y escribe")
+Rel(uplCtrl, storage, "Firma y verifica")
+Rel(uplCtrl, rc, "Encola indexado / retira fragmentos")
+Rel(repo, ctx, "Usa")
+Rel(cleanup, ctx, "Borra pendientes")
+Rel(cleanup, storage, "Borra objetos")
+Rel(jobs, cleanup, "import-cleanup")
+Rel(ctx, db, "Lee y escribe", "EF Core")
+Rel(storage, s3, "Firma, consulta y borra", "AWS SDK / GCS")
+Lay_R(annCtrl, sp)
+Lay_R(sp, uplCtrl)
+Lay_R(uplCtrl, fldCtrl)
+Lay_D(uplCtrl, svc)
+Lay_D(fldCtrl, svc)
+hide sp
+@enduml

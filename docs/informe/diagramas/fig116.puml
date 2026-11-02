@@ -1,0 +1,39 @@
+@startuml
+skinparam dpi 200
+skinparam defaultFontName "DejaVu Sans"
+skinparam shadowing false
+hide circle
+hide methods
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+title Bounded Context Billing - Database Design (TiDB Cloud · compatible con MySQL)
+
+entity subscriptions {
+  * id : CHAR(36) «PK»
+  --
+  owner_admin_id : CHAR(36) «FK, UQ»
+  building_id : CHAR(36) «FK»
+  plan : VARCHAR(12)
+  status : VARCHAR(16)
+  trial_ends_at : DATE
+  paid_until : DATE
+  failed_charges : INT
+  billed_departments : INT
+}
+
+entity subscription_payments {
+  * id : CHAR(36) «PK»
+  --
+  subscription_id : CHAR(36) «FK»
+  amount : DECIMAL(10,2)
+  status : VARCHAR(12)
+  external_reference : VARCHAR(64) «UQ»
+  paid_at : DATETIME
+}
+
+subscriptions "1" -- "0..*" subscription_payments : paga
+@enduml

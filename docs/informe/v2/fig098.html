@@ -1,0 +1,59 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Modelo de dominio resumido</title>
+<!-- Figura 98 (v2): diagrama de clases resumido (clases por bounded context y sus relaciones, sin atributos).
+     Atributos, métodos y multiplicidades completas: diagramas Domain Layer del Capítulo V
+     (Figs. 106, 109, 112, 115, 118, 121, 124, 127 y 130). -->
+<style>
+body{margin:0;background:#fff;font-family:"Liberation Sans",Arial,sans-serif;color:#111}
+#c{width:880px;padding:14px 16px 16px;box-sizing:border-box}
+h1{font-size:19px;margin:0 0 4px;text-align:center}
+.sub{font-size:15px;text-align:center;margin:0 0 10px;color:#333}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.card{border:1.6px solid;border-radius:9px;padding:7px 9px 9px;font-size:15px}
+.card h2{font-size:16px;margin:0 0 5px}
+.card h2 span{font-weight:normal;font-size:14px}
+.core{background:#E3F2EF;border-color:#0F5E57}.core h2{color:#0F5E57}
+.sup{background:#E8EDF7;border-color:#1F3864}.sup h2{color:#1F3864}
+.gen{background:#F1F2F4;border-color:#4B5563}.gen h2{color:#374151}
+.k{display:inline-block;background:#fff;border:1.4px solid #1F3864;border-radius:3px;padding:1px 6px 2px;margin:2px 3px 2px 0;font-size:15px;font-weight:bold;line-height:1.15;text-align:center}
+.k i{display:block;font-weight:normal;font-size:14px;color:#444}
+.k.vo{border-style:dashed;font-weight:normal}
+.k.ds{background:#FFF8E6;font-weight:normal}
+.rel{font-size:14px;margin:6px 0 0;line-height:1.38}
+.wide{grid-column:span 2}
+.full{grid-column:span 3}
+.note{background:#FFFDE7;border:1px solid #8A8A8A;border-radius:6px;padding:7px 10px;font-size:14px;line-height:1.4}
+</style></head><body><div id="c">
+<h1>Diagrama de clases resumido: clases por bounded context</h1>
+<p class="sub">«AR» raíz de agregado · «E» entidad · «VO» objeto de valor (borde punteado) · «DS» servicio de dominio · ◆ composición · → asociación · ⇢ dependencia</p>
+<div class="grid">
+ <div class="card gen"><h2>1. IAM <span>(genérico)</span></h2>
+  <span class="k"><i>«AR»</i>User</span><span class="k"><i>«AR»</i>BuildingMember</span><span class="k"><i>«AR»</i>MemberInvitation</span><span class="k vo"><i>«VO»</i>Email</span>
+  <div class="rel">User 0..* → 0..1 User (ownerAdmin, parentAdmin)<br>BuildingMember 0..* → 1 User (ownerAdmin, user)<br>MemberInvitation 0..* → 1 User<br>MemberInvitation ⇢ BuildingMember (al aceptarse)</div></div>
+ <div class="card sup"><h2>2. Profiles <span>(soporte)</span></h2>
+  <span class="k"><i>«AR»</i>Building</span><span class="k"><i>«AR»</i>Profile</span>
+  <div class="rel">Building 0..* → 1 User de IAM (ownerAdminId)<br>Profile 0..1 → 1 User de IAM (userExternalId)</div></div>
+ <div class="card gen"><h2>4. Billing <span>(genérico)</span></h2>
+  <span class="k"><i>«AR»</i>Subscription</span><span class="k"><i>«E»</i>SubscriptionPayment</span><span class="k"><i>«E»</i>SubscriptionCheckout</span><span class="k vo"><i>«VO»</i>PlanLimits</span><span class="k ds"><i>«static»</i>SubscriptionPlans</span>
+  <div class="rel">User de IAM 1 → 0..1 Subscription<br>Subscription 1 → 0..* Payment y Checkout<br>Checkout 1 ⇢ 0..1 Payment<br>Subscription ⇢ PlanLimits ⇢ SubscriptionPlans</div></div>
+ <div class="card sup wide"><h2>3. Finances <span>(soporte)</span></h2>
+  <span class="k"><i>«AR»</i>Fee</span><span class="k"><i>«AR»</i>Payment</span><span class="k"><i>«AR»</i>Receipt</span><span class="k"><i>«AR»</i>MaintenanceCheckout</span><span class="k vo"><i>«VO»</i>Item</span><span class="k"><i>«AR»</i>FinanceSetting</span><span class="k vo"><i>«VO»</i>MonthlyCharge</span><span class="k"><i>«AR»</i>AdminManagementExpense</span><span class="k"><i>«AR»</i>SharedUtilityService</span><span class="k"><i>«AR»</i>FixedPayoutRecipient</span><span class="k"><i>«AR»</i>KpiRecord</span><span class="k"><i>«AR»</i>ResidentExtraCharge</span><span class="k vo"><i>«VO»</i>Money</span><span class="k vo"><i>«VO»</i>Period</span><span class="k ds"><i>«DS»</i>DelinquencyPolicy</span>
+  <div class="rel">Payment 0..* → 0..1 Fee (feeExternalId) · MaintenanceCheckout 1 ◆ 1..* Item ⇢ Receipt o Fee<br>FinanceSetting 1 ◆ 0..* MonthlyCharge · Receipt ⇢ MonthlyCharge, Period · DelinquencyPolicy ⇢ FeeStatus</div></div>
+ <div class="card sup"><h2>5. Social Spaces <span>(soporte)</span></h2>
+  <span class="k"><i>«AR»</i>SocialSpace</span><span class="k"><i>«AR»</i>Reservation</span><span class="k vo"><i>«VO»</i>TimeSlot</span><span class="k ds"><i>«DS»</i>ReservationPolicy</span>
+  <div class="rel">SocialSpace 1 → 0..* Reservation<br>Reservation → 0..1 TimeSlot (pase QR en la reserva)<br>ReservationPolicy ⇢ SocialSpace, Reservation</div></div>
+ <div class="card core"><h2>6. Incidents <span>(core)</span></h2>
+  <span class="k"><i>«AR»</i>Incident</span><span class="k"><i>«E»</i>IncidentEvent</span><span class="k"><i>«AR»</i>BuildingServiceProvider</span><span class="k vo"><i>«VO»</i>IncidentActor</span><span class="k ds"><i>«DS»</i>EscalationPolicy</span>
+  <div class="rel">Incident 1 ◆ 1..* IncidentEvent<br>Incident 0..* → 0..1 BuildingServiceProvider (assigneeId)<br>IncidentEvent ⇢ IncidentActor · EscalationPolicy ⇢ Incident</div></div>
+ <div class="card sup"><h2>7. Communications <span>(soporte)</span></h2>
+  <span class="k"><i>«AR»</i>Announcement</span><span class="k"><i>«AR»</i>ImportUpload</span><span class="k"><i>«AR»</i>ImportFolder</span>
+  <div class="rel">ImportUpload 0..* → 0..1 ImportFolder (folderId)<br>ImportUpload 0..1 → 0..1 ImportUpload (supersedesId)</div></div>
+ <div class="card core"><h2>8. Resident Care <span>(core)</span></h2>
+  <span class="k"><i>«AR»</i>SupportChat</span><span class="k"><i>«E»</i>SupportMessage</span><span class="k"><i>«E»</i>AiContextChunk</span><span class="k"><i>«E»</i>AiUsage</span><span class="k ds"><i>«DS»</i>AnswerPolicy</span><span class="k ds"><i>«DS»</i>QuestionRelevancePolicy</span><span class="k vo"><i>«VO»</i>Answer</span><span class="k vo"><i>«VO»</i>KnowledgeSource</span>
+  <div class="rel">SupportChat 1 ◆ 0..* SupportMessage<br>SupportChat 0..1 → 0..1 SupportChat (linkedChatId)<br>AnswerPolicy ⇢ KnowledgeSource ⇢ AiContextChunk; crea Answer</div></div>
+ <div class="card sup"><h2>9. Team <span>(soporte)</span></h2>
+  <span class="k"><i>«AR»</i>TeamWorker</span><span class="k"><i>«AR»</i>MaintenanceTask</span><span class="k"><i>«E»</i>Shift</span><span class="k ds"><i>«DS»</i>WorkloadPolicy</span>
+  <div class="rel">MaintenanceTask 0..* → 1 TeamWorker (staffId)<br>Shift 0..* → 1 TeamWorker (staffId)<br>WorkloadPolicy ⇢ TeamWorker</div></div>
+ <div class="card wide" style="border:1.6px dashed #999;background:#fff"><h2 style="color:#333">Referencias entre contextos</h2>
+  <div class="rel" style="margin:0">Todos los agregados guardan <b>ownerAdminId</b>: referencia por id al condominio, una cuenta User de IAM (solo Profiles y Billing la dibujan arriba). Los contextos se comunican por servicios de aplicación y ACL, no por asociaciones entre clases.<br><span style="color:#0F5E57">■</span> core · <span style="color:#1F3864">■</span> soporte · <span style="color:#4B5563">■</span> genérico</div></div>
+ <div class="note full">Vista resumida: sin atributos, métodos ni enumeraciones. El detalle de cada contexto (atributos, métodos, enumeraciones de estado y multiplicidades) está en los diagramas Domain Layer del Capítulo V (Figs. 106, 109, 112, 115, 118, 121, 124, 127 y 130).</div>
+</div></div></body></html>

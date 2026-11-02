@@ -1,0 +1,143 @@
+@startuml
+!include common_class.iuml
+title Bounded Context Finances - Domain Layer (1 de 3: recibos, cuotas y pagos)
+left to right direction
+hide empty members
+
+
+class Receipt <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -residentExternalId : string
+  -issueDate : string?
+  -dueDate : string?
+  -amount : decimal
+  -status : string
+  -lateFee : decimal
+  -extraCharges : decimal
+  -concept : string?
+  -billingMonth : string?
+  -kind : string
+  -monthlyKey : string?
+  -paymentOpen : string?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...): Receipt
+  +{static} CreateMonthly(...): Receipt
+  +CoversMonth(month): bool
+  +EffectiveBillingMonth(): string?
+  +Patch(...): void
+  +MarkAsPaid(): void
+  +IsPaid : bool {derivada}
+  +IsMonthly : bool {derivada}
+  +Total : decimal {derivada}
+}
+
+class Fee <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -residentExternalId : string
+  -month : string
+  -amount : decimal
+  -dueDate : string
+  -status : string
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...): Fee
+  +UpdateStatus(status): void
+}
+
+class Payment <<Aggregate Root>> {
+  -id : int
+  -externalId : string
+  -ownerAdminId : int
+  -residentExternalId : string
+  -feeExternalId : string?
+  -feeMonth : string?
+  -amount : decimal
+  -paidAt : string?
+  -method : string?
+  -reference : string?
+  -createdAt : DateTimeOffset?
+  -updatedAt : DateTimeOffset?
+  --
+  +{static} Create(...): Payment
+}
+
+
+
+
+class MonthlyCharge <<Value Object>> #F2F2F2 {
+  .. detalle en la otra parte ..
+}
+
+class Period <<Value Object>> #F2F2F2 {
+  .. detalle en la otra parte ..
+}
+
+
+
+
+
+
+
+
+
+enum FeeStatus <<enumeration>> {
+  Pending
+  Paid
+  Overdue
+}
+enum PaymentMethod <<enumeration>> {
+  MercadoPago = "Mercado Pago"
+  Voucher = "Voucher"
+  BankTransfer = "Transferencia bancaria"
+  Cash = "Efectivo"
+}
+enum ReceiptKind <<enumeration>> {
+  MONTHLY
+  EXTRA
+}
+
+interface IReceiptRepository <<Repository>> {
+  +FindByExternalIdAsync(externalId): Receipt?
+  +ListAsync(...): IEnumerable<Receipt>
+  +AddAsync(...)
+}
+
+Payment "0..*" -[norank]-> "0..1" Fee : feeExternalId
+Receipt .[norank].> MonthlyCharge : CreateMonthly
+Receipt .[norank].> Period : billingMonth
+Receipt "0..*" -[norank]-> "1" ReceiptKind : kind
+Receipt "0..*" -[norank]-> "1" FeeStatus : status
+Fee "0..*" -[norank]-> "1" FeeStatus : status
+Payment "0..*" -[norank]-> "0..1" PaymentMethod : method
+IReceiptRepository .[norank].> "0..*" Receipt : persiste
+note as N1
+  Todos los agregados guardan ownerAdminId
+  (users.id del condominio, IAM; en
+  ResidentExtraCharge, su externalId como texto)
+  y, si aplica, residentExternalId.
+  FeeStatus, PaymentMethod y ReceiptKind son
+  constantes string (no hay enum persistido).
+  Repositorios: IFeeRepository, IPaymentRepository,
+  IReceiptRepository, IFinanceSettingRepository,
+  IKpiRepository, IAdminManagementExpenseRepository,
+  ISharedUtilityServiceRepository,
+  IFixedPayoutRecipientRepository e
+  IMaintenanceCheckoutRepository
+  (ResidentExtraCharge no tiene repositorio).
+end note
+' --- columnas (aristas ocultas); relaciones con [norank]
+Receipt -[hidden]- Fee
+Receipt -[hidden]- Payment
+Receipt -[hidden]- FeeStatus
+Receipt -[hidden]- PaymentMethod
+Receipt -[hidden]- ReceiptKind
+Receipt -[hidden]- MonthlyCharge
+Receipt -[hidden]- Period
+@enduml

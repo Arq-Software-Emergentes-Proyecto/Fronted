@@ -1,0 +1,46 @@
+@startuml
+!include <C4/C4_Container>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+
+Person(admin, "Administrador", "Empresa administradora, administrador asignado o la junta que creó la cuenta.")
+Person(board, "Junta directiva", "Solo lectura del edificio.")
+Person(resident, "Residente", "Paga cuotas, reserva espacios y reporta incidencias.")
+Person(guest, "Invitado de residente", "Sin cuenta; abre su pase QR de reserva.")
+
+System_Boundary(bf, "BuildingFex") {
+  Container(spa, "BuildingFex Web SPA", "Vue 3, Vite, PrimeVue; alojada en Vercel (CDN)", "Interfaz para administradores, junta directiva, residentes e invitados. Envía el edificio activo en la cabecera X-Building-Id. En producción el chat de soporte usa polling (VITE_REALTIME=false).")
+  Container(api, "BuildingFex.Api", "ASP.NET Core (.NET 10); AWS Lambda tras API Gateway", "Monolito modular con 9 módulos: IAM, Profiles, Finances, Billing, Social Spaces, Incidents, Communications, Resident Care y Team. API REST JSON en /api/v1 y rutas de compatibilidad.")
+  Container(jobs, "Función de jobs", "AWS Lambda + EventBridge Scheduler; mismo paquete .NET", "monthly-billing (diario 06:15, Lima), incident-escalation (cada hora), import-cleanup y ai-index (cada 30 min); migrate tras cada despliegue.")
+  ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Datos de los 9 módulos. Acceso con EF Core sobre TLS.")
+  ContainerDb(s3, "Almacenamiento de archivos", "Amazon S3 (FilesBucket)", "Bucket privado y cifrado: documentos del edificio y archivos de importación.")
+}
+
+System_Ext(fbauth, "Firebase Authentication", "Correo y contraseña o Google. Emite el ID token.")
+System_Ext(gemini, "Google Gemini API", "Chat del asistente, triaje de incidencias y embeddings.")
+System_Ext(mp, "Mercado Pago", "Checkout Pro: cuotas y suscripción.")
+
+Rel(admin, spa, "Usa", "HTTPS")
+Rel(board, spa, "Consulta /app/board", "HTTPS")
+Rel(resident, spa, "Usa", "HTTPS")
+Rel(guest, spa, "Abre /invite/:token", "HTTPS")
+
+Rel(spa, api, "Llama a la API con el ID token (Bearer)", "JSON/HTTPS")
+Rel_R(spa, fbauth, "Inicia sesión y obtiene el ID token", "Firebase JS SDK, HTTPS")
+Rel(spa, s3, "Sube y descarga archivos con URL prefirmada (15 min)", "HTTPS")
+
+Rel_L(api, s3, "Firma URL y verifica metadatos", "AWS SDK")
+Rel(api, db, "Lee y escribe", "EF Core, TLS")
+Rel(api, jobs, "Invoca ai-index al confirmar un documento", "Lambda, asíncrono")
+Rel_R(api, fbauth, "Verifica el ID token", "Firebase Admin SDK")
+Rel(api, gemini, "Chat del asistente y triaje de incidencias", "HTTPS/JSON")
+Rel_R(api, mp, "Crea el cobro y consulta el pago", "HTTPS/JSON")
+Rel_L(mp, api, "Webhook de pago (x-signature)", "HTTPS")
+
+Rel(jobs, db, "Lee y escribe", "EF Core, TLS")
+Rel_U(jobs, s3, "Lee documentos y borra huérfanos", "AWS SDK")
+Rel(jobs, gemini, "Embeddings de documentos", "HTTPS/JSON")
+
+Lay_D(fbauth, mp)
+Lay_D(mp, gemini)
+@enduml

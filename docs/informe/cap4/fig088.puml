@@ -1,0 +1,56 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+
+Person(admin, "Administrador", "Dueño de la cuenta o administrador asignado.")
+Person(board, "Junta directiva", "Solo lectura del edificio.")
+Person(resident, "Residente", "Ingresa por invitación con su cuenta de Google.")
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz web para administradores, junta y residentes. Envía X-Building-Id con el edificio activo.")
+
+Container_Boundary(api, "BuildingFex.Api - módulo IAM") {
+  Component(guards, "AccountStatusMiddleware y BoardReadOnlyMiddleware", "ASP.NET Core Middleware", "403 ACCOUNT_DEACTIVATED a cuentas dadas de baja y 403 BOARD_READ_ONLY a escrituras de la junta.")
+  Component(authCtrl, "AuthenticationController", "ASP.NET Core API Controller", "/api/v1/authentication: me, sign-in, sign-in-google, register-admin e invitación de residentes (residents/invite, complete-google, set-credentials).")
+  Component(usersCtrl, "UsersController", "ASP.NET Core API Controller", "/api/v1/users: alta, consulta, edición, baja y reactivación de residentes.")
+  Component(membersCtrl, "MembersController", "ASP.NET Core API Controller", "/api/v1/members: invita a un administrador o a la junta, anula invitaciones y retira accesos.")
+  Component(minvCtrl, "MemberInvitationsController", "ASP.NET Core API Controller", "/api/v1/member-invitations/{token}: consulta pública y aceptación (crea la cuenta y la membresía).")
+  Component(caller, "CallerContextAccessor", "C# Service (tenancy)", "Usuario, edificio activo (X-Building-Id) y rol en cada edificio: owner, admin o board_member.")
+  Component(cmdSvc, "UserCommandService", "C# Application Service", "Registro del administrador, ingreso con Google, alta, baja y credenciales de residentes.")
+  Component(qrySvc, "UserQueryService", "C# Application Service", "Consulta y búsqueda de cuentas.")
+  Component(userRepo, "UserRepository", "EF Core Repository", "Acceso a la tabla users.")
+  Component(verifier, "FirebaseIdTokenVerifier", "C# Infrastructure", "Valida el ID token de Firebase con las claves públicas (JWKS).")
+  Component(fbAdmin, "FirebaseAuthAdminService", "C# Infrastructure (Firebase Admin SDK)", "Asigna claims (rol y condominio) y revoca sesiones al dar de baja.")
+}
+
+Component_Ext(billing, "Módulo Billing", "SubscriptionService", "Inicia la prueba Free y valida el tope de departamentos del plan.")
+System_Ext(firebaseAuth, "Firebase Authentication", "Identidad: correo y contraseña (administrador) o Google (residente).")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de IAM: users, building_members y member_invitations.")
+
+Rel(admin, spa, "Se registra e inicia sesión", "HTTPS")
+Rel(board, spa, "Acepta la invitación y consulta", "HTTPS")
+Rel(resident, spa, "Acepta la invitación e ingresa con Google", "HTTPS")
+Rel(spa, firebaseAuth, "Autentica y obtiene el ID token", "HTTPS")
+Rel(spa, guards, "Toda petición pasa por", "JSON/HTTPS")
+Rel(guards, authCtrl, "Deja pasar")
+Rel(guards, usersCtrl, "Deja pasar")
+Rel(guards, membersCtrl, "Deja pasar")
+Rel(guards, minvCtrl, "Deja pasar")
+Rel(guards, caller, "Consulta estado y rol")
+Rel(authCtrl, cmdSvc, "Usa")
+Rel(usersCtrl, cmdSvc, "Usa")
+Rel(usersCtrl, qrySvc, "Usa")
+Rel(membersCtrl, caller, "Resuelve edificio y rol")
+Rel(cmdSvc, verifier, "Valida el ID token")
+Rel(cmdSvc, fbAdmin, "Claims y revocación")
+Rel(cmdSvc, userRepo, "Usa")
+Rel(qrySvc, userRepo, "Usa")
+Rel(caller, userRepo, "Usa")
+Rel(minvCtrl, userRepo, "Busca la cuenta")
+Rel(cmdSvc, billing, "StartTrialAsync / CheckRosterGrowthAsync")
+Rel(verifier, firebaseAuth, "Claves públicas (JWKS)", "HTTPS")
+Rel(fbAdmin, firebaseAuth, "SetCustomUserClaims / RevokeRefreshTokens", "HTTPS")
+Rel(userRepo, db, "Lee y escribe", "EF Core")
+Rel(membersCtrl, db, "building_members y member_invitations (AppDbContext)", "EF Core")
+Rel(minvCtrl, db, "Crea la cuenta y la membresía (AppDbContext)", "EF Core")
+@enduml

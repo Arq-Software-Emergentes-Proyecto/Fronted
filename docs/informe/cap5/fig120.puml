@@ -1,0 +1,46 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+skinparam wrapWidth 220
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz para administradores y residentes.")
+Component_Ext(rc, "Módulo Resident Care", "Módulo de BuildingFex.Api", "SupportController reporta incidencias desde el chat; IncidentResolutionNotifier recibe IncidenteResuelto.")
+Component_Ext(team, "Módulo Team", "Módulo de BuildingFex.Api", "MaintenanceTaskCommandService resuelve la incidencia al completarse su última tarea ligada.")
+Container_Ext(jobs, "Función de jobs", "AWS Lambda + EventBridge Scheduler", "Job incident-escalation cada hora (en local, IncidentEscalationWorker).")
+
+' Mismo aspecto que Container_Boundary; el título lleva relleno invisible (NBSP) para que las flechas de la SPA no lo crucen
+Boundary(api, "                                                            BuildingFex.Api - bounded context Incidents\n<size:12>                                                                    [container]</size>") {
+  Component(incCtrl, "IncidentsCompatController", "REST Controller", "/api/v1/incidents (y /incidents): GET, POST, PUT, DELETE, triage-suggestion, triage, assign, resolve y comments.")
+  Component(spCtrl, "ServiceProvidersCompatController", "REST Controller", "GET, POST /serviceProviders y DELETE /serviceProviders/{id}.")
+  Component(cmd, "IncidentCommandService", "Application Service (IIncidentCommandService)", "Handle() de Create, Update, Assign, ConfirmTriage, AddComment, Resolve y Delete.")
+  Component(qry, "IncidentQueryService", "Application Service (IIncidentQueryService)", "Lista las incidencias del condominio por residente y estado.")
+  Component(tri, "IncidentTriageService", "Application Service", "Sugerencia de categoría y prioridad con IA (plan Standard o superior, tope mensual de IA).")
+  Component(esc, "IncidentEscalationJob", "Background Job", "Escala las incidencias abiertas y sin proveedor tras 48 horas.")
+  Component(dm, "Domain Model", "Domain Layer", "Incident, IncidentEvent, BuildingServiceProvider, EscalationPolicy, IncidentActor.")
+  Component(repo, "IncidentRepository / ServiceProviderRepository", "Repository (EF Core)", "Implementan IIncidentRepository e IServiceProviderRepository sobre TiDB Cloud.")
+  Component(adv, "GeminiIncidentTriageAdvisor", "Anticorruption Layer (IIncidentTriageAdvisor)", "Pide a Gemini un JSON con categoría, prioridad y motivo, y lo valida.")
+}
+
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Incidents: incidents, incident_events, service_providers.")
+System_Ext(gemini, "Google Gemini API", "Proveedor de IA (IGeminiClient compartido con Resident Care).")
+
+Rel(spa, incCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, spCtrl, "Usa", "JSON/HTTPS")
+Rel(rc, cmd, "CreateIncidentCommand")
+Rel(team, cmd, "ResolveIncidentCommand")
+Rel(jobs, esc, "RunOnceAsync")
+Rel(incCtrl, cmd, "Envía comando")
+Rel(incCtrl, qry, "Consulta")
+Rel(incCtrl, tri, "Pide triaje")
+Rel(spCtrl, db, "Lee y escribe service_providers", "EF Core (AppDbContext)")
+Rel(cmd, dm, "Aplica reglas del dominio")
+Rel(cmd, repo, "Persiste")
+Rel(cmd, rc, "IncidenteResuelto")
+Rel(qry, repo, "Lee")
+Rel(tri, adv, "SuggestAsync")
+Rel(tri, repo, "Guarda sugerencia")
+Rel(esc, repo, "Candidatas y escalamiento")
+Rel(adv, gemini, "generateContent", "HTTPS")
+Rel(repo, db, "Lee y escribe", "EF Core")
+@enduml

@@ -1,0 +1,60 @@
+digraph G {
+  graph [rankdir=TB, newrank=true, splines=true, nodesep=0.1, ranksep=0.32, fontname="Liberation Sans", fontsize=15, pad="0.08", outputorder=edgesfirst];
+  node [fontname="Liberation Sans", fontsize=14, margin="0.10,0.06", penwidth=0];
+  edge [fontname="Liberation Sans", fontsize=14, color="#666666", fontcolor="#333333", arrowsize=0.7, penwidth=1.1];
+  labelloc=t; label=<<b>BuildingFex.Api - bounded context Communications (azul<br/>claro: componentes; gris: otros módulos)</b>>;
+  spa [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>BuildingFex Web SPA</b></font><br/><i>[Vue 3]</i><br/>Interfaz para<br/>administradores y<br/>residentes.>];
+  jobs [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>Función de jobs</b></font><br/><i>[AWS Lambda +<br/>EventBridge Scheduler]</i><br/>Job import-cleanup<br/>en AWS.>];
+  annCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>AnnouncementsCompat<br/>Controller</b></font><br/><i>[REST Controller]</i><br/>GET y POST<br/>/announcements; PUT<br/>y DELETE<br/>/announcements/{id}.>];
+  uplCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ImportUploadsController</b></font><br/><i>[REST Controller]</i><br/>/api/v1/import/uploads:<br/>signed-url,<br/>confirm,<br/>download-url,<br/>publish, archive,<br/>PATCH y DELETE.>];
+  fldCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ImportFoldersController</b></font><br/><i>[REST Controller]</i><br/>GET y POST<br/>/api/v1/import/folders;<br/>PATCH y DELETE<br/>.../{id}.>];
+  svc [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>AnnouncementCommand<br/>/ QueryService</b></font><br/><i>[Application Services]</i><br/>Crean, editan,<br/>eliminan y listan<br/>comunicados<br/>(vigentes por<br/>prioridad y fecha).>];
+  dm [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>Domain Model</b></font><br/><i>[Domain Layer]</i><br/>Announcement,<br/>ImportUpload,<br/>ImportFolder.>];
+  cleanup [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>ImportOrphanCleanup<br/>/ Worker</b></font><br/><i>[Background Job]</i><br/>Borra cargas<br/>pending_upload sin<br/>confirmar tras 2 h<br/>(worker cada 30 min<br/>fuera de Lambda).>];
+  repo [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>AnnouncementRepository</b></font><br/><i>[Repository (EF Core)]</i><br/>Implementa<br/>IAnnouncementRepository.>];
+  ctx [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>AppDbContext</b></font><br/><i>[EF Core (compartido)]</i><br/>import_uploads e<br/>import_folders se<br/>leen y escriben<br/>directamente.>];
+  storage [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>S3StorageService /<br/>FirebaseStorageService</b></font><br/><i>[Adapter<br/>(IFirebaseStorageService)]</i><br/>URL firmadas de<br/>subida y descarga<br/>(10 min, máx. 15),<br/>metadatos y<br/>borrado.>];
+  iam [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo IAM</b></font><br/><i>[BuildingFex.Api]</i><br/>IUserRepository:<br/>resuelve el<br/>administrador del<br/>condominio.>];
+  rc [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Resident<br/>Care</b></font><br/><i>[BuildingFex.Api]</i><br/>IAiContextIndexingQueue<br/>e<br/>IAiContextIndexer:<br/>indexa los<br/>documentos de la<br/>carpeta Contexto<br/>IA.>];
+  db [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>TiDB Cloud</b></font><br/><i>[MySQL compatible]</i><br/>announcements,<br/>import_uploads,<br/>import_folders.>];
+  s3 [shape=box, style="rounded,filled", fillcolor="#999999", fontcolor="white", label=<<font point-size="15"><b>Amazon S3 /<br/>Firebase Storage</b></font><br/>Bucket privado con<br/>los archivos de los<br/>documentos.>];
+  { rank=same; spa; jobs; }
+  spa -> jobs [style=invis, weight=5];
+  { rank=same; annCtrl; fldCtrl; uplCtrl; }
+  annCtrl -> fldCtrl [style=invis, weight=5];
+  fldCtrl -> uplCtrl [style=invis, weight=5];
+  { rank=same; svc; dm; cleanup; rc; }
+  svc -> dm [style=invis, weight=5];
+  dm -> cleanup [style=invis, weight=5];
+  cleanup -> rc [style=invis, weight=5];
+  { rank=same; iam; repo; storage; }
+  iam -> repo [style=invis, weight=5];
+  repo -> storage [style=invis, weight=5];
+  { rank=same; ctx; s3; }
+  ctx -> s3 [style=invis, weight=5];
+  { rank=same; db; }
+  spa -> annCtrl [style=invis, weight=0];
+  annCtrl -> svc [style=invis, weight=0];
+  svc -> iam [style=invis, weight=0];
+  iam -> ctx [style=invis, weight=0];
+  ctx -> db [style=invis, weight=0];
+  spa -> annCtrl [];
+  spa -> uplCtrl [label=<JSON/HTTPS>];
+  spa -> fldCtrl [];
+  spa -> s3 [label=<PUT / GET con<br/>URL firmada<br/>(HTTPS)>];
+  annCtrl -> svc [label=<Comandos y<br/>consultas>];
+  svc -> dm [xlabel=<Reglas>];
+  svc -> repo [label=<Persiste>];
+  svc -> iam [label=<Resuelve<br/>administrador>];
+  uplCtrl -> dm [label=<Confirm,<br/>Publish,<br/>Supersede,<br/>Archive>];
+  uplCtrl -> ctx [label=<Lee y escribe>];
+  fldCtrl -> ctx [];
+  uplCtrl -> storage [label=<Firma y<br/>verifica>];
+  uplCtrl -> rc [label=<Encola<br/>indexado /<br/>retira<br/>fragmentos>];
+  repo -> ctx [];
+  cleanup -> ctx [label=<Borra<br/>pendientes>];
+  cleanup -> storage [label=<Borra objetos>];
+  jobs -> cleanup [label=<import-cleanup>];
+  ctx -> db [label=<EF Core>];
+  storage -> s3 [label=<Firma,<br/>consulta y<br/>borra (AWS SDK<br/>/ GCS)>];
+}

@@ -1,0 +1,61 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+skinparam wrapWidth 200
+LAYOUT_TOP_DOWN()
+
+Container(jobs, "Función de jobs", "AWS Lambda + EventBridge", "Job monthly-billing (diario); en local, MonthlyBillingWorker.")
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz web para administradores y residentes.")
+System_Ext(mp, "Mercado Pago", "Checkout Pro: preferencias, pagos y webhooks.")
+
+Container_Boundary(api, "BuildingFex.Api - módulo Finances") {
+  Component(opsCtrl, "FinanceOperationsController", "ASP.NET Core API Controller", "/api/v1/finances: generación de recibos, alertas, calendario de pagos, PDF y saldo; DashboardController expone /api/v1/finances/kpi.")
+  Component(crudCtrl, "Controladores de compatibilidad", "ASP.NET Core API Controllers", "FeesCompat, PaymentsCompat, ReceiptsCompat, AdminManagementExpensesCompat, SharedUtilityServicesCompat, FixedPayoutRecipientsCompat, FinanceSettingsCompat, KpiCompat y ResidentExtraChargesCompat (/fees, /payments, /receipts…). ResidentExtraChargesCompat lee y escribe con AppDbContext.")
+  Component(mpCtrl, "MercadoPagoController", "ASP.NET Core API Controller", "/api/v1/payments: preference, checkout, confirm, process y webhook (MercadoPagoWebhookValidator valida x-signature).")
+
+  Component(billingSvc, "MonthlyBillingService", "C# Application Service", "Facturación mensual idempotente: recibos del mes, recargo por mora y alertas.")
+  Component(querySvc, "Servicios de consulta", "C# Query Services", "DashboardQueryService (KPI y morosidad), PaymentCalendarQueryService y AccountStatusQueryService (estado de cuenta).")
+  Component(docSvc, "ReceiptDocumentService", "C# Application Service", "PDF del recibo o del pago con SimpleReceiptPdfRenderer.")
+  Component(mpSvc, "MercadoPagoService", "C# Application Service (ACL)", "Crea preferencias, confirma pagos y concilia recibos y cuotas; deriva los pagos de suscripción a Billing.")
+
+  Component(repos, "Repositorios de Finances", "EF Core Repositories", "Fee, Payment, Receipt, FinanceSetting, Kpi, AdminManagementExpense, SharedUtilityService, FixedPayoutRecipient y MaintenanceCheckout Repository.")
+}
+
+Component_Ext(spaces, "Módulo Social Spaces", "FinancesAccountStatusAcl", "Consulta la morosidad al reservar.")
+Component_Ext(billing, "Módulo Billing", "SubscriptionService", "Checkout y aplicación del pago de la suscripción.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Finances: fees, payments, receipts, admin_management_expenses, shared_utility_services, fixed_payout_recipients, resident_extra_charges, finance_settings, kpi_records y maintenance_checkouts.")
+
+Lay_R(jobs, spa)
+Lay_R(spa, mp)
+Lay_R(opsCtrl, crudCtrl)
+Lay_R(crudCtrl, mpCtrl)
+Lay_R(billingSvc, querySvc)
+Lay_R(querySvc, docSvc)
+Lay_R(docSvc, mpSvc)
+Lay_D(querySvc, repos)
+Lay_R(spaces, db)
+Lay_R(db, billing)
+
+Rel(spa, opsCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, crudCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, mpCtrl, "Usa", "JSON/HTTPS")
+Rel(mp, mpCtrl, "Webhook firmado (x-signature)", "HTTPS")
+Rel(jobs, billingSvc, "monthly-billing")
+
+Rel(opsCtrl, billingSvc, "Usa")
+Rel(opsCtrl, querySvc, "Usa")
+Rel(opsCtrl, docSvc, "Usa")
+Rel(crudCtrl, querySvc, "KpiCompat")
+Rel(crudCtrl, repos, "Usa (IUnitOfWork)")
+Rel(mpCtrl, mpSvc, "Usa")
+Rel(querySvc, billingSvc, "Alertas")
+Rel(mpSvc, repos, "Usa")
+Rel_U(mpSvc, mp, "Preferencias y pagos", "SDK MercadoPago")
+Rel(mpSvc, billing, "Pagos de suscripción")
+Rel_U(spaces, querySvc, "Consulta morosidad")
+
+Rel(repos, db, "Lee y escribe", "EF Core")
+Rel(billingSvc, db, "Lee y escribe (AppDbContext)", "EF Core")
+Rel(docSvc, db, "Lee (AppDbContext)", "EF Core")
+Rel(querySvc, db, "Lee (AppDbContext)", "EF Core")
+@enduml

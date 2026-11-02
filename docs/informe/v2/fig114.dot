@@ -1,0 +1,48 @@
+digraph G {
+  graph [rankdir=TB, newrank=true, splines=true, nodesep=0.1, ranksep=0.32, fontname="Liberation Sans", fontsize=15, pad="0.08", outputorder=edgesfirst];
+  node [fontname="Liberation Sans", fontsize=14, margin="0.10,0.06", penwidth=0];
+  edge [fontname="Liberation Sans", fontsize=14, color="#666666", fontcolor="#333333", arrowsize=0.7, penwidth=1.1];
+  labelloc=t; label=<<b>BuildingFex.Api - bounded context Billing (azul claro:<br/>componentes; gris: otros módulos)</b>>;
+  spa [shape=box, style="rounded,filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>BuildingFex Web SPA</b></font><br/><i>[Vue 3]</i><br/>Interfaz para<br/>administradores y<br/>residentes.>];
+  iam [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo IAM</b></font><br/><i>[BuildingFex.Api]</i><br/>UserCommandService:<br/>prueba Free al<br/>registrar un<br/>administrador y<br/>tope de residentes.>];
+  profiles [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Profiles</b></font><br/><i>[BuildingFex.Api]</i><br/>BuildingsController<br/>y<br/>ResidentRosterImportService:<br/>edificio principal<br/>y tope de<br/>departamentos.>];
+  plansCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>PlansController</b></font><br/><i>[REST Controller]</i><br/>GET /api/v1/plans,<br/>.../plans/{planId}<br/>y .../plans/suggest<br/>(público).>];
+  subCtrl [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>SubscriptionController</b></font><br/><i>[REST Controller]</i><br/>GET y PATCH<br/>/api/v1/subscription;<br/>POST .../checkout y<br/>.../confirm; GET<br/>.../limits.>];
+  svc [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>SubscriptionService</b></font><br/><i>[Application Service<br/>(ISubscriptionService)]</i><br/>GetOrStart,<br/>StartTrial,<br/>ActivatePaidPlan,<br/>ChangeToFree,<br/>CreateCheckout,<br/>ApplyPayment,<br/>CheckRosterGrowth,<br/>LinkBuilding<br/>(Async).>];
+  dm [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>Domain Model</b></font><br/><i>[Domain Layer]</i><br/>Subscription,<br/>SubscriptionPayment,<br/>SubscriptionCheckout,<br/>PlanLimits,<br/>SubscriptionPlans,<br/>PlanCatalog,<br/>SubscriptionStatus.>];
+  repo [shape=box, style="rounded,filled", fillcolor="#85BBF0", fontcolor="black", label=<<font point-size="15"><b>SubscriptionRepository</b></font><br/><i>[Repository (EF Core)]</i><br/>Implementa<br/>ISubscriptionRepository<br/>sobre TiDB Cloud.>];
+  fin [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>MercadoPagoService<br/>(Finances)</b></font><br/><i>[IMercadoPagoService]</i><br/>Preferencia<br/>Checkout Pro,<br/>confirm y webhook<br/>(POST<br/>/api/v1/payments/webhook,<br/>firma x-signature).>];
+  rc [shape=box, style="rounded,filled", fillcolor="#CCCCCC", fontcolor="black", label=<<font point-size="15"><b>Módulo Resident<br/>Care</b></font><br/><i>[BuildingFex.Api]</i><br/>PlanQuotaClient:<br/>tope de consultas<br/>de IA y módulos del<br/>plan.>];
+  mp [shape=box, style="rounded,filled", fillcolor="#999999", fontcolor="white", label=<<font point-size="15"><b>Mercado Pago</b></font><br/>Checkout Pro: pago<br/>de cada periodo.>];
+  db [shape=cylinder, style="filled", fillcolor="#438DD5", fontcolor="white", label=<<font point-size="15"><b>TiDB Cloud</b></font><br/><i>[MySQL compatible]</i><br/>subscriptions,<br/>subscription_payments,<br/>subscription_checkouts.>];
+  { rank=same; iam; spa; profiles; }
+  iam -> spa [style=invis, weight=5];
+  spa -> profiles [style=invis, weight=5];
+  { rank=same; plansCtrl; subCtrl; }
+  plansCtrl -> subCtrl [style=invis, weight=5];
+  { rank=same; rc; fin; }
+  rc -> fin [style=invis, weight=5];
+  { rank=same; svc; mp; }
+  svc -> mp [style=invis, weight=5];
+  { rank=same; dm; repo; }
+  dm -> repo [style=invis, weight=5];
+  { rank=same; db; }
+  iam -> plansCtrl [style=invis, weight=0];
+  plansCtrl -> rc [style=invis, weight=0];
+  rc -> svc [style=invis, weight=0];
+  svc -> dm [style=invis, weight=0];
+  dm -> db [style=invis, weight=0];
+  spa -> subCtrl [label=<JSON/HTTPS>];
+  spa -> plansCtrl [];
+  iam -> svc [label=<StartTrial,<br/>CheckRoster<br/>Growth>];
+  profiles -> svc [label=<LinkBuilding,<br/>CheckRoster<br/>Growth>];
+  plansCtrl -> dm [label=<Lee<br/>PlanCatalog>];
+  subCtrl -> svc [];
+  subCtrl -> fin [label=<Checkout y<br/>confirm>];
+  fin -> svc [label=<CreateCheckout,<br/>ApplyPayment>];
+  svc -> dm [label=<Reglas del<br/>dominio>];
+  svc -> repo [label=<Persiste>];
+  rc -> dm [label=<Lee topes del<br/>plan>];
+  fin -> mp [label=<Preferencia,<br/>pago y webhook<br/>(HTTPS)>];
+  repo -> db [label=<EF Core>];
+}

@@ -1,0 +1,42 @@
+@startuml
+!include <C4/C4_Component>
+!include common_c4.iuml
+LAYOUT_TOP_DOWN()
+skinparam wrapWidth 220
+skinparam nodesep 25
+
+Container(spa, "BuildingFex Web SPA", "Vue 3", "Interfaz para administradores, residentes y la página pública del invitado.")
+
+' Mismo aspecto que Container_Boundary; el título lleva relleno invisible (NBSP) al final para que las flechas de la SPA no lo crucen
+Boundary(api, "BuildingFex.Api - bounded context Social Spaces                                                                                                                \n<size:12>[container]                                                                                                                               </size>") {
+  Component(spCtrl, "SocialSpacesCompatController", "REST Controller", "GET, POST /socialSpaces y GET, PATCH, DELETE /socialSpaces/{id}.")
+  Component(resCtrl, "ReservationsCompatController", "REST Controller", "GET, POST /reservations; GET, PATCH, DELETE /reservations/{id}; POST /reservations/{id}/cancel.")
+  Component(gpCtrl, "GuestPassesController", "REST Controller", "GET /api/v1/guest-passes/{token} (público) y POST /api/v1/guest-passes/{token}/check-in (portería).")
+  Component(svc, "ReservationCommandService", "Application Service", "CreateAsync, UpdateGuestsAsync, CancelAsync, PurgeAsync, CheckInByTokenAsync. Usa GuestListSanitizer y SocialSpacesClock.")
+  Component(dm, "Domain Model", "Domain Layer", "SocialSpace, Reservation (con el pase QR), TimeSlot y ReservationPolicy.")
+  Component(acl, "FinancesAccountStatusAcl", "Anticorruption Layer (IAccountStatusAcl)", "¿El reglamento impide reservar al residente moroso?")
+  Component(repo, "SocialSpaceRepository / ReservationRepository", "Repository (EF Core)", "BeginBookingAsync bloquea el espacio (SELECT ... FOR UPDATE).")
+}
+
+Component_Ext(finances, "Módulo Finances", "Módulo de BuildingFex.Api", "IAccountStatusQueryService: estado de cuenta y regla de morosidad.")
+ContainerDb(db, "Base de datos TiDB Cloud", "TiDB Cloud Starter (compatible con MySQL)", "Esquema de Social Spaces: social_spaces, reservations.")
+
+Rel(spa, spCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, resCtrl, "Usa", "JSON/HTTPS")
+Rel(spa, gpCtrl, "Usa", "JSON/HTTPS")
+Rel(resCtrl, svc, "Crea, edita invitados, cancela")
+Rel(gpCtrl, svc, "Check-in")
+Rel(spCtrl, repo, "Lee y escribe espacios")
+Rel(resCtrl, repo, "Consulta reservas")
+Rel(gpCtrl, repo, "Valida el pase")
+Rel(svc, dm, "Aplica reglas del dominio")
+Rel(svc, acl, "BlocksReservationsAsync")
+Rel(svc, repo, "Persiste")
+Rel(acl, finances, "Consulta estado de cuenta")
+Rel(repo, db, "Lee y escribe", "EF Core")
+Lay_R(spCtrl, resCtrl)
+Lay_R(resCtrl, gpCtrl)
+Lay_R(dm, svc)
+Lay_R(svc, acl)
+Lay_R(acl, finances)
+@enduml

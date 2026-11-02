@@ -1,0 +1,84 @@
+@startuml
+skinparam dpi 200
+skinparam defaultFontName "DejaVu Sans"
+skinparam shadowing false
+hide circle
+hide methods
+skinparam class {
+  BackgroundColor #FFFFFF
+  HeaderBackgroundColor #E7EDF8
+  BorderColor #1F3864
+  ArrowColor #181818
+}
+skinparam class<<ext>> {
+  BackgroundColor #F2F2F2
+  HeaderBackgroundColor #D9D9D9
+  BorderColor #8A8A8A
+}
+hide stereotype
+title Bounded Context Communications - Database Design (TiDB Cloud · compatible con MySQL)
+
+entity "users (IAM)" as users <<ext>> {
+  * id : INT «PK»
+  --
+  external_id : VARCHAR(128) «UQ»
+}
+
+entity announcements {
+  * id : INT «PK» AUTO_INCREMENT
+  --
+  external_id : VARCHAR(64) «UQ»
+  owner_admin_id : INT «FK»
+  title : VARCHAR(500)
+  body : VARCHAR(4000)
+  priority : VARCHAR(20)
+  duration : INT
+  author_name : VARCHAR(200)
+  status : VARCHAR(20)
+  published_at : DATETIME(6)
+  expires_at : DATETIME(6)
+  created_at : DATETIME(6)
+  updated_at : DATETIME(6)
+}
+
+entity import_folders {
+  * id : INT «PK» AUTO_INCREMENT
+  --
+  external_id : VARCHAR(128) «UQ»
+  owner_admin_id : VARCHAR(128)
+  name : VARCHAR(256)
+  is_home : TINYINT(1)
+  is_context : TINYINT(1)
+  created_at : DATETIME(6)
+}
+
+entity import_uploads {
+  * id : INT «PK» AUTO_INCREMENT
+  --
+  external_id : VARCHAR(128) «UQ»
+  owner_admin_id : VARCHAR(128) «IDX»
+  file_name : VARCHAR(512)
+  mime_type : VARCHAR(128)
+  size : BIGINT
+  storage_path : VARCHAR(1024)
+  download_url : LONGTEXT (legado)
+  data_url : LONGTEXT (legado)
+  folder_id : VARCHAR(128)
+  upload_status : VARCHAR(32) «IDX»
+  indexing_status : VARCHAR(32) «IDX»
+  indexing_error : VARCHAR(1024)
+  uploaded_at : DATETIME(6)
+  document_type : VARCHAR(20)
+  version : INT
+  published_at : DATETIME(6)
+  document_status : VARCHAR(20)
+  supersedes_id : VARCHAR(128)
+  ..
+  «IDX» (owner_admin_id, document_status)
+}
+
+users "1" -- "0..*" announcements : owner_admin_id
+import_folders "0..1" .. "0..*" import_uploads : folder_id → external_id\n(sin FK)
+import_uploads "0..1   " .. "   0..1" import_uploads : supersedes_id →\nexternal_id (sin FK)
+users -[hidden]right- import_folders
+@enduml
