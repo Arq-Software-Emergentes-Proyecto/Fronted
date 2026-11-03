@@ -230,9 +230,12 @@ export async function ensureSupportHub() {
   return startPromise
 }
 
+/** VITE_REALTIME=false: the API has no SignalR hub (AWS Lambda); views keep polling. */
+const REALTIME_CONFIGURED = String(import.meta.env.VITE_REALTIME ?? 'true') !== 'false'
+
 function realtimeEnabled() {
   const token = getAccessToken()
-  return !!token && !OPEN_WIREFRAME_ACCESS && !isPreviewAccessToken(token)
+  return REALTIME_CONFIGURED && !!token && !OPEN_WIREFRAME_ACCESS && !isPreviewAccessToken(token)
 }
 
 async function joinGroup(method, set, id) {

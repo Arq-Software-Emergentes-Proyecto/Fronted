@@ -36,6 +36,7 @@ import {
 import { teamWorkersApi } from '@/team/infrastructure/teamWorkersApi.js'
 import { teamTasksApi } from '@/team/infrastructure/teamTasksApi.js'
 import KpiPills from '@/shared/presentation/components/KpiPills.vue'
+import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const { t, locale } = useI18n()
@@ -491,6 +492,50 @@ async function confirmResolve(comment, event) {
   }
 }
 
+/* ---------- Triaje con IA (plan Standard+): la IA sugiere, el administrador confirma ---------- */
+const triageNotice = ref({ id: '', text: '', error: false, upgrade: false })
+
+function triageErrorNotice(row, err) {
+  const code = err?.payload?.code || err?.code
+  if (code === 'PLAN_FEATURE_NOT_INCLUDED') {
+    return { id: row.id, text: t('incidentFlow.triagePlanRequired'), error: true, upgrade: true }
+  }
+  if (code === 'AI_MONTHLY_CAP_REACHED') return { id: row.id, text: t('incidentFlow.triageCapReached'), error: true }
+  // AI_UNAVAILABLE, o una API que todavía no tiene el endpoint (404/405) o falla (5xx).
+  if (code === 'AI_UNAVAILABLE' || [404, 405].includes(err?.status) || err?.status >= 500) {
+    return { id: row.id, text: t('incidentFlow.triageUnavailable'), error: true }
+  }
+  return { id: row.id, text: resolveErrorMessage(err), error: true }
+}
+
+async function runTriage(row, action) {
+  if (!row?.id || savingId.value) return
+  savingId.value = row.id
+  triageNotice.value = { id: '', text: '', error: false }
+  const before = detailEventIds()
+  try {
+    await action()
+    await loadIncidents({ silent: true })
+    if (detailId.value === String(row.id)) {
+      await loadDetail()
+      markNewEvents(before)
+    }
+    markFresh('incident', row.id)
+  } catch (err) {
+    triageNotice.value = triageErrorNotice(row, err)
+  } finally {
+    savingId.value = ''
+  }
+}
+
+function requestTriage(row) {
+  runTriage(row, () => incidentsApi.requestTriageSuggestion(row.id))
+}
+
+function applyTriage(row) {
+  runTriage(row, () => incidentsApi.confirmTriage(row.id))
+}
+
 /* ---------- Delete (shared BuildingFex confirm dialog) ---------- */
 const askConfirm = useConfirmDialog()
 
@@ -554,6 +599,7 @@ function openDetail(row, focus = '') {
   detailData.value = null
   detailFocus.value = focus
   taskWorkerId.value = ''
+  if (triageNotice.value.id !== row.id) triageNotice.value = { id: '', text: '', error: false }
   if (taskNotice.value.id !== row.id) taskNotice.value = { id: '', text: '', error: false }
   void loadDetail()
 }
@@ -770,7 +816,11 @@ onBeforeUnmount(() => stopRealtime())
                   <div class="inc-item">
                     <strong class="inc-item__title">{{ row.title || row.description }}</strong>
                     <span v-if="row.title && row.description" class="inc-item__desc">{{ row.description }}</span>
-                    <span v-if="row.priority || row.category" class="inc-item__tags">
+                    <span v-if="row.priority || row.category || row.aiSuggestion?.pending" class="inc-item__tags">
+                      <span v-if="row.aiSuggestion?.pending" class="inc-pill inc-pill--ai">
+                        <i class="pi pi-sparkles" aria-hidden="true" />
+                        {{ t('incidentFlow.triagePendingBadge') }}
+                      </span>
                       <span v-if="row.priority" class="inc-pill" :class="`inc-pill--${row.priority}`">
                         <i class="pi pi-flag" aria-hidden="true" />
                         {{ incidentPriorityLabel(t, row.priority) }}
@@ -999,6 +1049,66 @@ onBeforeUnmount(() => stopRealtime())
         <p class="incd-text">{{ detailRow.description }}</p>
 
         <p v-if="error" class="incd-alert" role="alert">{{ error }}</p>
+
+        <section
+          v-if="statusOf(detailRow) !== IncidentStatus.RESOLVED || detailRow.aiSuggestion"
+          class="incd-block incd-block--ai"
+          aria-labelledby="incd-ai-title"
+        >
+          <h3 id="incd-ai-title" class="incd-block__title">
+            <i class="pi pi-sparkles" aria-hidden="true" />
+            {{ t('incidentFlow.triageTitle') }}
+          </h3>
+          <template v-if="detailRow.aiSuggestion">
+            <div class="incd-meta">
+              <span v-if="detailRow.aiSuggestion.category" class="inc-pill inc-pill--soft">{{ detailRow.aiSuggestion.category }}</span>
+              <span
+                v-if="detailRow.aiSuggestion.priority"
+                class="inc-pill"
+                :class="`inc-pill--${detailRow.aiSuggestion.priority}`"
+              >
+                <i class="pi pi-flag" aria-hidden="true" />
+                {{ incidentPriorityLabel(t, detailRow.aiSuggestion.priority) }}
+              </span>
+            </div>
+            <p v-if="detailRow.aiSuggestion.reason" class="incd-muted">{{ detailRow.aiSuggestion.reason }}</p>
+            <p v-if="!detailRow.aiSuggestion.pending" class="incd-muted">{{ t('incidentFlow.triageConfirmed') }}</p>
+          </template>
+          <p v-else class="incd-muted">{{ t('incidentFlow.triageHint') }}</p>
+          <div v-if="statusOf(detailRow) !== IncidentStatus.RESOLVED" class="incd-inline">
+            <button
+              v-if="detailRow.aiSuggestion?.pending"
+              type="button"
+              class="incd-btn incd-btn--primary"
+              :disabled="savingId === detailRow.id"
+              @click="applyTriage(detailRow)"
+            >
+              <i class="pi" :class="savingId === detailRow.id ? 'pi-spin pi-spinner' : 'pi-check'" aria-hidden="true" />
+              {{ t('incidentFlow.triageApply') }}
+            </button>
+            <button
+              type="button"
+              class="incd-btn"
+              :disabled="savingId === detailRow.id"
+              @click="requestTriage(detailRow)"
+            >
+              <i class="pi" :class="savingId === detailRow.id ? 'pi-spin pi-spinner' : 'pi-sparkles'" aria-hidden="true" />
+              {{ detailRow.aiSuggestion ? t('incidentFlow.triageRetry') : t('incidentFlow.triageRequest') }}
+            </button>
+          </div>
+          <p
+            v-if="triageNotice.id === detailRow.id && triageNotice.text"
+            class="incd-note"
+            :class="triageNotice.error ? 'incd-note--error' : 'incd-note--ok'"
+            role="status"
+          >
+            <i class="pi" :class="triageNotice.error ? 'pi-exclamation-circle' : 'pi-check'" aria-hidden="true" />
+            <span>
+              {{ triageNotice.text }}
+              <RouterLink v-if="triageNotice.upgrade" :to="{ name: AppRouteNames.APP_SETTINGS, query: { tab: 'plans' } }">{{ t('incidentFlow.triageSeePlans') }}</RouterLink>
+            </span>
+          </p>
+        </section>
 
         <section v-if="detailRow.resolutionComment" class="incd-block incd-block--resolved" aria-labelledby="incd-resolution">
           <h3 id="incd-resolution" class="incd-block__title">{{ t('incidentFlow.resolutionTitle') }}</h3>

@@ -29,6 +29,7 @@ const lastListSync = ref('')
 /** US032: 'pending' | 'answered' | 'all'. */
 const filter = ref('all')
 const statusBusy = ref(false)
+const aiUsage = ref(null)
 
 const searchQuery = ref('')
 const replyEl = ref(null)
@@ -61,6 +62,30 @@ const filterOptions = computed(() => [
   { id: 'answered', label: t('supportAdmin.filterAnswered'), count: answeredCount.value },
   { id: 'all', label: t('supportAdmin.filterAll'), count: chats.value.length },
 ])
+
+/** AI usage: ratio del tope mensual → tono (≥80 % ámbar, tope rojo). */
+const usageTone = computed(() => {
+  const usage = aiUsage.value
+  if (!usage) return 'ok'
+  if (usage.capReached || (usage.cap > 0 && usage.used >= usage.cap)) return 'reached'
+  if (usage.cap > 0 && usage.used / usage.cap >= 0.8) return 'near'
+  return 'ok'
+})
+
+const usageHint = computed(() => {
+  if (usageTone.value === 'reached') return t('supportAdmin.aiUsageReached')
+  return usageTone.value === 'near' ? t('supportAdmin.usageNear') : t('supportAdmin.usageOk')
+})
+const usagePercent = computed(() => {
+  const usage = aiUsage.value
+  if (!usage?.cap) return 0
+  return Math.min(100, Math.round((usage.used / usage.cap) * 100))
+})
+
+/** Same grouping as the plans page (10,000 / 2,000). */
+function formatCount(value) {
+  return new Intl.NumberFormat(locale.value === 'en' ? 'en-US' : 'es-PE').format(Number(value) || 0)
+}
 
 function isDerived(row) {
   return row?.source === 'ai-escalation' || row?.status === ChatStatus.DERIVED
@@ -162,6 +187,7 @@ function onReplyKeydown(event) {
 }
 
 function refreshAll() {
+  void loadAiUsage()
   void bindChats()
 }
 
@@ -184,6 +210,14 @@ async function setSelectedStatus(status, event = null) {
     loadError.value = t('supportAdmin.statusError')
   } finally {
     statusBusy.value = false
+  }
+}
+
+async function loadAiUsage() {
+  try {
+    aiUsage.value = await supportApi.getAiUsage()
+  } catch {
+    aiUsage.value = null
   }
 }
 
@@ -300,6 +334,7 @@ function startFallbackPolling() {
 }
 
 watch(ownerId, async () => {
+  void loadAiUsage()
   void loadResidentUnits()
   await bindChats()
   if (disposed) return
@@ -368,6 +403,39 @@ async function sendReply() {
 
       <div class="help-shell" :class="{ 'has-selection': !!selected }">
         <aside class="inbox" :aria-label="t('supportAdmin.inboxHeading')">
+            <div
+              v-if="aiUsage"
+              class="usage-card"
+              :class="`is-${usageTone}`"
+              role="group"
+              :aria-label="t('supportAdmin.usageAria', { used: aiUsage.used, cap: aiUsage.cap })"
+              :title="usageHint"
+            >
+              <span class="usage-card__icon" aria-hidden="true"><i class="pi pi-sparkles" /></span>
+              <div class="usage-card__body">
+                <div class="usage-card__row">
+                  <span class="usage-card__label">{{ t('supportAdmin.usageTitle') }}</span>
+                  <span class="usage-card__value">{{ t('supportAdmin.usageValue', { used: formatCount(aiUsage.used), cap: formatCount(aiUsage.cap) }) }}</span>
+                </div>
+                <div
+                  v-if="aiUsage.cap"
+                  class="usage-bar"
+                  role="progressbar"
+                  :aria-valuenow="aiUsage.used"
+                  aria-valuemin="0"
+                  :aria-valuemax="aiUsage.cap"
+                  :aria-label="t('supportAdmin.usageTitle')"
+                >
+                  <span :style="{ width: `${usagePercent}%` }" />
+                </div>
+                <span v-if="aiUsage.filtered || aiUsage.residentDailyLimit" class="usage-card__note">
+                  <template v-if="aiUsage.filtered">{{ t('supportAdmin.usageFiltered', { count: aiUsage.filtered }) }}</template>
+                  <template v-if="aiUsage.filtered && aiUsage.residentDailyLimit"> · </template>
+                  <template v-if="aiUsage.residentDailyLimit">{{ t('supportAdmin.usageResidentDaily', { limit: aiUsage.residentDailyLimit }) }}</template>
+                </span>
+                <span class="bf-sr-only">{{ usageHint }}</span>
+              </div>
+            </div>
           <div class="inbox__tools">
             <div class="filter-pills" v-bf-seg role="group" :aria-label="t('supportAdmin.filterAria')">
               <button
@@ -564,6 +632,10 @@ async function sendReply() {
                     <span class="msg__time">{{ messageTime(m) }}</span>
                   </span>
                   <div class="msg__bubble" :class="{ 'bf-fresh': isFresh('supportMsg', m.id) }"><p>{{ m.body }}</p></div>
+                  <span v-if="m.citedSource" class="source-pill">
+                    <i class="pi pi-file" aria-hidden="true" />
+                    {{ t('supportAdmin.sourceLabel') }}: {{ m.citedSource }}
+                  </span>
                 </div>
                 <span v-if="msgKind(m) === 'admin'" class="admin-avatar" aria-hidden="true">
                   <i class="pi pi-building" />
@@ -661,6 +733,111 @@ async function sendReply() {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+.usage-card {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.5rem 0.85rem 0.55rem 0.5rem;
+  border-radius: 16px;
+  background: var(--tint-blue);
+  box-sizing: border-box;
+}
+
+.usage-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--navy);
+  font-size: 0.85rem;
+}
+
+.usage-card__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.usage-card__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.usage-card__label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.usage-card__value {
+  font-family: var(--bf-font-heading, inherit);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.usage-card__note {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--apple-text-tertiary, #6e6e73);
+}
+
+.usage-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  overflow: hidden;
+}
+
+.usage-bar span {
+  display: block;
+  height: 100%;
+  min-width: 4px;
+  border-radius: 999px;
+  background: var(--navy);
+}
+
+.usage-card.is-near {
+  background: var(--tint-amber);
+}
+
+.usage-card.is-near .usage-card__icon {
+  color: #8a5a00;
+}
+
+.usage-card.is-near .usage-bar span {
+  background: #d97706;
+}
+
+.usage-card.is-near .usage-card.is-reached {
+  background: var(--tint-red);
+}
+
+.usage-card.is-reached .usage-card__icon {
+  color: #b42318;
+}
+
+.usage-card.is-reached .usage-bar span {
+  background: #d92d20;
+}
+
+.usage-card.is-reached .usage-card__value {
+  color: #b42318;
 }
 
 /* ---------- Buttons ---------- */
@@ -1308,6 +1485,28 @@ async function sendReply() {
 .msg > .bot-avatar,
 .msg > .admin-avatar {
   margin-top: 1.4rem;
+}
+
+.source-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  padding: 0.22rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: #475467;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source-pill .pi {
+  font-size: 0.7rem;
+  color: var(--navy);
 }
 
 .composer-dock {
