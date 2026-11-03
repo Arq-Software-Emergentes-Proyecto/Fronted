@@ -34,6 +34,7 @@ export const IncidentEventType = Object.freeze({
   UNASSIGNED: 'unassigned',
   RESOLVED: 'resolved',
   COMMENT: 'comment',
+  AI_TRIAGE_SUGGESTED: 'ai_triage_suggested',
 })
 
 /** Eventos SignalR emitidos por el backend en /hubs/support. */

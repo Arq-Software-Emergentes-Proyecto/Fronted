@@ -8,6 +8,8 @@ function normalizeMessage(row) {
     authorRole: String(row?.authorRole ?? (role === 'user' ? 'resident' : role === 'ai' ? 'assistant' : role)),
     body: String(row?.body ?? ''),
     authorName: row?.authorName ? String(row.authorName) : '',
+    citedSource: row?.citedSource ? String(row.citedSource) : '',
+    citedDocumentId: row?.citedDocumentId ? String(row.citedDocumentId) : '',
     createdAt: String(row?.createdAt ?? ''),
   }
 }
@@ -84,10 +86,15 @@ export const supportApi = {
     return normalizeChat(data)
   },
 
+  /**
+   * Errores: 503 AI_UNAVAILABLE / GEMINI_API_KEY_MISSING (no se guardó el mensaje, se puede reintentar),
+   * 429 GEMINI_RATE_LIMITED o AI_MONTHLY_CAP_REACHED (este último trae `payload.chat` ya derivado).
+   */
   async postMessage(chatId, body, locale = 'es') {
     const { data } = await apiClient.post(
       `/api/v1/support/chats/${encodeURIComponent(chatId)}/messages`,
       { body, locale },
+      { timeout: 25000 },
     )
     return normalizeChat(data)
   },
@@ -123,6 +130,21 @@ export const supportApi = {
       answered: Number(data?.answered ?? 0),
       closed: Number(data?.closed ?? 0),
       total: Number(data?.total ?? 0),
+    }
+  },
+
+  /** Admin: consumo del tope mensual de consultas IA del plan { period, used, cap, remaining, filtered, residentDailyLimit }. */
+  async getAiUsage() {
+    const { data } = await apiClient.get('/api/v1/support/ai-usage')
+    return {
+      period: String(data?.period ?? ''),
+      used: Number(data?.used ?? 0),
+      cap: Number(data?.cap ?? 0),
+      remaining: Number(data?.remaining ?? 0),
+      capReached: Boolean(data?.capReached),
+      /** Mensajes respondidos sin IA por el filtro de relevancia (no consumen el tope). */
+      filtered: Number(data?.filtered ?? 0),
+      residentDailyLimit: Number(data?.residentDailyLimit ?? 0),
     }
   },
 }
