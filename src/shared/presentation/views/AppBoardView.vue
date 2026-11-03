@@ -73,8 +73,12 @@ function initials(value) {
 const openIncidents = computed(() =>
   incidents.value
     .filter((i) => String(i.status ?? '').toLowerCase() !== 'resolved')
-    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))),
+    .sort(
+      (a, b) =>
+        Number(Boolean(b.escalated)) - Number(Boolean(a.escalated)) || String(a.createdAt).localeCompare(String(b.createdAt)),
+    ),
 )
+const escalatedCount = computed(() => openIncidents.value.filter((i) => i.escalated).length)
 const resolvedThisMonth = computed(() => {
   const key = new Date().toISOString().slice(0, 7)
   return incidents.value.filter(
@@ -129,12 +133,12 @@ const kpiPills = computed(() => [
   },
   {
     key: 'incidents',
-    tone: 'amber',
+    tone: escalatedCount.value ? 'orange' : 'amber',
     icon: 'pi-flag',
     label: t('board.kpiIncidents'),
     short: t('board.tabIncidents'),
     value: openIncidents.value.length,
-    hint: t('board.kpiIncidentsHint', { resolved: resolvedThisMonth.value }),
+    hint: t('board.kpiIncidentsHint', { escalated: escalatedCount.value, resolved: resolvedThisMonth.value }),
   },
   {
     key: 'occupancy',
@@ -147,7 +151,7 @@ const kpiPills = computed(() => [
 ])
 
 const mainTabs = computed(() => [
-  { id: 'incidents', tone: 'amber', label: t('board.tabIncidents'), count: openIncidents.value.length },
+  { id: 'incidents', tone: escalatedCount.value ? 'red' : 'amber', label: t('board.tabIncidents'), count: openIncidents.value.length },
   { id: 'debtors', tone: debtors.value.length ? 'red' : 'green', label: t('board.tabDebtors'), count: debtors.value.length },
   { id: 'reservations', tone: 'blue', label: t('board.tabReservations'), count: upcomingReservations.value.length },
 ])
@@ -159,6 +163,7 @@ const sideTabs = computed(() => [
 ])
 
 function incidentState(item) {
+  if (item.escalated) return { tone: 'ws-pill--red', icon: 'pi-exclamation-triangle', label: t('board.escalated') }
   const key = String(item.status ?? '').toLowerCase()
   if (key === 'in-progress' || key === 'in_progress') return { tone: 'ws-pill--blue', icon: 'pi-spinner', label: t('board.statusInProgress') }
   return { tone: 'ws-pill--orange', icon: 'pi-circle', label: t('board.statusOpen') }

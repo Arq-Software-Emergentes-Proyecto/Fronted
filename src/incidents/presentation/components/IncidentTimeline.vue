@@ -88,6 +88,7 @@ function showComment(ev) {
 .itl__item--unassigned .itl__dot { background: #b45309; }
 .itl__item--resolved .itl__dot { background: #15803d; }
 .itl__item--comment .itl__dot { background: #64748b; }
+.itl__item--escalated .itl__dot { background: #b42318; }
 .itl__item--ai_triage_suggested .itl__dot,
 .itl__item--triage_confirmed .itl__dot { background: #5b21b6; }
 
