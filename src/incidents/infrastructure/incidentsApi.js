@@ -103,6 +103,15 @@ export const incidentsApi = {
     return data
   },
 
+  /** PATCH /incidents/{id}/triage — sin valores aplica la sugerencia de la IA; con valores la corrige. */
+  async confirmTriage(id, { category = null, priority = null } = {}) {
+    const { data } = await apiClient.patch(incidentPath(id, '/triage'), {
+      category: category || null,
+      priority: priority || null,
+    })
+    return data
+  },
+
   async remove(id) {
     await apiClient.delete(incidentPath(id))
   },
