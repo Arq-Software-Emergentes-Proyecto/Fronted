@@ -8,6 +8,8 @@ function normalizeMessage(row) {
     authorRole: String(row?.authorRole ?? (role === 'user' ? 'resident' : role === 'ai' ? 'assistant' : role)),
     body: String(row?.body ?? ''),
     authorName: row?.authorName ? String(row.authorName) : '',
+    citedSource: row?.citedSource ? String(row.citedSource) : '',
+    citedDocumentId: row?.citedDocumentId ? String(row.citedDocumentId) : '',
     createdAt: String(row?.createdAt ?? ''),
   }
 }
