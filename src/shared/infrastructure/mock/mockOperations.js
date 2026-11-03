@@ -844,7 +844,7 @@ function handleDocuments(config, method, id, action) {
   if (upload.uploadStatus !== 'confirmed') fail(config, 400, 'NOT_CONFIRMED', 'Confirma la subida primero.')
 
   if (action === 'archive') {
-    return ok(config, uploadResource(patchRow('importUploads', upload.id, { documentStatus: 'ARCHIVED' })))
+    return ok(config, uploadResource(patchRow('importUploads', upload.id, { documentStatus: 'ARCHIVED', indexingStatus: 'none' })))
   }
 
   const requestedType = body.documentType != null ? String(body.documentType).toUpperCase() : null
@@ -871,7 +871,7 @@ function handleDocuments(config, method, id, action) {
   }
   const document = uploadResource(patchRow('importUploads', upload.id, patch))
   const superseded = previous
-    ? uploadResource(patchRow('importUploads', previous.id, { documentStatus: 'SUPERSEDED' }))
+    ? uploadResource(patchRow('importUploads', previous.id, { documentStatus: 'SUPERSEDED', indexingStatus: 'none' }))
     : null
   return ok(config, { document, superseded })
 }

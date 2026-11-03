@@ -1322,7 +1322,7 @@ function handleV1(config, method, parts) {
     if (id && method === 'DELETE') {
       const current = findById('importFolders', id)
       if (!current) fail(config, 404, 'HTTP_404', 'Not found')
-      if (current.isHome) {
+      if (current.isHome || current.isContext) {
         fail(config, 400, 'SYSTEM_FOLDER_PROTECTED', 'Protected folder')
       }
       removeRow('importFolders', id)
@@ -1347,6 +1347,7 @@ function handleV1(config, method, parts) {
         storagePath,
         folderId: body.folderId || null,
         uploadStatus: 'pending_upload',
+        indexingStatus: 'none',
         uploadedAt: new Date().toISOString(),
         documentType: body.documentType ? String(body.documentType).toUpperCase() : null,
         documentStatus: 'PENDING_UPLOAD',
@@ -1368,6 +1369,7 @@ function handleV1(config, method, parts) {
       if (!current) fail(config, 404, 'HTTP_404', 'Not found')
       const row = patchRow('importUploads', current.id, {
         uploadStatus: 'confirmed',
+        indexingStatus: 'none',
         ...(current.documentStatus && current.documentStatus !== 'PENDING_UPLOAD'
           ? {}
           : { documentStatus: 'PUBLISHED', publishedAt: new Date().toISOString() }),
