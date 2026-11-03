@@ -3,7 +3,7 @@ import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useSession, getActiveDataOwnerId } from '@/iam/application/sessionStore.js'
-import { supportApi } from '@/residentCare/infrastructure/supportApi.js'
+import { normalizeChat, supportApi } from '@/residentCare/infrastructure/supportApi.js'
 import {
   FAQ_TOPICS,
   RESIDENT_FAQS,
@@ -104,6 +104,16 @@ async function askFromHelp(key) {
   await startAiChat()
   if (disposed) return
   void sendAiMessage(t(`supportResident.${key}`))
+}
+
+/** "Hablar con administración": si el chat activo ya está derivado lo abre; si no, pide la derivación. */
+async function talkToAdminFromHelp() {
+  openChatView()
+  const current = activeAiChat.value
+  if (current?.escalatedChatId) return
+  if (current?.messages?.length) await startAiChat()
+  if (disposed) return
+  onAiSuggestion('admin')
 }
 
 const hasHistory = computed(() => aiChats.value.some((chat) => chat.messages?.length))
@@ -460,21 +470,21 @@ function openAiChat(id) {
 function describeSendError(error) {
   const code = error?.code
   if (code === 'GEMINI_API_KEY_MISSING') {
-    return { message: t('supportResident.aiMissingKey'), retryable: false }
+    return { message: t('supportResident.aiMissingKey'), retryable: false, offerAdmin: true }
   }
   if (code === 'AI_UNAVAILABLE' || error?.status === 503) {
-    return { message: t('supportResident.aiUnavailable'), retryable: true }
+    return { message: t('supportResident.aiUnavailable'), retryable: true, offerAdmin: true }
   }
   if (code === 'CHAT_CLOSED') {
-    return { message: t('supportResident.chatClosedSend'), retryable: false }
+    return { message: t('supportResident.chatClosedSend'), retryable: false, offerAdmin: false }
   }
   if (code === 'GEMINI_RATE_LIMITED') {
-    return { message: t('supportResident.aiBusy'), retryable: true }
+    return { message: t('supportResident.aiBusy'), retryable: true, offerAdmin: false }
   }
   if (code === 'TIMEOUT' || code === 'NETWORK_ERROR') {
-    return { message: t('supportResident.aiNetworkError'), retryable: true }
+    return { message: t('supportResident.aiNetworkError'), retryable: true, offerAdmin: false }
   }
-  return { message: t('supportResident.sendError'), retryable: true }
+  return { message: t('supportResident.sendError'), retryable: true, offerAdmin: false }
 }
 
 async function sendAiMessage(preset) {
@@ -503,8 +513,15 @@ async function sendAiMessage(preset) {
   } catch (error) {
     console.error(error)
     if (error?.code === 'AI_MONTHLY_CAP_REACHED') {
-      // Tope del plan: la consulta no se envió a la IA.
+      // Tope del plan: el servidor ya guardó y derivó la consulta a administración.
+      if (error?.payload?.chat) {
+        const chat = normalizeChat(error.payload.chat)
+        upsertLocalChat(chat)
+        markSentMessage(chat, knownIds)
+      }
+      if (aiInput.value.trim() === text) aiInput.value = ''
       aiNotice.value = t('supportResident.aiCapReached')
+      await refreshAdminThread()
     } else {
       if (!aiInput.value.trim()) aiInput.value = text
       sendFailure.value = { text, chatId, ...describeSendError(error) }
@@ -524,6 +541,19 @@ function retryFailedMessage() {
   if (!failed) return
   if (failed.chatId) activeAiChatId.value = failed.chatId
   void sendAiMessage(failed.text)
+}
+
+function askForAdmin() {
+  sendFailure.value = null
+  void sendAiMessage(t('supportResident.aiSuggestionAdmin'))
+}
+
+function onAiSuggestion(kind) {
+  if (kind === 'admin') {
+    sendAiMessage(t('supportResident.aiSuggestionAdmin'))
+    return
+  }
+  sendAiMessage(t(`supportResident.${kind}`))
 }
 </script>
 
@@ -634,6 +664,15 @@ function retryFailedMessage() {
               >
                 <i class="pi pi-comments" aria-hidden="true" />
                 {{ t('supportResident.startChat') }}
+              </button>
+              <button
+                type="button"
+                class="btn btn--secondary"
+                :disabled="aiSending || !residentId"
+                @click="talkToAdminFromHelp"
+              >
+                <i class="pi pi-user" aria-hidden="true" />
+                {{ t('supportResident.talkToAdmin') }}
               </button>
             </div>
           </aside>
@@ -846,6 +885,15 @@ function retryFailedMessage() {
               >
                 {{ t(`supportResident.${key}`) }}
               </button>
+              <button
+                type="button"
+                class="ask-chip ask-chip--inline ask-chip--admin"
+                :disabled="aiSending"
+                @click="onAiSuggestion('admin')"
+              >
+                <i class="pi pi-user" aria-hidden="true" />
+                {{ t('supportResident.aiSuggestionAdmin') }}
+              </button>
             </div>
           </div>
 
@@ -914,6 +962,15 @@ function retryFailedMessage() {
                   >
                     <i class="pi pi-refresh" aria-hidden="true" />
                     {{ t('supportResident.retry') }}
+                  </button>
+                  <button
+                    v-if="sendFailure.offerAdmin"
+                    type="button"
+                    class="btn btn--ghost-danger btn--sm"
+                    :disabled="aiSending"
+                    @click="askForAdmin"
+                  >
+                    {{ t('supportResident.talkToAdmin') }}
                   </button>
                 </div>
               </div>
@@ -1094,6 +1151,12 @@ function retryFailedMessage() {
 
 .btn--danger:hover:not(:disabled) {
   background: #912018;
+}
+
+.btn--ghost-danger {
+  background: #fff;
+  border-color: #f4b8b3;
+  color: #b42318;
 }
 
 .btn:disabled {
@@ -1672,6 +1735,16 @@ function retryFailedMessage() {
   border-radius: 999px;
   border: 1px solid var(--line);
   background: #fff;
+}
+
+.ask-chip--admin {
+  background: var(--tint-green);
+  border-color: transparent;
+  color: #146c43;
+}
+
+.ask-chip--admin .pi {
+  color: #146c43;
 }
 
 .assistant-card__actions {

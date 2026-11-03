@@ -88,7 +88,7 @@ export const supportApi = {
 
   /**
    * Errores: 503 AI_UNAVAILABLE / GEMINI_API_KEY_MISSING (no se guardó el mensaje, se puede reintentar),
-   * 429 GEMINI_RATE_LIMITED o AI_MONTHLY_CAP_REACHED.
+   * 429 GEMINI_RATE_LIMITED o AI_MONTHLY_CAP_REACHED (este último trae `payload.chat` ya derivado).
    */
   async postMessage(chatId, body, locale = 'es') {
     const { data } = await apiClient.post(
