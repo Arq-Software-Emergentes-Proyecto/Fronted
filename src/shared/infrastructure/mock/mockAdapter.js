@@ -1823,6 +1823,22 @@ function handleIncidentsAndAnnouncements(config, method, parts) {
     return ok(config, patchRow('incidents', id, { aiSuggestion, events, ...derivedIncidentFields(next) }))
   }
 
+  if (action === 'triage' && method === 'PATCH') {
+    if (actor.role !== SessionRoles.ADMIN) fail(config, 403, 'FORBIDDEN', 'Solo el administrador.')
+    const s = current.aiSuggestion
+    const category = String(body.category ?? '').trim() || s?.category || null
+    const priority = String(body.priority ?? '').trim() || s?.priority || null
+    if (!category && !priority) {
+      fail(config, 400, 'TRIAGE_SUGGESTION_REQUIRED', 'No hay una sugerencia de triaje para confirmar.')
+    }
+    const next = { ...current, category: category ?? current.category, priority: priority ?? current.priority }
+    events.push(mockIncidentEvent('triage_confirmed', current.status, triageSummary(next.category, next.priority), actor))
+    return ok(
+      config,
+      patchRow('incidents', id, { category: next.category, priority: next.priority, events, ...derivedIncidentFields(next) }),
+    )
+  }
+
   if (action === 'comments' && method === 'POST') {
     const comment = String(body.comment ?? '').trim()
     if (!comment) fail(config, 400, 'COMMENT_REQUIRED', 'El comentario es obligatorio.')

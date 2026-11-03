@@ -492,7 +492,7 @@ async function confirmResolve(comment, event) {
   }
 }
 
-/* ---------- Triaje con IA (plan Standard+): la IA sugiere categoría y prioridad ---------- */
+/* ---------- Triaje con IA (plan Standard+): la IA sugiere, el administrador confirma ---------- */
 const triageNotice = ref({ id: '', text: '', error: false, upgrade: false })
 
 function triageErrorNotice(row, err) {
@@ -530,6 +530,10 @@ async function runTriage(row, action) {
 
 function requestTriage(row) {
   runTriage(row, () => incidentsApi.requestTriageSuggestion(row.id))
+}
+
+function applyTriage(row) {
+  runTriage(row, () => incidentsApi.confirmTriage(row.id))
 }
 
 /* ---------- Delete (shared BuildingFex confirm dialog) ---------- */
@@ -1068,9 +1072,20 @@ onBeforeUnmount(() => stopRealtime())
               </span>
             </div>
             <p v-if="detailRow.aiSuggestion.reason" class="incd-muted">{{ detailRow.aiSuggestion.reason }}</p>
+            <p v-if="!detailRow.aiSuggestion.pending" class="incd-muted">{{ t('incidentFlow.triageConfirmed') }}</p>
           </template>
           <p v-else class="incd-muted">{{ t('incidentFlow.triageHint') }}</p>
           <div v-if="statusOf(detailRow) !== IncidentStatus.RESOLVED" class="incd-inline">
+            <button
+              v-if="detailRow.aiSuggestion?.pending"
+              type="button"
+              class="incd-btn incd-btn--primary"
+              :disabled="savingId === detailRow.id"
+              @click="applyTriage(detailRow)"
+            >
+              <i class="pi" :class="savingId === detailRow.id ? 'pi-spin pi-spinner' : 'pi-check'" aria-hidden="true" />
+              {{ t('incidentFlow.triageApply') }}
+            </button>
             <button
               type="button"
               class="incd-btn"
