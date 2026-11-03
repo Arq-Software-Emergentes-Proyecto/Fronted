@@ -38,8 +38,9 @@ const lastListSync = ref('')
 const view = ref('faq')
 const faqQuery = ref('')
 const openFaqId = ref('')
-/** Texto en vuelo (se muestra como burbuja pendiente). */
+/** Texto en vuelo (se muestra como burbuja pendiente) y último fallo reintentable. */
 const pendingText = ref('')
+const sendFailure = ref(null)
 const aiNotice = ref('')
 
 /** Chip de tema activo del encabezado de ayuda ('' = todos). */
@@ -122,6 +123,7 @@ function selectConversation(id) {
 
 async function newChatFromList() {
   showConversations.value = false
+  sendFailure.value = null
   aiNotice.value = ''
   await startAiChat()
   focusComposer()
@@ -171,7 +173,7 @@ const displayMessages = computed(() => {
   return rows
 })
 
-const hasAiMessages = computed(() => displayMessages.value.length > 0)
+const hasAiMessages = computed(() => displayMessages.value.length > 0 || Boolean(sendFailure.value))
 
 /** Conversación cerrada (duda resuelta o incidencia registrada): solo lectura. */
 const isChatClosed = computed(() => activeAiChat.value?.status === 'closed')
@@ -450,7 +452,29 @@ async function startAiChat() {
 
 function openAiChat(id) {
   activeAiChatId.value = id
+  sendFailure.value = null
   aiNotice.value = ''
+}
+
+/** Traduce el error del POST a un mensaje claro y si se puede reintentar (US033 / TS009 / RNF012). */
+function describeSendError(error) {
+  const code = error?.code
+  if (code === 'GEMINI_API_KEY_MISSING') {
+    return { message: t('supportResident.aiMissingKey'), retryable: false }
+  }
+  if (code === 'AI_UNAVAILABLE' || error?.status === 503) {
+    return { message: t('supportResident.aiUnavailable'), retryable: true }
+  }
+  if (code === 'CHAT_CLOSED') {
+    return { message: t('supportResident.chatClosedSend'), retryable: false }
+  }
+  if (code === 'GEMINI_RATE_LIMITED') {
+    return { message: t('supportResident.aiBusy'), retryable: true }
+  }
+  if (code === 'TIMEOUT' || code === 'NETWORK_ERROR') {
+    return { message: t('supportResident.aiNetworkError'), retryable: true }
+  }
+  return { message: t('supportResident.sendError'), retryable: true }
 }
 
 async function sendAiMessage(preset) {
@@ -465,6 +489,7 @@ async function sendAiMessage(preset) {
   // El input no se limpia hasta que el servidor confirma: si falla, el texto no se pierde.
   aiSending.value = true
   pendingText.value = text
+  sendFailure.value = null
   aiNotice.value = ''
   scrollAiToBottom()
   const knownIds = new Set((activeAiChat.value?.messages || []).map((m) => m.id))
@@ -478,8 +503,7 @@ async function sendAiMessage(preset) {
   } catch (error) {
     console.error(error)
     if (!aiInput.value.trim()) aiInput.value = text
-    aiNotice.value =
-      error?.code === 'CHAT_CLOSED' ? t('supportResident.chatClosedSend') : t('supportResident.sendError')
+    sendFailure.value = { text, chatId, ...describeSendError(error) }
   } finally {
     pendingText.value = ''
     aiSending.value = false
@@ -488,6 +512,13 @@ async function sendAiMessage(preset) {
     autosizeTextarea(composerEl.value)
     if (view.value === 'chat') focusComposer()
   }
+}
+
+function retryFailedMessage() {
+  const failed = sendFailure.value
+  if (!failed) return
+  if (failed.chatId) activeAiChatId.value = failed.chatId
+  void sendAiMessage(failed.text)
 }
 </script>
 
@@ -864,6 +895,24 @@ async function sendAiMessage(preset) {
               </div>
             </div>
 
+            <div v-if="sendFailure" class="notice notice--red" role="alert">
+              <i class="pi pi-exclamation-circle" aria-hidden="true" />
+              <div class="notice__body">
+                <p>{{ sendFailure.message }}</p>
+                <div class="notice__actions">
+                  <button
+                    v-if="sendFailure.retryable"
+                    type="button"
+                    class="btn btn--danger btn--sm"
+                    :disabled="aiSending"
+                    @click="retryFailedMessage"
+                  >
+                    <i class="pi pi-refresh" aria-hidden="true" />
+                    {{ t('supportResident.retry') }}
+                  </button>
+                </div>
+              </div>
+            </div>
             <div v-if="aiNotice" class="notice notice--amber" role="status">
               <i class="pi pi-info-circle" aria-hidden="true" />
               <div class="notice__body"><p>{{ aiNotice }}</p></div>
@@ -1031,6 +1080,15 @@ async function sendAiMessage(preset) {
 
 .btn--ghost:hover:not(:disabled) {
   background: var(--tint-blue);
+}
+
+.btn--danger {
+  background: #b42318;
+  color: #fff;
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: #912018;
 }
 
 .btn:disabled {
@@ -2035,6 +2093,18 @@ async function sendAiMessage(preset) {
 
 .notice__body p {
   margin: 0;
+}
+
+.notice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
+.notice--red {
+  background: var(--tint-red);
+  color: #b42318;
 }
 
 .notice--amber {
