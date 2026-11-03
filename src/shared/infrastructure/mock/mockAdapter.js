@@ -93,6 +93,20 @@ function hardcodedAiReply(userText, locale = 'es') {
   const text = String(userText ?? '').toLowerCase()
   const es = !String(locale).toLowerCase().startsWith('en')
   const rules = es ? 'Reglamento interno.pdf' : 'Internal rules.pdf'
+  if (shouldEscalateToAdmin(userText)) {
+    return {
+      body: es
+        ? 'Listo, derivé tu consulta a administración. Te responderán por este mismo chat.'
+        : 'Done, I forwarded your request to management. They will reply in this same chat.',
+    }
+  }
+  if (/admin|administraci|human|persona|hablar/.test(text)) {
+    return {
+      body: es
+        ? 'Puedo ayudarte con eso. Si prefieres hablar con administración, escribe “quiero hablar con un administrador” y te conectamos.'
+        : 'I can help with that. If you prefer a human from management, say “I want to talk to an admin” and we will connect you.',
+    }
+  }
   if (/pago|recibo|cuota|deuda|bill|payment|fee/.test(text)) {
     return {
       body: es
@@ -122,6 +136,12 @@ function hardcodedAiReply(userText, locale = 'es') {
       ? 'Soy el asistente demo de BuildingFex. Puedo orientarte sobre pagos, reservas, incidencias y contacto con administración. ¿En qué te ayudo?'
       : 'I am the BuildingFex demo assistant. I can help with payments, reservations, incidents, and reaching management. How can I help?',
   }
+}
+
+function shouldEscalateToAdmin(userText) {
+  return /hablar con|quiero (un |una )?(administrador|administraci|humano|persona)|persona real|talk to (an? )?(admin|human)|speak (to|with)/.test(
+    String(userText ?? '').toLowerCase(),
+  )
 }
 
 function publicSupportChat(row) {
@@ -1171,6 +1191,46 @@ function handleV1(config, method, parts) {
         if (!chat.titleSummarized && messages.filter((m) => m.authorRole === 'resident' || m.role === 'user').length === 1) {
           topic = text.slice(0, 48)
           title = topic
+        }
+
+        if (!escalatedChatId && shouldEscalateToAdmin(text)) {
+          const adminChat = insertRow('supportChats', {
+            id: `chat-esc-${Date.now()}`,
+            ownerAdminId: chat.ownerAdminId || MOCK_OWNER_ID,
+            residentId: chat.residentId,
+            residentName: chat.residentName,
+            topic: topic || 'Consulta escalada',
+            title: title || 'Consulta escalada',
+            titleSummarized: true,
+            status: 'open',
+            kind: 'admin',
+            source: 'ai-escalation',
+            linkedChatId: chat.id,
+            aiChatId: chat.id,
+            escalatedChatId: '',
+            messages: [
+              {
+                id: `msg-esc-${Date.now()}`,
+                role: 'resident',
+                authorRole: 'resident',
+                authorName: chat.residentName || 'Residente',
+                body: text,
+                createdAt: now(),
+              },
+              {
+                id: `msg-esc-${Date.now() + 1}`,
+                role: 'ai',
+                authorRole: 'assistant',
+                authorName: 'Asistente BuildingFlex',
+                body: 'El residente pidió hablar con administración.',
+                createdAt: now(),
+              },
+            ],
+            createdAt: now(),
+            updatedAt: now(),
+          })
+          escalatedChatId = adminChat.id
+          linkedChatId = adminChat.id
         }
 
       }
