@@ -30,6 +30,7 @@ import {
   subscriptionSnapshot,
 } from './mockDb.js'
 import { MOCK_OWNER_ID } from './seed.js'
+import { RESIDENT_DAILY_AI_QUERIES } from '@/residentCare/domain/questionRelevance.js'
 import {
   fail,
   ok,
@@ -998,11 +999,15 @@ function handleSupportCounters(config, method, rest) {
       .filter((c) => String(c.kind ?? '') === 'ai' && ownerResidents.has(String(c.residentId ?? '')))
       .flatMap((c) => (Array.isArray(c.messages) ? c.messages : []))
       .filter((m) => (m.role === 'ai' || m.authorRole === 'assistant') && String(m.createdAt ?? '').startsWith(period))
-    const used = replies.length
+    // Las respuestas del filtro de relevancia y del límite diario no consumen el tope (igual que la API).
+    const used = replies.filter((m) => !m.filtered && !m.limitReached).length
+    const filtered = replies.filter((m) => m.filtered).length
     return ok(config, {
       period,
       used,
       cap,
+      filtered,
+      residentDailyLimit: RESIDENT_DAILY_AI_QUERIES,
       remaining: Math.max(0, cap - used),
       capReached: used >= cap,
       planId,
