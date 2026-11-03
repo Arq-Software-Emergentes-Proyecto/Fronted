@@ -88,7 +88,7 @@ export const supportApi = {
 
   /**
    * Errores: 503 AI_UNAVAILABLE / GEMINI_API_KEY_MISSING (no se guardó el mensaje, se puede reintentar),
-   * 429 GEMINI_RATE_LIMITED.
+   * 429 GEMINI_RATE_LIMITED o AI_MONTHLY_CAP_REACHED.
    */
   async postMessage(chatId, body, locale = 'es') {
     const { data } = await apiClient.post(
@@ -130,6 +130,18 @@ export const supportApi = {
       answered: Number(data?.answered ?? 0),
       closed: Number(data?.closed ?? 0),
       total: Number(data?.total ?? 0),
+    }
+  },
+
+  /** Admin: consumo del tope mensual de consultas IA del plan { period, used, cap, remaining }. */
+  async getAiUsage() {
+    const { data } = await apiClient.get('/api/v1/support/ai-usage')
+    return {
+      period: String(data?.period ?? ''),
+      used: Number(data?.used ?? 0),
+      cap: Number(data?.cap ?? 0),
+      remaining: Number(data?.remaining ?? 0),
+      capReached: Boolean(data?.capReached),
     }
   },
 }
