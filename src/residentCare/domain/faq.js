@@ -30,6 +30,8 @@ export const RESIDENT_FAQS = [
     keywords: ['incidencia', 'incidencias', 'reporte', 'reportar', 'falla', 'fuga', 'averia', 'mantenimiento', 'issue', 'incident', 'report', 'repair', 'leak'] }),
   new Faq({ id: 'faq8', topic: 'guests', questionKey: 'supportResident.faq8Question', answerKey: 'supportResident.faq8Answer',
     keywords: ['invitado', 'invitados', 'visita', 'qr', 'codigo', 'generacion', 'acceso', 'guest', 'visitor', 'qr code'] }),
+  new Faq({ id: 'faq9', questionKey: 'supportResident.faq9Question', answerKey: 'supportResident.faq9Answer',
+    keywords: ['asistente', 'ia', 'chat', 'reglamento', 'actas', 'fuente', 'tope', 'consultas', 'administracion', 'junta', 'assistant', 'ai', 'rules', 'minutes', 'limit'] }),
   new Faq({ id: 'faq10', topic: 'account', questionKey: 'supportResident.faq10Question', answerKey: 'supportResident.faq10Answer',
     keywords: ['idioma', 'ingles', 'espanol', 'cuenta', 'perfil', 'contrasena', 'sesion', 'invitacion', 'enlace', 'language', 'account', 'password', 'login'] }),
   new Faq({ id: 'faq1', questionKey: 'supportResident.faq1Question', answerKey: 'supportResident.faq1Answer',

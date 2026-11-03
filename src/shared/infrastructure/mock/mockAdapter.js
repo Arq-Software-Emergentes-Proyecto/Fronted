@@ -88,6 +88,39 @@ export function resolveActor(config) {
   return { id: ownerId, role: SessionRoles.ADMIN, email: '', ownerAdminId: ownerId }
 }
 
+/** Demo assistant: canned reply. */
+function hardcodedAiReply(userText, locale = 'es') {
+  const text = String(userText ?? '').toLowerCase()
+  const es = !String(locale).toLowerCase().startsWith('en')
+  const rules = es ? 'Reglamento interno.pdf' : 'Internal rules.pdf'
+  if (/pago|recibo|cuota|deuda|bill|payment|fee/.test(text)) {
+    return {
+      body: es
+        ? 'La cuota de mantenimiento vence el día 5 de cada mes. Tus recibos están en Finanzas: los pendientes aparecen como “Por pagar” y puedes pagarlos con tarjeta o Mercado Pago. Si un cargo no cuadra, avísame el mes y el monto.'
+        : 'The maintenance fee is due on the 5th of each month. Your bills are under Finance: pending ones show as unpaid and you can pay them by card or Mercado Pago. If a charge looks wrong, tell me the month and amount.',
+    }
+  }
+  if (/reserva|espacio|piscina|guest|invitad|qr|book|pool/.test(text)) {
+    return {
+      body: es
+        ? 'La piscina abre de 7:00 a 21:00 y cada reserva admite hasta 5 invitados. Reserva en Servicios eligiendo espacio, fecha y horario; luego, en Generación, agrega a tus invitados y comparte el enlace o el QR.'
+        : 'The pool is open 7:00–21:00 and each booking allows up to 5 guests. Book under Services by picking the space, date and time; then, under Generation, add your guests and share the link or QR code.',
+    }
+  }
+  if (/incidencia|incidente|fuga|ascensor|incident|leak/.test(text)) {
+    return {
+      body: es
+        ? 'Repórtala en la sección Incidencias con una foto y el área del edificio. Según el acuerdo de junta, las fugas de agua se atienden con prioridad dentro de 24 horas.'
+        : 'Report it under Incidents with a photo and the area of the building. Per the board agreement, water leaks are handled as a priority within 24 hours.',
+    }
+  }
+  return {
+    body: es
+      ? 'Soy el asistente demo de BuildingFex. Puedo orientarte sobre pagos, reservas, incidencias y contacto con administración. ¿En qué te ayudo?'
+      : 'I am the BuildingFex demo assistant. I can help with payments, reservations, incidents, and reaching management. How can I help?',
+  }
+}
+
 function publicSupportChat(row) {
   return {
     id: row.id,
@@ -1120,6 +1153,17 @@ function handleV1(config, method, parts) {
       let title = chat.title || chat.topic
 
       if (chat.kind === 'ai') {
+        const answer = hardcodedAiReply(text, body.locale)
+        const reply = {
+          id: `msg-${Date.now() + 1}`,
+          role: 'ai',
+          authorRole: 'assistant',
+          authorName: 'Asistente BuildingFlex',
+          body: answer.body,
+          createdAt: now(),
+        }
+        messages.push(reply)
+
         if (!chat.titleSummarized && messages.filter((m) => m.authorRole === 'resident' || m.role === 'user').length === 1) {
           topic = text.slice(0, 48)
           title = topic
@@ -1129,7 +1173,7 @@ function handleV1(config, method, parts) {
 
       // Estados (Resident Care): admin responde → answered; residente escribe → open; IA derivada → derived.
       let status = chat.status || 'open'
-      if (chat.kind === 'ai') status = escalatedChatId ? 'derived' : 'open'
+      if (chat.kind === 'ai') status = escalatedChatId ? 'derived' : 'answered'
       else status = isAdminActor ? 'answered' : 'open'
 
       const updated = patchRow('supportChats', chatId, {
@@ -1278,7 +1322,7 @@ function handleV1(config, method, parts) {
     if (id && method === 'DELETE') {
       const current = findById('importFolders', id)
       if (!current) fail(config, 404, 'HTTP_404', 'Not found')
-      if (current.isHome) {
+      if (current.isHome || current.isContext) {
         fail(config, 400, 'SYSTEM_FOLDER_PROTECTED', 'Protected folder')
       }
       removeRow('importFolders', id)
@@ -1303,6 +1347,7 @@ function handleV1(config, method, parts) {
         storagePath,
         folderId: body.folderId || null,
         uploadStatus: 'pending_upload',
+        indexingStatus: 'none',
         uploadedAt: new Date().toISOString(),
         documentType: body.documentType ? String(body.documentType).toUpperCase() : null,
         documentStatus: 'PENDING_UPLOAD',
@@ -1324,6 +1369,7 @@ function handleV1(config, method, parts) {
       if (!current) fail(config, 404, 'HTTP_404', 'Not found')
       const row = patchRow('importUploads', current.id, {
         uploadStatus: 'confirmed',
+        indexingStatus: 'none',
         ...(current.documentStatus && current.documentStatus !== 'PENDING_UPLOAD'
           ? {}
           : { documentStatus: 'PUBLISHED', publishedAt: new Date().toISOString() }),
