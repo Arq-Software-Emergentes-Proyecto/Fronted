@@ -6,12 +6,15 @@ import {
 } from '@/residentCare/infrastructure/supportRealtime.js'
 import { onSessionIdentityChange } from '@/iam/application/sessionStore.js'
 import { IncidentRealtimeEvent } from '@/incidents/domain/model/incidentConstants.js'
+import { incidentsApi } from '@/incidents/infrastructure/incidentsApi.js'
 
 /**
  * Tiempo real de incidencias (RF024): reutiliza la conexión SignalR de soporte (/hubs/support).
  * - Admin: "incidentCreated" incrementa el contador de no vistas (badge del menú) y dispara toasts.
  * - Admin y residente: "incidentUpdated" permite refrescar vistas abiertas.
+ * Sin hub (API en AWS Lambda) el admin consulta la lista cada minuto y emite los mismos eventos.
  */
+const POLL_MS = 60_000
 const state = reactive({
   unseenCount: 0,
   lastCreated: null,
@@ -23,6 +26,50 @@ const listeners = new Set()
 let unsubscribers = []
 let startingFor = null
 let generation = 0
+let pollTimer = 0
+/** id → updatedAt de la última consulta (null = todavía sin línea base). */
+let knownIncidents = null
+
+/** Respaldo sin SignalR: detecta incidencias nuevas o cambiadas comparando con la consulta anterior. */
+async function pollIncidents(countUnseen) {
+  if (realtimeAvailable.value) return
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+  const gen = generation
+  let list
+  try {
+    list = await incidentsApi.list()
+  } catch {
+    return
+  }
+  if (gen !== generation) return
+  const next = new Map(list.map((row) => [String(row.id), String(row.updatedAt ?? row.createdAt ?? '')]))
+  if (knownIncidents) {
+    const created = list.filter((row) => !knownIncidents.has(String(row.id)))
+    const updated = list.filter(
+      (row) => knownIncidents.has(String(row.id)) && knownIncidents.get(String(row.id)) !== next.get(String(row.id)),
+    )
+    if (created.length) {
+      if (countUnseen) state.unseenCount += created.length
+      state.lastCreated = created[0]
+      created.forEach((row) => emit(IncidentRealtimeEvent.CREATED, row))
+    }
+    updated.forEach((row) => emit(IncidentRealtimeEvent.UPDATED, row))
+  }
+  knownIncidents = next
+}
+
+function startPolling(countUnseen) {
+  stopPolling()
+  if (!countUnseen) return
+  void pollIncidents(countUnseen)
+  pollTimer = setInterval(() => void pollIncidents(countUnseen), POLL_MS)
+}
+
+function stopPolling() {
+  if (pollTimer) clearInterval(pollTimer)
+  pollTimer = 0
+  knownIncidents = null
+}
 
 function emit(type, payload) {
   listeners.forEach((fn) => {
@@ -61,6 +108,7 @@ export async function startIncidentRealtime(ownerAdminId, { countUnseen = false 
     ]
     state.ownerId = owner
     state.connected = realtimeAvailable.value
+    startPolling(countUnseen)
   } finally {
     if (gen === generation) startingFor = null
   }
@@ -69,6 +117,7 @@ export async function startIncidentRealtime(ownerAdminId, { countUnseen = false 
 export function stopIncidentRealtime() {
   generation += 1
   startingFor = null
+  stopPolling()
   unsubscribers.forEach((off) => off())
   unsubscribers = []
   state.connected = false

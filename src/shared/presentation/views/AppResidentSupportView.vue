@@ -48,6 +48,8 @@ const activeTopic = ref('')
 const showConversations = ref(false)
 const composerEl = ref(null)
 
+/** Preguntas sugeridas del asistente (tarjeta de ayuda y chat vacío). */
+const ASSISTANT_SUGGESTIONS = ['aiAskFees', 'aiAskPool', 'aiAskGuests', 'aiAskLeak']
 const TOPIC_BY_ID = Object.fromEntries(FAQ_TOPICS.map((topic) => [topic.id, topic]))
 
 const filteredFaqs = computed(() =>
@@ -93,6 +95,14 @@ async function startChatFromHelp() {
   openChatView()
   await startAiChat()
   focusComposer()
+}
+
+/** Pregunta sugerida desde la ayuda: abre el chat en blanco y envía la pregunta. */
+async function askFromHelp(key) {
+  openChatView()
+  await startAiChat()
+  if (disposed) return
+  void sendAiMessage(t(`supportResident.${key}`))
 }
 
 const hasHistory = computed(() => aiChats.value.some((chat) => chat.messages?.length))
@@ -554,7 +564,7 @@ async function sendAiMessage(preset) {
           <aside class="assistant-card" aria-labelledby="assistant-heading">
             <div class="assistant-card__head">
               <span class="bot-avatar bot-avatar--lg" aria-hidden="true">
-                <i class="pi pi-building" />
+                <i class="pi pi-sparkles" />
               </span>
               <div>
                 <h2 id="assistant-heading" class="assistant-card__name">{{ t('supportResident.assistantName') }}</h2>
@@ -564,6 +574,21 @@ async function sendAiMessage(preset) {
                 </p>
               </div>
             </div>
+            <p class="assistant-card__intro">{{ t('supportResident.assistantIntro') }}</p>
+            <p class="assistant-card__label">{{ t('supportResident.assistantTryLabel') }}</p>
+            <ul class="ask-list" role="list">
+              <li v-for="key in ASSISTANT_SUGGESTIONS" :key="key">
+                <button
+                  type="button"
+                  class="ask-chip"
+                  :disabled="aiSending || !residentId"
+                  @click="askFromHelp(key)"
+                >
+                  <span>{{ t(`supportResident.${key}`) }}</span>
+                  <i class="pi pi-arrow-up-right" aria-hidden="true" />
+                </button>
+              </li>
+            </ul>
             <div class="assistant-card__actions">
               <button
                 type="button"
@@ -771,9 +796,21 @@ async function sendAiMessage(preset) {
           </div>
 
           <div v-if="!hasAiMessages" class="chat-empty">
-            <span class="bot-avatar bot-avatar--xl" aria-hidden="true"><i class="pi pi-building" /></span>
+            <span class="bot-avatar bot-avatar--xl" aria-hidden="true"><i class="pi pi-sparkles" /></span>
             <h2 class="chat-empty__title">{{ t('supportResident.aiGreeting') }}</h2>
-            <p class="chat-empty__sub">{{ t('supportResident.assistantStatus') }}</p>
+            <p class="chat-empty__sub">{{ t('supportResident.assistantIntro') }}</p>
+            <div class="chat-empty__chips">
+              <button
+                v-for="key in ASSISTANT_SUGGESTIONS"
+                :key="key"
+                type="button"
+                class="ask-chip ask-chip--inline"
+                :disabled="aiSending"
+                @click="sendAiMessage(t(`supportResident.${key}`))"
+              >
+                {{ t(`supportResident.${key}`) }}
+              </button>
+            </div>
           </div>
 
           <div
@@ -807,12 +844,25 @@ async function sendAiMessage(preset) {
                 <div class="msg__bubble" :class="{ 'bf-fresh': isFresh('supportMessage', m.id) }">
                   <p>{{ m.body }}</p>
                 </div>
+                <span v-if="m.citedSource" class="source-pill">
+                  <i class="pi pi-file" aria-hidden="true" />
+                  {{ t('supportResident.sourceLabel') }}: {{ m.citedSource }}
+                </span>
                 <span class="msg__meta">
                   {{ m.pending ? t('supportResident.aiPending') : messageTime(m) }}
                 </span>
               </div>
             </div>
 
+            <div v-if="aiSending" class="msg msg--ai msg--typing">
+              <span class="bot-avatar bot-avatar--sm" aria-hidden="true"><i class="pi pi-sparkles" /></span>
+              <div class="msg__col">
+                <div class="msg__bubble">
+                  <span class="typing" aria-hidden="true"><span /><span /><span /></span>
+                  <span class="sr-only">{{ t('supportResident.aiTyping') }}</span>
+                </div>
+              </div>
+            </div>
 
             <div v-if="aiNotice" class="notice notice--amber" role="status">
               <i class="pi pi-info-circle" aria-hidden="true" />
@@ -1910,6 +1960,28 @@ async function sendAiMessage(preset) {
 
 .msg.is-pending .msg__bubble {
   opacity: 0.6;
+}
+
+.source-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  padding: 0.22rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: #475467;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source-pill .pi {
+  font-size: 0.7rem;
+  color: var(--navy);
 }
 
 .typing {
