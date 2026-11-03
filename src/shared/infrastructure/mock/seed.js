@@ -740,6 +740,7 @@ export function createSeedDb() {
             authorRole: 'assistant',
             authorName: 'Asistente BuildingFlex',
             body: 'El reglamento fija horario de silencio de 23:00 a 7:00. Como pide una gestión con el vecino, derivé la consulta a administración.',
+            citedSource: 'Reglamento interno.pdf',
             createdAt: isoHoursAgo(1.2),
           },
           {
@@ -851,6 +852,7 @@ export function createSeedDb() {
             authorRole: 'assistant',
             authorName: 'Asistente BuildingFlex',
             body: 'Tus recibos y pagos están en Finanzas. Los pendientes aparecen con estado “Por pagar”. Si un cargo no cuadra, avísame el mes y el monto.',
+            citedSource: 'Reglamento interno.pdf',
             createdAt: isoHoursAgo(2),
           },
         ],

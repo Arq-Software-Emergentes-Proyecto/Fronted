@@ -844,6 +844,10 @@ async function sendAiMessage(preset) {
                 <div class="msg__bubble" :class="{ 'bf-fresh': isFresh('supportMessage', m.id) }">
                   <p>{{ m.body }}</p>
                 </div>
+                <span v-if="m.citedSource" class="source-pill">
+                  <i class="pi pi-file" aria-hidden="true" />
+                  {{ t('supportResident.sourceLabel') }}: {{ m.citedSource }}
+                </span>
                 <span class="msg__meta">
                   {{ m.pending ? t('supportResident.aiPending') : messageTime(m) }}
                 </span>
@@ -1956,6 +1960,28 @@ async function sendAiMessage(preset) {
 
 .msg.is-pending .msg__bubble {
   opacity: 0.6;
+}
+
+.source-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  padding: 0.22rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: #475467;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source-pill .pi {
+  font-size: 0.7rem;
+  color: var(--navy);
 }
 
 .typing {
