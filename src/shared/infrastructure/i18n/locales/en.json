@@ -2218,7 +2218,18 @@
     "residentEmptyHint": "If something isn’t working in your unit or the common areas, let us know.",
     "residentListTitle": "My reports",
     "callProvider": "Call {name}",
-    "detailFor": "View details of “{title}”"
+    "detailFor": "View details of “{title}”",
+    "eventAiTriageSuggested": "AI suggested a classification",
+    "authorAssistant": "AI assistant",
+    "triageTitle": "AI-suggested classification",
+    "triageHint": "The AI can suggest the category and priority from the subject and description. You decide whether to apply it.",
+    "triagePendingBadge": "AI suggestion",
+    "triageRequest": "Suggest with AI",
+    "triageRetry": "Suggest again",
+    "triagePlanRequired": "AI triage is included from the Standard plan.",
+    "triageSeePlans": "See plans",
+    "triageCapReached": "The building reached its monthly AI query cap. Classify the incident manually.",
+    "triageUnavailable": "The AI is not available right now. Try again in a few minutes or classify manually."
   },
   "announcementFeed": {
     "emptyCarousel": "No news at the moment",

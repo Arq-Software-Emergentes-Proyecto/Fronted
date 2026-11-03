@@ -3,6 +3,7 @@ import { IncidentStatus } from './incidentConstants.js'
 /**
  * Incidencia. title = asunto (RF024). provider = nombre (compat); providerId/Phone/Specialty
  * vienen del proveedor asignado. events solo llega en el detalle (GET /incidents/{id}).
+ * aiSuggestion: triaje con IA (solo admin).
  */
 export class Incident {
   constructor({
@@ -23,6 +24,7 @@ export class Incident {
     resolvedAt,
     updatedAt,
     events,
+    aiSuggestion,
   } = {}) {
     this.id = id
     this.title = title ?? ''
@@ -41,6 +43,11 @@ export class Incident {
     this.resolvedAt = resolvedAt ?? null
     this.updatedAt = updatedAt ?? null
     this.events = Array.isArray(events) ? events : null
+    this.aiSuggestion = aiSuggestion ?? null
+  }
+
+  get hasPendingAiSuggestion() {
+    return this.aiSuggestion?.pending === true
   }
 
   get isResolved() {

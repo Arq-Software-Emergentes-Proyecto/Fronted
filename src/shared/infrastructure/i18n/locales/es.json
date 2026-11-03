@@ -2218,7 +2218,18 @@
     "residentEmptyHint": "Si algo no funciona en tu unidad o en las áreas comunes, cuéntanos.",
     "residentListTitle": "Mis reportes",
     "callProvider": "Llamar a {name}",
-    "detailFor": "Ver detalle de «{title}»"
+    "detailFor": "Ver detalle de «{title}»",
+    "eventAiTriageSuggested": "La IA sugirió una clasificación",
+    "authorAssistant": "Asistente IA",
+    "triageTitle": "Clasificación sugerida por la IA",
+    "triageHint": "La IA puede sugerir la categoría y la prioridad a partir del asunto y la descripción. Tú decides si aplicarla.",
+    "triagePendingBadge": "Sugerencia IA",
+    "triageRequest": "Sugerir con IA",
+    "triageRetry": "Volver a sugerir",
+    "triagePlanRequired": "El triaje con IA está incluido desde el plan Standard.",
+    "triageSeePlans": "Ver planes",
+    "triageCapReached": "Se alcanzó el tope mensual de consultas de IA del edificio. Clasifica la incidencia manualmente.",
+    "triageUnavailable": "La IA no está disponible en este momento. Intenta de nuevo en unos minutos o clasifica manualmente."
   },
   "announcementFeed": {
     "emptyCarousel": "No hay novedades por el momento",
