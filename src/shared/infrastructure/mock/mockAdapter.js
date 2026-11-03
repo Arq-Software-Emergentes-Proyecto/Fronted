@@ -18,6 +18,13 @@ import {
   upsertSubscription,
 } from './mockDb.js'
 import { MOCK_OWNER_ID } from './seed.js'
+import {
+  QuestionScope,
+  RESIDENT_DAILY_AI_QUERIES,
+  classifyQuestion,
+  filteredReply,
+  residentDailyLimitReply,
+} from '@/residentCare/domain/questionRelevance.js'
 import { isExtraReceipt, ReceiptKinds, resolveReceiptKind } from '@/finances/domain/receipt.js'
 import { demoFileDataUrl, handleOperations, uploadResource } from './mockOperations.js'
 
@@ -86,6 +93,71 @@ export function resolveActor(config) {
   }
   const ownerId = getActiveDataOwnerId() || MOCK_OWNER_ID
   return { id: ownerId, role: SessionRoles.ADMIN, email: '', ownerAdminId: ownerId }
+}
+
+/** Demo assistant: canned reply + the building document it "cites" (like the real RAG reply). */
+function hardcodedAiReply(userText, locale = 'es') {
+  const text = String(userText ?? '').toLowerCase()
+  const es = !String(locale).toLowerCase().startsWith('en')
+  const rules = es ? 'Reglamento interno.pdf' : 'Internal rules.pdf'
+  if (shouldEscalateToAdmin(userText)) {
+    return {
+      body: es
+        ? 'Listo, derivé tu consulta a administración. Te responderán por este mismo chat.'
+        : 'Done, I forwarded your request to management. They will reply in this same chat.',
+    }
+  }
+  if (/admin|administraci|human|persona|hablar/.test(text)) {
+    return {
+      body: es
+        ? 'Puedo ayudarte con eso. Si prefieres hablar con administración, escribe “quiero hablar con un administrador” y te conectamos.'
+        : 'I can help with that. If you prefer a human from management, say “I want to talk to an admin” and we will connect you.',
+    }
+  }
+  if (/pago|recibo|cuota|deuda|bill|payment|fee/.test(text)) {
+    return {
+      body: es
+        ? 'La cuota de mantenimiento vence el día 5 de cada mes. Tus recibos están en Finanzas: los pendientes aparecen como “Por pagar” y puedes pagarlos con tarjeta o Mercado Pago. Si un cargo no cuadra, avísame el mes y el monto.'
+        : 'The maintenance fee is due on the 5th of each month. Your bills are under Finance: pending ones show as unpaid and you can pay them by card or Mercado Pago. If a charge looks wrong, tell me the month and amount.',
+      citedSource: rules,
+    }
+  }
+  if (/reserva|espacio|piscina|guest|invitad|qr|book|pool/.test(text)) {
+    return {
+      body: es
+        ? 'La piscina abre de 7:00 a 21:00 y cada reserva admite hasta 5 invitados. Reserva en Servicios eligiendo espacio, fecha y horario; luego, en Generación, agrega a tus invitados y comparte el enlace o el QR.'
+        : 'The pool is open 7:00–21:00 and each booking allows up to 5 guests. Book under Services by picking the space, date and time; then, under Generation, add your guests and share the link or QR code.',
+      citedSource: rules,
+    }
+  }
+  if (/incidencia|incidente|fuga|ascensor|incident|leak/.test(text)) {
+    return {
+      body: es
+        ? 'Repórtala en la sección Incidencias con una foto y el área del edificio. Según el acuerdo de junta, las fugas de agua se atienden con prioridad dentro de 24 horas.'
+        : 'Report it under Incidents with a photo and the area of the building. Per the board agreement, water leaks are handled as a priority within 24 hours.',
+      citedSource: es ? 'Acta de junta – agosto 2026.pdf' : 'Board minutes – August 2026.pdf',
+    }
+  }
+  return {
+    body: es
+      ? 'Soy el asistente demo de BuildingFex. Puedo orientarte sobre pagos, reservas, incidencias y contacto con administración. ¿En qué te ayudo?'
+      : 'I am the BuildingFex demo assistant. I can help with payments, reservations, incidents, and reaching management. How can I help?',
+  }
+}
+
+/** Respuestas con IA que recibió hoy este residente en la demo (límite diario por residente). */
+function residentAiQueriesToday(residentId) {
+  const today = new Date().toISOString().slice(0, 10)
+  return listCollection('supportChats')
+    .filter((c) => String(c.kind ?? '') === 'ai' && String(c.residentId ?? '') === String(residentId ?? ''))
+    .flatMap((c) => (Array.isArray(c.messages) ? c.messages : []))
+    .filter((m) => m.aiUsed && String(m.createdAt ?? '').startsWith(today)).length
+}
+
+function shouldEscalateToAdmin(userText) {
+  return /hablar con|quiero (un |una )?(administrador|administraci|humano|persona)|persona real|talk to (an? )?(admin|human)|speak (to|with)/.test(
+    String(userText ?? '').toLowerCase(),
+  )
 }
 
 function publicSupportChat(row) {
@@ -1120,16 +1192,80 @@ function handleV1(config, method, parts) {
       let title = chat.title || chat.topic
 
       if (chat.kind === 'ai') {
+        // Igual que la API: saludos, temas ajenos y mensajes sin contenido no usan la IA ni el tope del plan,
+        // y cada residente tiene un límite diario de consultas con IA.
+        const escalating = shouldEscalateToAdmin(text)
+        const scope = escalating ? QuestionScope.BUILDING : classifyQuestion(text)
+        const dailyLimitReached =
+          scope === QuestionScope.BUILDING && !escalating && residentAiQueriesToday(chat.residentId) >= RESIDENT_DAILY_AI_QUERIES
+        let answer
+        if (scope !== QuestionScope.BUILDING) answer = { body: filteredReply(scope, text, body.locale), filtered: true }
+        else if (dailyLimitReached) answer = { body: residentDailyLimitReply(body.locale), limitReached: true }
+        else answer = { ...hardcodedAiReply(text, body.locale), aiUsed: !escalating }
+        const reply = {
+          id: `msg-${Date.now() + 1}`,
+          role: 'ai',
+          authorRole: 'assistant',
+          authorName: 'Asistente BuildingFlex',
+          body: answer.body,
+          ...(answer.citedSource ? { citedSource: answer.citedSource } : {}),
+          ...(answer.filtered ? { filtered: true } : {}),
+          ...(answer.limitReached ? { limitReached: true } : {}),
+          ...(answer.aiUsed ? { aiUsed: true } : {}),
+          createdAt: now(),
+        }
+        messages.push(reply)
+
         if (!chat.titleSummarized && messages.filter((m) => m.authorRole === 'resident' || m.role === 'user').length === 1) {
           topic = text.slice(0, 48)
           title = topic
+        }
+
+        if (!escalatedChatId && shouldEscalateToAdmin(text)) {
+          const adminChat = insertRow('supportChats', {
+            id: `chat-esc-${Date.now()}`,
+            ownerAdminId: chat.ownerAdminId || MOCK_OWNER_ID,
+            residentId: chat.residentId,
+            residentName: chat.residentName,
+            topic: topic || 'Consulta escalada',
+            title: title || 'Consulta escalada',
+            titleSummarized: true,
+            status: 'open',
+            kind: 'admin',
+            source: 'ai-escalation',
+            linkedChatId: chat.id,
+            aiChatId: chat.id,
+            escalatedChatId: '',
+            messages: [
+              {
+                id: `msg-esc-${Date.now()}`,
+                role: 'resident',
+                authorRole: 'resident',
+                authorName: chat.residentName || 'Residente',
+                body: text,
+                createdAt: now(),
+              },
+              {
+                id: `msg-esc-${Date.now() + 1}`,
+                role: 'ai',
+                authorRole: 'assistant',
+                authorName: 'Asistente BuildingFlex',
+                body: 'El residente pidió hablar con administración.',
+                createdAt: now(),
+              },
+            ],
+            createdAt: now(),
+            updatedAt: now(),
+          })
+          escalatedChatId = adminChat.id
+          linkedChatId = adminChat.id
         }
 
       }
 
       // Estados (Resident Care): admin responde → answered; residente escribe → open; IA derivada → derived.
       let status = chat.status || 'open'
-      if (chat.kind === 'ai') status = escalatedChatId ? 'derived' : 'open'
+      if (chat.kind === 'ai') status = escalatedChatId ? 'derived' : 'answered'
       else status = isAdminActor ? 'answered' : 'open'
 
       const updated = patchRow('supportChats', chatId, {
@@ -1278,7 +1414,7 @@ function handleV1(config, method, parts) {
     if (id && method === 'DELETE') {
       const current = findById('importFolders', id)
       if (!current) fail(config, 404, 'HTTP_404', 'Not found')
-      if (current.isHome) {
+      if (current.isHome || current.isContext) {
         fail(config, 400, 'SYSTEM_FOLDER_PROTECTED', 'Protected folder')
       }
       removeRow('importFolders', id)
@@ -1303,6 +1439,7 @@ function handleV1(config, method, parts) {
         storagePath,
         folderId: body.folderId || null,
         uploadStatus: 'pending_upload',
+        indexingStatus: 'none',
         uploadedAt: new Date().toISOString(),
         documentType: body.documentType ? String(body.documentType).toUpperCase() : null,
         documentStatus: 'PENDING_UPLOAD',
@@ -1324,6 +1461,7 @@ function handleV1(config, method, parts) {
       if (!current) fail(config, 404, 'HTTP_404', 'Not found')
       const row = patchRow('importUploads', current.id, {
         uploadStatus: 'confirmed',
+        indexingStatus: 'none',
         ...(current.documentStatus && current.documentStatus !== 'PENDING_UPLOAD'
           ? {}
           : { documentStatus: 'PUBLISHED', publishedAt: new Date().toISOString() }),
