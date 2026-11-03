@@ -97,6 +97,12 @@ export const incidentsApi = {
     return data
   },
 
+  /** POST /incidents/{id}/triage-suggestion — la IA sugiere categoría y prioridad (plan Standard+). */
+  async requestTriageSuggestion(id) {
+    const { data } = await apiClient.post(incidentPath(id, '/triage-suggestion'))
+    return data
+  },
+
   async remove(id) {
     await apiClient.delete(incidentPath(id))
   },
