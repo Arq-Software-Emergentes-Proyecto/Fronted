@@ -38,8 +38,9 @@ const lastListSync = ref('')
 const view = ref('faq')
 const faqQuery = ref('')
 const openFaqId = ref('')
-/** Texto en vuelo (se muestra como burbuja pendiente). */
+/** Texto en vuelo (se muestra como burbuja pendiente) y último fallo reintentable. */
 const pendingText = ref('')
+const sendFailure = ref(null)
 const aiNotice = ref('')
 
 /** Chip de tema activo del encabezado de ayuda ('' = todos). */
@@ -48,6 +49,8 @@ const activeTopic = ref('')
 const showConversations = ref(false)
 const composerEl = ref(null)
 
+/** Preguntas sugeridas del asistente (tarjeta de ayuda y chat vacío). */
+const ASSISTANT_SUGGESTIONS = ['aiAskFees', 'aiAskPool', 'aiAskGuests', 'aiAskLeak']
 const TOPIC_BY_ID = Object.fromEntries(FAQ_TOPICS.map((topic) => [topic.id, topic]))
 
 const filteredFaqs = computed(() =>
@@ -95,6 +98,14 @@ async function startChatFromHelp() {
   focusComposer()
 }
 
+/** Pregunta sugerida desde la ayuda: abre el chat en blanco y envía la pregunta. */
+async function askFromHelp(key) {
+  openChatView()
+  await startAiChat()
+  if (disposed) return
+  void sendAiMessage(t(`supportResident.${key}`))
+}
+
 const hasHistory = computed(() => aiChats.value.some((chat) => chat.messages?.length))
 
 function chatWhen(chat) {
@@ -112,6 +123,7 @@ function selectConversation(id) {
 
 async function newChatFromList() {
   showConversations.value = false
+  sendFailure.value = null
   aiNotice.value = ''
   await startAiChat()
   focusComposer()
@@ -161,7 +173,7 @@ const displayMessages = computed(() => {
   return rows
 })
 
-const hasAiMessages = computed(() => displayMessages.value.length > 0)
+const hasAiMessages = computed(() => displayMessages.value.length > 0 || Boolean(sendFailure.value))
 
 /** Conversación cerrada (duda resuelta o incidencia registrada): solo lectura. */
 const isChatClosed = computed(() => activeAiChat.value?.status === 'closed')
@@ -440,7 +452,29 @@ async function startAiChat() {
 
 function openAiChat(id) {
   activeAiChatId.value = id
+  sendFailure.value = null
   aiNotice.value = ''
+}
+
+/** Traduce el error del POST a un mensaje claro y si se puede reintentar (US033 / TS009 / RNF012). */
+function describeSendError(error) {
+  const code = error?.code
+  if (code === 'GEMINI_API_KEY_MISSING') {
+    return { message: t('supportResident.aiMissingKey'), retryable: false }
+  }
+  if (code === 'AI_UNAVAILABLE' || error?.status === 503) {
+    return { message: t('supportResident.aiUnavailable'), retryable: true }
+  }
+  if (code === 'CHAT_CLOSED') {
+    return { message: t('supportResident.chatClosedSend'), retryable: false }
+  }
+  if (code === 'GEMINI_RATE_LIMITED') {
+    return { message: t('supportResident.aiBusy'), retryable: true }
+  }
+  if (code === 'TIMEOUT' || code === 'NETWORK_ERROR') {
+    return { message: t('supportResident.aiNetworkError'), retryable: true }
+  }
+  return { message: t('supportResident.sendError'), retryable: true }
 }
 
 async function sendAiMessage(preset) {
@@ -455,6 +489,7 @@ async function sendAiMessage(preset) {
   // El input no se limpia hasta que el servidor confirma: si falla, el texto no se pierde.
   aiSending.value = true
   pendingText.value = text
+  sendFailure.value = null
   aiNotice.value = ''
   scrollAiToBottom()
   const knownIds = new Set((activeAiChat.value?.messages || []).map((m) => m.id))
@@ -467,9 +502,13 @@ async function sendAiMessage(preset) {
     syncError.value = ''
   } catch (error) {
     console.error(error)
-    if (!aiInput.value.trim()) aiInput.value = text
-    aiNotice.value =
-      error?.code === 'CHAT_CLOSED' ? t('supportResident.chatClosedSend') : t('supportResident.sendError')
+    if (error?.code === 'AI_MONTHLY_CAP_REACHED') {
+      // Tope del plan: la consulta no se envió a la IA.
+      aiNotice.value = t('supportResident.aiCapReached')
+    } else {
+      if (!aiInput.value.trim()) aiInput.value = text
+      sendFailure.value = { text, chatId, ...describeSendError(error) }
+    }
   } finally {
     pendingText.value = ''
     aiSending.value = false
@@ -478,6 +517,13 @@ async function sendAiMessage(preset) {
     autosizeTextarea(composerEl.value)
     if (view.value === 'chat') focusComposer()
   }
+}
+
+function retryFailedMessage() {
+  const failed = sendFailure.value
+  if (!failed) return
+  if (failed.chatId) activeAiChatId.value = failed.chatId
+  void sendAiMessage(failed.text)
 }
 </script>
 
@@ -554,7 +600,7 @@ async function sendAiMessage(preset) {
           <aside class="assistant-card" aria-labelledby="assistant-heading">
             <div class="assistant-card__head">
               <span class="bot-avatar bot-avatar--lg" aria-hidden="true">
-                <i class="pi pi-building" />
+                <i class="pi pi-sparkles" />
               </span>
               <div>
                 <h2 id="assistant-heading" class="assistant-card__name">{{ t('supportResident.assistantName') }}</h2>
@@ -564,6 +610,21 @@ async function sendAiMessage(preset) {
                 </p>
               </div>
             </div>
+            <p class="assistant-card__intro">{{ t('supportResident.assistantIntro') }}</p>
+            <p class="assistant-card__label">{{ t('supportResident.assistantTryLabel') }}</p>
+            <ul class="ask-list" role="list">
+              <li v-for="key in ASSISTANT_SUGGESTIONS" :key="key">
+                <button
+                  type="button"
+                  class="ask-chip"
+                  :disabled="aiSending || !residentId"
+                  @click="askFromHelp(key)"
+                >
+                  <span>{{ t(`supportResident.${key}`) }}</span>
+                  <i class="pi pi-arrow-up-right" aria-hidden="true" />
+                </button>
+              </li>
+            </ul>
             <div class="assistant-card__actions">
               <button
                 type="button"
@@ -771,9 +832,21 @@ async function sendAiMessage(preset) {
           </div>
 
           <div v-if="!hasAiMessages" class="chat-empty">
-            <span class="bot-avatar bot-avatar--xl" aria-hidden="true"><i class="pi pi-building" /></span>
+            <span class="bot-avatar bot-avatar--xl" aria-hidden="true"><i class="pi pi-sparkles" /></span>
             <h2 class="chat-empty__title">{{ t('supportResident.aiGreeting') }}</h2>
-            <p class="chat-empty__sub">{{ t('supportResident.assistantStatus') }}</p>
+            <p class="chat-empty__sub">{{ t('supportResident.assistantIntro') }}</p>
+            <div class="chat-empty__chips">
+              <button
+                v-for="key in ASSISTANT_SUGGESTIONS"
+                :key="key"
+                type="button"
+                class="ask-chip ask-chip--inline"
+                :disabled="aiSending"
+                @click="sendAiMessage(t(`supportResident.${key}`))"
+              >
+                {{ t(`supportResident.${key}`) }}
+              </button>
+            </div>
           </div>
 
           <div
@@ -807,13 +880,44 @@ async function sendAiMessage(preset) {
                 <div class="msg__bubble" :class="{ 'bf-fresh': isFresh('supportMessage', m.id) }">
                   <p>{{ m.body }}</p>
                 </div>
+                <span v-if="m.citedSource" class="source-pill">
+                  <i class="pi pi-file" aria-hidden="true" />
+                  {{ t('supportResident.sourceLabel') }}: {{ m.citedSource }}
+                </span>
                 <span class="msg__meta">
                   {{ m.pending ? t('supportResident.aiPending') : messageTime(m) }}
                 </span>
               </div>
             </div>
 
+            <div v-if="aiSending" class="msg msg--ai msg--typing">
+              <span class="bot-avatar bot-avatar--sm" aria-hidden="true"><i class="pi pi-sparkles" /></span>
+              <div class="msg__col">
+                <div class="msg__bubble">
+                  <span class="typing" aria-hidden="true"><span /><span /><span /></span>
+                  <span class="sr-only">{{ t('supportResident.aiTyping') }}</span>
+                </div>
+              </div>
+            </div>
 
+            <div v-if="sendFailure" class="notice notice--red" role="alert">
+              <i class="pi pi-exclamation-circle" aria-hidden="true" />
+              <div class="notice__body">
+                <p>{{ sendFailure.message }}</p>
+                <div class="notice__actions">
+                  <button
+                    v-if="sendFailure.retryable"
+                    type="button"
+                    class="btn btn--danger btn--sm"
+                    :disabled="aiSending"
+                    @click="retryFailedMessage"
+                  >
+                    <i class="pi pi-refresh" aria-hidden="true" />
+                    {{ t('supportResident.retry') }}
+                  </button>
+                </div>
+              </div>
+            </div>
             <div v-if="aiNotice" class="notice notice--amber" role="status">
               <i class="pi pi-info-circle" aria-hidden="true" />
               <div class="notice__body"><p>{{ aiNotice }}</p></div>
@@ -981,6 +1085,15 @@ async function sendAiMessage(preset) {
 
 .btn--ghost:hover:not(:disabled) {
   background: var(--tint-blue);
+}
+
+.btn--danger {
+  background: #b42318;
+  color: #fff;
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: #912018;
 }
 
 .btn:disabled {
@@ -1912,6 +2025,28 @@ async function sendAiMessage(preset) {
   opacity: 0.6;
 }
 
+.source-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  padding: 0.22rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: #475467;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source-pill .pi {
+  font-size: 0.7rem;
+  color: var(--navy);
+}
+
 .typing {
   display: inline-flex;
   align-items: center;
@@ -1963,6 +2098,18 @@ async function sendAiMessage(preset) {
 
 .notice__body p {
   margin: 0;
+}
+
+.notice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
+.notice--red {
+  background: var(--tint-red);
+  color: #b42318;
 }
 
 .notice--amber {

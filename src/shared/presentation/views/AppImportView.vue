@@ -5,7 +5,7 @@ import Dialog from 'primevue/dialog'
 import Select from 'primevue/select'
 import InputText from 'primevue/inputtext'
 import { importUploadsApi, DOCUMENT_TYPES } from '@/communications/infrastructure/importUploadsApi.js'
-import { importFoldersApi, isHomeFolder, isSystemFolder } from '@/communications/infrastructure/importFoldersApi.js'
+import { importFoldersApi, isContextFolder, isHomeFolder, isSystemFolder } from '@/communications/infrastructure/importFoldersApi.js'
 import ConfirmActions from '@/shared/presentation/components/ConfirmActions.vue'
 import LoadErrorRetry from '@/shared/presentation/components/LoadErrorRetry.vue'
 import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
@@ -119,6 +119,7 @@ function formatDate(iso) {
 }
 
 const homeFolder = computed(() => folders.value.find((folder) => isHomeFolder(folder)) ?? null)
+const contextFolder = computed(() => folders.value.find((folder) => isContextFolder(folder)) ?? null)
 
 const selectedFolder = computed(
   () => folders.value.find((folder) => folder.id === selectedFolderId.value) ?? homeFolder.value,
@@ -145,7 +146,7 @@ function folderFileCount(folder) {
 
 function sortFolders(list) {
   return [...list].sort((a, b) => {
-    const rank = (f) => (isHomeFolder(f) ? 1 : 0)
+    const rank = (f) => (isHomeFolder(f) ? 2 : isContextFolder(f) ? 1 : 0)
     const diff = rank(b) - rank(a)
     if (diff) return diff
     return String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
@@ -159,15 +160,17 @@ function selectFolder(folder) {
 
 function folderDisplayName(folder) {
   if (!folder || isHomeFolder(folder)) return t('importView.homeFolderName')
+  if (isContextFolder(folder)) return t('importView.contextFolderName')
   return folder.name
 }
 
 function folderIcon(folder) {
   if (isHomeFolder(folder)) return 'pi-inbox'
+  if (isContextFolder(folder)) return 'pi-sparkles'
   return 'pi-folder'
 }
 
-/* ---------- Document status and type ---------- */
+/* ---------- Document status, type and AI usage ---------- */
 
 function documentStatusOf(file) {
   return String(file?.documentStatus ?? 'PUBLISHED').toUpperCase()
@@ -190,6 +193,39 @@ function documentStatusLabel(file) {
     : status
 }
 
+function isInContextFolder(file) {
+  return Boolean(contextFolder.value) && fileBelongsToFolder(file, contextFolder.value)
+}
+
+/**
+ * How the AI assistant uses a file: only PUBLISHED documents feed it (RF033); files in the
+ * "Contexto IA" folder are indexed. Returns ready | pending | failed | queued | off.
+ */
+function aiStateOf(file) {
+  if (documentStatusOf(file) !== 'PUBLISHED') return 'off'
+  const s = String(file?.indexingStatus ?? '').toLowerCase()
+  if (s === 'failed') return 'failed'
+  if (s === 'pending' || s === 'indexing') return 'pending'
+  if (s === 'done' || s === 'ready') return 'ready'
+  return isInContextFolder(file) ? 'queued' : 'off'
+}
+
+function aiStateLabel(state) {
+  if (state === 'ready') return t('importView.indexingDone')
+  if (state === 'pending') return t('importView.indexingPending')
+  if (state === 'failed') return t('importView.indexingFailed')
+  if (state === 'queued') return t('importView.aiQueued')
+  return t('importView.aiOff')
+}
+
+function aiStateIcon(state) {
+  if (state === 'ready') return 'pi-sparkles'
+  if (state === 'pending') return 'pi-spin pi-spinner'
+  if (state === 'failed') return 'pi-exclamation-triangle'
+  if (state === 'queued') return 'pi-clock'
+  return 'pi-minus-circle'
+}
+
 function fileKind(file) {
   const mime = String(file?.mimeType ?? '').toLowerCase()
   const name = String(file?.fileName ?? '').toLowerCase()
@@ -205,10 +241,14 @@ function fileKind(file) {
 const summary = computed(() => {
   const rows = items.value
   const current = rows.filter((f) => documentStatusOf(f) === 'PUBLISHED')
+  const aiUsed = current.filter((f) => ['ready', 'pending', 'queued'].includes(aiStateOf(f)))
+  const aiReady = current.filter((f) => aiStateOf(f) === 'ready')
   const inactive = rows.filter((f) => ['SUPERSEDED', 'ARCHIVED'].includes(documentStatusOf(f)))
   const bytes = rows.reduce((sum, f) => sum + (Number(f.size) || 0), 0)
   return {
     current: current.length,
+    aiUsed: aiUsed.length,
+    aiReady: aiReady.length,
     inactive: inactive.length,
     superseded: inactive.filter((f) => documentStatusOf(f) === 'SUPERSEDED').length,
     archived: inactive.filter((f) => documentStatusOf(f) === 'ARCHIVED').length,
@@ -229,6 +269,15 @@ const kpiPills = computed(() => {
       short: t('kpiShort.current'),
       value: shown(s.current),
       hint: t('importView.statCurrentHint'),
+    },
+    {
+      key: 'ai',
+      tone: 'green',
+      icon: 'pi-sparkles',
+      label: t('importView.statAi'),
+      short: t('kpiShort.forAi'),
+      value: shown(s.aiUsed),
+      hint: t('importView.statAiHint', { n: s.aiReady }, s.aiReady),
     },
     {
       key: 'inactive',
@@ -341,9 +390,17 @@ async function loadList() {
       importFoldersApi.list(),
     ])
     const home = await importFoldersApi.ensureHome(folderRows)
-    const nextFolders = folderRows.some((folder) => folder.id === home.id)
+    const context = await importFoldersApi.ensureContext(
+      folderRows.some((folder) => folder.id === home.id)
+        ? folderRows.map((folder) => (folder.id === home.id ? home : folder))
+        : [home, ...folderRows],
+    )
+    let nextFolders = folderRows.some((folder) => folder.id === home.id)
       ? folderRows.map((folder) => (folder.id === home.id ? home : folder))
       : [home, ...folderRows]
+    nextFolders = nextFolders.some((folder) => folder.id === context.id)
+      ? nextFolders.map((folder) => (folder.id === context.id ? context : folder))
+      : [context, ...nextFolders]
 
     const orphans = files.filter((file) => !file.folderId)
     if (orphans.length) {
@@ -847,15 +904,28 @@ onMounted(loadList)
               :aria-label="`${folderDisplayName(folder)} · ${t('importView.folderFilesCount', { n: folderFileCount(folder) }, folderFileCount(folder))}`"
               @click="selectFolder(folder)"
             >
-              <span class="imp-folder__icon" aria-hidden="true">
+              <span
+                class="imp-folder__icon"
+                :class="{ 'is-ai': isContextFolder(folder) }"
+                aria-hidden="true"
+              >
                 <i class="pi" :class="folderIcon(folder)" />
               </span>
               <span class="imp-folder__text">
                 <span class="imp-folder__name">
                   {{ folderDisplayName(folder) }}
+                  <span v-if="isContextFolder(folder)" class="imp-pill imp-pill--green imp-pill--xs">
+                    {{ t('importView.contextFolderBadge') }}
+                  </span>
                 </span>
-                <span class="imp-folder__meta">
-                  {{ isHomeFolder(folder) ? t('importView.homeFolderMeta') : t('importView.customFolderMeta') }}
+                <span class="imp-folder__meta" :class="{ 'is-ai': isContextFolder(folder) }">
+                  {{
+                    isContextFolder(folder)
+                      ? t('importView.contextFolderMeta')
+                      : isHomeFolder(folder)
+                        ? t('importView.homeFolderMeta')
+                        : t('importView.customFolderMeta')
+                  }}
                 </span>
               </span>
               <span class="imp-folder__count" aria-hidden="true">{{ folderFileCount(folder) }}</span>
@@ -953,8 +1023,15 @@ onMounted(loadList)
         <!-- Documents -->
         <section class="imp-card imp-docs" aria-labelledby="imp-docs-title">
           <div class="imp-docs__head">
-            <span class="imp-folder__icon" aria-hidden="true">
-              <i class="pi" :class="isHomeFolder(selectedFolder) ? 'pi-inbox' : 'pi-folder-open'" />
+            <span
+              class="imp-folder__icon"
+              :class="{ 'is-ai': isContextFolder(selectedFolder) }"
+              aria-hidden="true"
+            >
+              <i
+                class="pi"
+                :class="isHomeFolder(selectedFolder) ? 'pi-inbox' : isContextFolder(selectedFolder) ? 'pi-sparkles' : 'pi-folder-open'"
+              />
             </span>
             <div class="imp-docs__head-text">
               <h2 id="imp-docs-title" class="imp-card__title">
@@ -962,7 +1039,7 @@ onMounted(loadList)
                 <span class="imp-count">{{ visibleItems.length }}</span>
               </h2>
               <p class="imp-docs__hint">
-                {{ t('importView.folderHint') }}
+                {{ isContextFolder(selectedFolder) ? t('importView.contextFolderHint') : t('importView.folderHint') }}
               </p>
             </div>
           </div>
@@ -1035,6 +1112,7 @@ onMounted(loadList)
               <span>{{ t('importView.colDocument') }}</span>
               <span>{{ t('importView.colType') }}</span>
               <span>{{ t('importView.colStatus') }}</span>
+              <span>{{ t('importView.colAi') }}</span>
               <span class="is-actions">{{ t('importView.colActions') }}</span>
             </div>
 
@@ -1094,6 +1172,12 @@ onMounted(loadList)
                       <span class="imp-pill" :class="`imp-pill--status-${documentStatusOf(file)}`">
                         <span class="imp-pill__dot" aria-hidden="true" />
                         {{ documentStatusLabel(file) }}
+                      </span>
+                    </span>
+                    <span class="imp-row__cell">
+                      <span class="imp-ai" :class="`is-${aiStateOf(file)}`">
+                        <i class="pi" :class="aiStateIcon(aiStateOf(file))" aria-hidden="true" />
+                        {{ aiStateLabel(aiStateOf(file)) }}
                       </span>
                     </span>
                   </div>
@@ -1634,6 +1718,15 @@ onMounted(loadList)
   color: #1e3a8a;
 }
 
+.imp-folder__icon.is-ai {
+  background: #e3f4e8;
+  color: #15803d;
+}
+
+.imp-folder.is-selected .imp-folder__icon.is-ai {
+  background: #fff;
+}
+
 .imp-folder__text {
   flex: 1;
   min-width: 0;
@@ -1659,6 +1752,10 @@ onMounted(loadList)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.imp-folder__meta.is-ai {
+  color: #15803d;
 }
 
 .imp-folder__count {
@@ -1847,6 +1944,11 @@ onMounted(loadList)
   color: #1e3a8a;
 }
 
+.imp-docs__head .imp-folder__icon.is-ai {
+  background: #e3f4e8;
+  color: #15803d;
+}
+
 .imp-docs__head-text {
   min-width: 0;
   flex: 1;
@@ -1962,7 +2064,7 @@ onMounted(loadList)
 }
 
 .imp-list {
-  --cols: minmax(0, 1fr) 6.75rem 7rem 8.75rem;
+  --cols: minmax(0, 1fr) 6.75rem 7rem 8.75rem 8.75rem;
 }
 
 .imp-list__cols {
@@ -2145,6 +2247,26 @@ onMounted(loadList)
 .imp-pill--status-ARCHIVED { background: #f1f5f9; color: #475569; }
 .imp-pill--status-PENDING_UPLOAD { background: #fdeee2; color: #9a3412; }
 
+.imp-ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.imp-ai .pi {
+  font-size: 0.72rem;
+}
+
+.imp-ai.is-ready { color: #15803d; }
+.imp-ai.is-pending,
+.imp-ai.is-queued { color: #b45309; }
+.imp-ai.is-failed { color: #b42318; }
+.imp-ai.is-off { color: #94a3b8; font-weight: 500; }
+
 /* Row actions with a tooltip */
 .imp-action {
   position: relative;
@@ -2282,7 +2404,7 @@ onMounted(loadList)
 /* ---------- Responsive ---------- */
 @media (max-width: 1280px) {
   .imp-list {
-    --cols: minmax(0, 1fr) 6.5rem 6.75rem 8.75rem;
+    --cols: minmax(0, 1fr) 6.5rem 6.75rem 8.5rem 8.75rem;
   }
 }
 

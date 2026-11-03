@@ -19,6 +19,7 @@ import {
 } from '@/finances/domain/billingCycle.js'
 import { parseDepartmentNumber } from '@/shared/domain/departmentNumber.js'
 import { isExtraReceipt } from '@/finances/domain/receipt.js'
+import { SUBSCRIPTION_PLAN_AI_QUERY_CAPS } from '@/billing/domain/subscriptionPlans.js'
 import {
   findById,
   insertRow,
@@ -844,7 +845,7 @@ function handleDocuments(config, method, id, action) {
   if (upload.uploadStatus !== 'confirmed') fail(config, 400, 'NOT_CONFIRMED', 'Confirma la subida primero.')
 
   if (action === 'archive') {
-    return ok(config, uploadResource(patchRow('importUploads', upload.id, { documentStatus: 'ARCHIVED' })))
+    return ok(config, uploadResource(patchRow('importUploads', upload.id, { documentStatus: 'ARCHIVED', indexingStatus: 'none' })))
   }
 
   const requestedType = body.documentType != null ? String(body.documentType).toUpperCase() : null
@@ -871,7 +872,7 @@ function handleDocuments(config, method, id, action) {
   }
   const document = uploadResource(patchRow('importUploads', upload.id, patch))
   const superseded = previous
-    ? uploadResource(patchRow('importUploads', previous.id, { documentStatus: 'SUPERSEDED' }))
+    ? uploadResource(patchRow('importUploads', previous.id, { documentStatus: 'SUPERSEDED', indexingStatus: 'none' }))
     : null
   return ok(config, { document, superseded })
 }
@@ -985,6 +986,26 @@ function handleSupportCounters(config, method, rest) {
       answered: count((s) => s === 'answered'),
       closed: count((s) => s === 'closed'),
       total: rows.length,
+    })
+  }
+  if (rest === 'ai-usage') {
+    requireAdmin(config, actor)
+    const { planId } = subscriptionSnapshot(ownerId)
+    const cap = Number(SUBSCRIPTION_PLAN_AI_QUERY_CAPS[planId] ?? 150)
+    const period = todayYmd().slice(0, 7)
+    const ownerResidents = new Set(residentsOf(ownerId).map((r) => String(r.id)))
+    const replies = listCollection('supportChats')
+      .filter((c) => String(c.kind ?? '') === 'ai' && ownerResidents.has(String(c.residentId ?? '')))
+      .flatMap((c) => (Array.isArray(c.messages) ? c.messages : []))
+      .filter((m) => (m.role === 'ai' || m.authorRole === 'assistant') && String(m.createdAt ?? '').startsWith(period))
+    const used = replies.length
+    return ok(config, {
+      period,
+      used,
+      cap,
+      remaining: Math.max(0, cap - used),
+      capReached: used >= cap,
+      planId,
     })
   }
   return null
