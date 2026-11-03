@@ -86,10 +86,15 @@ export const supportApi = {
     return normalizeChat(data)
   },
 
+  /**
+   * Errores: 503 AI_UNAVAILABLE / GEMINI_API_KEY_MISSING (no se guardó el mensaje, se puede reintentar),
+   * 429 GEMINI_RATE_LIMITED.
+   */
   async postMessage(chatId, body, locale = 'es') {
     const { data } = await apiClient.post(
       `/api/v1/support/chats/${encodeURIComponent(chatId)}/messages`,
       { body, locale },
+      { timeout: 25000 },
     )
     return normalizeChat(data)
   },
