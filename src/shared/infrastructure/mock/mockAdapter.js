@@ -1526,6 +1526,7 @@ function mockIncidentEvent(type, status, comment, actor) {
   }
 }
 
+const ESCALATION_MS = 48 * 3600 * 1000
 const ASSISTANT_ACTOR = { id: null, role: 'assistant' }
 
 /** Triaje de la demo (sin IA real): palabras clave → categoría y prioridad, como GeminiIncidentTriageAdvisor. */
@@ -1616,15 +1617,18 @@ export function resolveMockIncidentFromTask(incidentId, comment) {
     status: 'resolved',
     resolutionComment: comment,
     resolvedAt: new Date().toISOString(),
+    escalated: false,
     events,
   })
   notifyMockIncidentResolved(resolved)
 }
 
-/** Campos derivados que calcula el backend (aiSuggestion.pending). */
+/** Campos derivados que calcula el backend (escalated, aiSuggestion.pending). */
 function derivedIncidentFields(row) {
+  const unassigned = !row.providerId && !row.provider
   const s = row.aiSuggestion
   return {
+    escalated: !!row.escalatedAt && row.status === 'open' && unassigned,
     ...(s
       ? {
           aiSuggestion: {
@@ -1638,12 +1642,23 @@ function derivedIncidentFields(row) {
   }
 }
 
-/** Recalcula los campos derivados de la demo (aiSuggestion.pending). */
+/** EscalationPolicy de la demo: abierta y sin proveedor por más de 48 h → se escala una sola vez. */
 function sweepIncidents() {
+  const now = Date.now()
   for (const row of queryCollection('incidents', {})) {
-    const derived = derivedIncidentFields(row)
-    if (derived.aiSuggestion?.pending !== row.aiSuggestion?.pending) {
-      patchRow('incidents', row.id, derived)
+    const patch = {}
+    const unassigned = !row.providerId && !row.provider
+    const reported = new Date(row.createdAt || 0).getTime()
+    if (!row.escalatedAt && row.status === 'open' && unassigned && reported && now - reported >= ESCALATION_MS) {
+      patch.escalatedAt = new Date().toISOString()
+      patch.events = [
+        ...(Array.isArray(row.events) ? row.events : []),
+        mockIncidentEvent('escalated', row.status, 'Sin asignar por más de 48 horas: se avisó a la administración.', { id: null, role: 'system' }),
+      ]
+    }
+    const derived = derivedIncidentFields({ ...row, ...patch })
+    if (patch.escalatedAt || derived.escalated !== row.escalated || derived.aiSuggestion?.pending !== row.aiSuggestion?.pending) {
+      patchRow('incidents', row.id, { ...patch, ...derived })
     }
   }
 }
@@ -1811,6 +1826,7 @@ function handleIncidentsAndAnnouncements(config, method, parts) {
       resolutionComment: comment,
       resolvedAt: new Date().toISOString(),
       events,
+      escalated: false,
     })
     notifyMockIncidentResolved(resolved)
     return ok(config, resolved)

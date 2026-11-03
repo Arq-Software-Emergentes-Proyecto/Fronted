@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import Dialog from 'primevue/dialog'
 import Select from 'primevue/select'
@@ -18,6 +19,7 @@ import {
   IncidentStatus,
   INCIDENT_TITLE_MAX,
   INCIDENT_DESCRIPTION_MAX,
+  INCIDENT_ESCALATION_HOURS,
 } from '@/incidents/domain/model/incidentConstants.js'
 import {
   formatIncidentDate,
@@ -40,6 +42,7 @@ import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import { confirmSuccess, isFresh, markFresh } from '@/shared/presentation/feedback/successFeedback.js'
 
 const { t, locale } = useI18n()
+const route = useRoute()
 
 /** Team: "Crear tarea de mantenimiento" desde una incidencia (MaintenanceTask.incidentId). */
 const activeWorkers = ref([])
@@ -130,6 +133,8 @@ const statusCounts = computed(() => {
   return counts
 })
 
+const escalatedCount = computed(() => incidents.value.filter((row) => row.escalated).length)
+
 const filters = computed(() => [
   { id: 'all', label: t('incidentFlow.filterAll'), count: statusCounts.value.all },
   ...statusOptions.value.map((opt) => ({
@@ -137,6 +142,10 @@ const filters = computed(() => [
     label: opt.label,
     count: statusCounts.value[opt.value] ?? 0,
   })),
+  // Escalamiento (48 h sin asignar): solo aparece cuando hay alguna.
+  ...(escalatedCount.value || statusFilter.value === 'escalated'
+    ? [{ id: 'escalated', label: t('incidentFlow.filterEscalated'), count: escalatedCount.value }]
+    : []),
 ])
 
 const providerOptions = computed(() =>
@@ -180,7 +189,9 @@ const searchNeedle = computed(() => normalizeText(search.value.trim()))
 
 const visibleIncidents = computed(() =>
   incidents.value.filter((row) => {
-    if (statusFilter.value !== 'all' && statusOf(row) !== statusFilter.value) return false
+    if (statusFilter.value === 'escalated') {
+      if (!row.escalated) return false
+    } else if (statusFilter.value !== 'all' && statusOf(row) !== statusFilter.value) return false
     if (priorityFilter.value === 'none' && row.priority) return false
     if (!['all', 'none'].includes(priorityFilter.value) && row.priority !== priorityFilter.value) return false
     if (!searchNeedle.value) return true
@@ -265,7 +276,9 @@ const kpiPills = computed(() => {
       icon: 'pi-wrench',
       label: t('incidentFlow.summaryUnassigned'),
       value: shown(summary.value.unassigned),
-      hint: t('incidentFlow.summaryUnassignedHint'),
+      hint: escalatedCount.value
+        ? t('incidentFlow.summaryUnassignedEscalatedHint', { count: escalatedCount.value, hours: INCIDENT_ESCALATION_HOURS })
+        : t('incidentFlow.summaryUnassignedHint'),
     },
   ]
 })
@@ -665,6 +678,8 @@ function toggleRowMenu(event, row) {
 let stopRealtime = () => {}
 
 onMounted(async () => {
+  // Desde la agenda del panel: /app/incidents?filter=escalated
+  if (route.query.filter === 'escalated') statusFilter.value = 'escalated'
   markIncidentsSeen()
   stopRealtime = onIncidentRealtime((type, payload) => {
     if (type === IncidentRealtimeEvent.CREATED) markIncidentsSeen()
@@ -816,7 +831,15 @@ onBeforeUnmount(() => stopRealtime())
                   <div class="inc-item">
                     <strong class="inc-item__title">{{ row.title || row.description }}</strong>
                     <span v-if="row.title && row.description" class="inc-item__desc">{{ row.description }}</span>
-                    <span v-if="row.priority || row.category || row.aiSuggestion?.pending" class="inc-item__tags">
+                    <span v-if="row.priority || row.category || row.escalated || row.aiSuggestion?.pending" class="inc-item__tags">
+                      <span
+                        v-if="row.escalated"
+                        class="inc-pill inc-pill--escalated"
+                        :title="t('incidentFlow.escalatedHint', { hours: INCIDENT_ESCALATION_HOURS })"
+                      >
+                        <i class="pi pi-exclamation-triangle" aria-hidden="true" />
+                        {{ t('incidentFlow.escalatedBadge') }}
+                      </span>
                       <span v-if="row.aiSuggestion?.pending" class="inc-pill inc-pill--ai">
                         <i class="pi pi-sparkles" aria-hidden="true" />
                         {{ t('incidentFlow.triagePendingBadge') }}
@@ -1047,6 +1070,11 @@ onBeforeUnmount(() => stopRealtime())
         </div>
 
         <p class="incd-text">{{ detailRow.description }}</p>
+
+        <p v-if="detailRow.escalated" class="incd-note incd-note--escalated" role="status">
+          <i class="pi pi-exclamation-triangle" aria-hidden="true" />
+          <span>{{ t('incidentFlow.escalatedNotice', { hours: INCIDENT_ESCALATION_HOURS }) }}</span>
+        </p>
 
         <p v-if="error" class="incd-alert" role="alert">{{ error }}</p>
 
@@ -1480,6 +1508,7 @@ onBeforeUnmount(() => stopRealtime())
 .inc-filter--open:not(.is-active) .inc-filter__count { background: #fdeee2; color: #9a3412; }
 .inc-filter--in-progress:not(.is-active) .inc-filter__count { background: #e8eefc; color: #1e3a8a; }
 .inc-filter--resolved:not(.is-active) .inc-filter__count { background: #e3f4e8; color: #15803d; }
+.inc-filter--escalated:not(.is-active) .inc-filter__count { background: #fde4e4; color: #b42318; }
 
 .inc-filter.is-active {
   background: transparent;

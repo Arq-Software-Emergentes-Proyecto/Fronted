@@ -338,6 +338,7 @@ export function createSeedDb() {
         ownerAdminId: owner,
       },
       {
+        // Abierta y sin proveedor por más de 48 h: la demo la escala (EscalationPolicy).
         id: 'inc-4',
         residentId: 'preview-resident-3',
         residentName: 'Carla Ríos',
