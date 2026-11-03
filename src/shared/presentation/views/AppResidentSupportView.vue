@@ -502,8 +502,13 @@ async function sendAiMessage(preset) {
     syncError.value = ''
   } catch (error) {
     console.error(error)
-    if (!aiInput.value.trim()) aiInput.value = text
-    sendFailure.value = { text, chatId, ...describeSendError(error) }
+    if (error?.code === 'AI_MONTHLY_CAP_REACHED') {
+      // Tope del plan: la consulta no se envió a la IA.
+      aiNotice.value = t('supportResident.aiCapReached')
+    } else {
+      if (!aiInput.value.trim()) aiInput.value = text
+      sendFailure.value = { text, chatId, ...describeSendError(error) }
+    }
   } finally {
     pendingText.value = ''
     aiSending.value = false
