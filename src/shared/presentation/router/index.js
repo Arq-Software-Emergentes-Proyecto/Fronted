@@ -14,6 +14,7 @@ import {
 import { freshSessionToken } from '@/iam/infrastructure/firebaseSession.js'
 import { AppPaths, AppRouteNames } from '@/shared/domain/appRoutes.js'
 import { applyPageMeta } from '@/shared/presentation/router/pageMeta.js'
+import { setStatusBarDarkContent } from '@/shared/infrastructure/nativePlatform.js'
 import AuthView from '@/iam/presentation/views/AuthView.vue'
 import AppShellView from '@/shared/presentation/views/AppShellView.vue'
 import AppDashboardView from '@/shared/presentation/views/AppDashboardView.vue'
@@ -258,6 +259,16 @@ router.beforeEach(async (to) => {
   return true
 })
 
-router.afterEach((to) => applyPageMeta(to))
+/** Login / registro: cabecera azul marino, así que la barra de estado del celular va en blanco. */
+const NAVY_HEADER_ROUTE_NAMES = new Set([
+  AppRouteNames.LOGIN,
+  AppRouteNames.REGISTER,
+  AppRouteNames.RESIDENT_LOGIN,
+])
+
+router.afterEach((to) => {
+  applyPageMeta(to)
+  void setStatusBarDarkContent(!NAVY_HEADER_ROUTE_NAMES.has(to.name))
+})
 
 export default router

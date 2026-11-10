@@ -1,4 +1,5 @@
 import { apiClient } from '@/shared/infrastructure/api/apiClient.js'
+import { publicWebOrigin } from '@/shared/infrastructure/envConfig.js'
 import { reservationsApi } from '@/socialSpaces/infrastructure/reservationsApi.js'
 import { withOwnerParams } from '@/shared/infrastructure/api/ownerQuery.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
@@ -19,7 +20,7 @@ const RESIDENTS_IMPORT_BASE = '/api/v1/residents/import'
 
 /** Invite link the admin shares with the resident (no email provider is integrated). */
 export function residentInviteLink(resident) {
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : ''
+  const baseUrl = publicWebOrigin()
   const params = new URLSearchParams({ invite: '1' })
   if (resident?.inviteToken) params.set('token', resident.inviteToken)
   else params.set('code', resident?.code || '')

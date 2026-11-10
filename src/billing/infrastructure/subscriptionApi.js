@@ -1,4 +1,5 @@
 import { apiClient } from '@/shared/infrastructure/api/apiClient.js'
+import { publicWebOrigin } from '@/shared/infrastructure/envConfig.js'
 import { apiError } from '@/shared/infrastructure/api/utils.js'
 import { checkoutReturnUrl } from '@/shared/infrastructure/mercadoPagoCheckoutClient.js'
 import { AppPaths } from '@/shared/domain/appRoutes.js'
@@ -87,7 +88,7 @@ export const subscriptionApi = {
     }
     // Solo la API crea el cobro (precio del plan, referencia del admin y snapshot del checkout):
     // el navegador nunca arma un pago por su cuenta.
-    const frontendBaseUrl = typeof window !== 'undefined' ? window.location.origin : undefined
+    const frontendBaseUrl = publicWebOrigin() || undefined
     const { data } = await apiClient.post('/api/v1/subscription/checkout', {
       planId,
       ...(frontendBaseUrl ? { frontendBaseUrl } : {}),

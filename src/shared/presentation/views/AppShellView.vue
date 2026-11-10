@@ -21,6 +21,8 @@ import {
 } from '@/incidents/application/incidentRealtimeStore.js'
 import { stopSupportHub } from '@/residentCare/infrastructure/supportRealtime.js'
 import { IncidentRealtimeEvent } from '@/incidents/domain/model/incidentConstants.js'
+import { USE_NATIVE_CHROME } from '@/shared/infrastructure/nativePlatform.js'
+import { pageTitleKey } from '@/shared/presentation/router/pageMeta.js'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -320,6 +322,63 @@ const navBadgeCount = computed(() =>
   appNavPrimaryItems.value.reduce((total, item) => total + (item.badge || 0), 0),
 )
 
+// App nativa en el celular: barra de pestañas abajo (las secciones de uso diario) y "Más" abre el
+// menú completo como hoja. Las pestañas reutilizan los ítems del menú, así conservan sus contadores.
+const TAB_LAYOUTS = {
+  resident: [
+    { key: 'residentDashboard', label: 'app.tabs.home', icon: 'pi pi-home' },
+    { key: 'residentFinance', label: 'app.tabs.payments' },
+    { key: 'residentServices', label: 'app.tabs.spaces' },
+    { key: 'residentIncidents', label: 'app.tabs.incidents' },
+  ],
+  board: [
+    { key: 'board', label: 'app.tabs.summary' },
+    { key: 'access', label: 'app.tabs.team' },
+    { key: 'buildings', label: 'app.tabs.buildings' },
+  ],
+  admin: [
+    { key: 'dashboard', label: 'app.tabs.dashboard', icon: 'pi pi-home' },
+    { key: 'finance', label: 'app.tabs.finance' },
+    { key: 'incidents', label: 'app.tabs.incidents' },
+    { key: 'information', label: 'app.tabs.information' },
+  ],
+}
+
+const showTabBar = computed(() => USE_NATIVE_CHROME && isMobile.value)
+const moreButtonEl = ref(null)
+
+const tabItems = computed(() => {
+  const layout = isResident.value ? TAB_LAYOUTS.resident : isBoardView.value ? TAB_LAYOUTS.board : TAB_LAYOUTS.admin
+  return layout
+    .map((tab) => {
+      const item = appNavPrimaryItems.value.find((navItem) => navItem.key === tab.key)
+      return item && { ...item, label: t(tab.label), icon: tab.icon ?? item.icon }
+    })
+    .filter(Boolean)
+})
+
+/** "Más" queda activa en las vistas que no tienen pestaña propia (Ajustes, Equipo, etc.). */
+const isMoreTabActive = computed(
+  () => isMenuOpen.value || !tabItems.value.some((tab) => tab.routeName === route.name),
+)
+
+/** Contador de una sección que solo está en el menú "Más". */
+const hasMoreBadge = computed(() => {
+  const tabKeys = new Set(tabItems.value.map((tab) => tab.key))
+  return appNavPrimaryItems.value.some((item) => item.badge && !tabKeys.has(item.key))
+})
+
+const pageTitle = computed(() => {
+  const key = pageTitleKey(route.name)
+  return key ? t(key) : ''
+})
+
+watch(
+  showTabBar,
+  (visible) => document.documentElement.classList.toggle('bf-has-tabbar', visible),
+  { flush: 'post' },
+)
+
 function syncMobile() {
   isMobile.value = Boolean(mobileQuery?.matches)
   if (!isMobile.value) isMenuOpen.value = false
@@ -334,7 +393,8 @@ async function openMenu() {
 function closeMenu({ restoreFocus = true } = {}) {
   if (!isMenuOpen.value) return
   isMenuOpen.value = false
-  if (restoreFocus) menuButtonEl.value?.focus({ preventScroll: true })
+  const opener = showTabBar.value ? moreButtonEl : menuButtonEl
+  if (restoreFocus) opener.value?.focus({ preventScroll: true })
 }
 
 function onMenuKeydown(event) {
@@ -380,12 +440,15 @@ onMounted(() => {
 onBeforeUnmount(() => {
   mobileQuery?.removeEventListener('change', syncMobile)
   document.removeEventListener('keydown', onMenuKeydown)
-  document.documentElement.classList.remove('bf-menu-open')
+  document.documentElement.classList.remove('bf-menu-open', 'bf-has-tabbar')
 })
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'app-shell--chat': lockChatPageScroll }">
+  <div
+    class="app-shell"
+    :class="{ 'app-shell--chat': lockChatPageScroll, 'app-shell--tabbar': showTabBar }"
+  >
     <SkipLink />
     <Toast
       v-if="!isResident"
@@ -412,7 +475,9 @@ onBeforeUnmount(() => {
     </Toast>
     <BfConfirmDialog />
     <header class="app-shell__mobilebar">
+      <p v-if="showTabBar" class="app-shell__mobilebar-title">{{ pageTitle }}</p>
       <button
+        v-if="!showTabBar"
         ref="menuButtonEl"
         type="button"
         class="app-shell__menu-btn"
@@ -425,6 +490,7 @@ onBeforeUnmount(() => {
         <span v-if="navBadgeCount" class="app-shell__menu-dot" aria-hidden="true" />
       </button>
       <RouterLink
+        v-if="!showTabBar"
         class="app-shell__mobilebar-brand"
         :to="{ name: homeRoute }"
       >
@@ -618,6 +684,41 @@ onBeforeUnmount(() => {
     >
       <RouterView />
     </main>
+    <nav v-if="showTabBar" class="app-shell__tabbar" :aria-label="t('app.tabs.nav')">
+      <RouterLink
+        v-for="tab in tabItems"
+        :key="tab.key"
+        class="app-shell__tab"
+        exact-active-class="app-shell__tab--active"
+        :to="{ name: tab.routeName }"
+      >
+        <span class="app-shell__tab-icon">
+          <i :class="tab.icon" aria-hidden="true" />
+          <span
+            v-if="tab.badge"
+            class="app-shell__tab-badge"
+            role="status"
+            :aria-label="tab.badgeLabel"
+          >{{ tab.badge > 99 ? '99+' : tab.badge }}</span>
+        </span>
+        <span class="app-shell__tab-label">{{ tab.label }}</span>
+      </RouterLink>
+      <button
+        ref="moreButtonEl"
+        type="button"
+        class="app-shell__tab"
+        :class="{ 'app-shell__tab--active': isMoreTabActive }"
+        :aria-expanded="isMenuOpen ? 'true' : 'false'"
+        aria-controls="app-sidebar"
+        @click="openMenu"
+      >
+        <span class="app-shell__tab-icon">
+          <i class="pi pi-ellipsis-h" aria-hidden="true" />
+          <span v-if="hasMoreBadge" class="app-shell__tab-dot" aria-hidden="true" />
+        </span>
+        <span class="app-shell__tab-label">{{ t('app.tabs.more') }}</span>
+      </button>
+    </nav>
   </div>
 </template>
 
@@ -1499,9 +1600,179 @@ onBeforeUnmount(() => {
   }
 }
 
+/* ---------- App nativa: título arriba, pestañas abajo y "Más" como hoja ---------- */
+.app-shell__tabbar {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .app-shell__mobilebar-title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-family: var(--bf-font-heading, inherit);
+    font-size: 1.3rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    color: var(--shell-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Espacio de la barra de pestañas; las vistas de chat también lo restan de su alto. */
+  .app-shell--tabbar {
+    --shell-tabbar-space: calc(var(--bf-tabbar-height, 3.35rem) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .app-shell--tabbar .app-shell__main {
+    padding-bottom: var(--shell-tabbar-space);
+  }
+
+  .app-shell__tabbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 250;
+    display: flex;
+    align-items: stretch;
+    padding: 0 max(0.25rem, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px)
+      max(0.25rem, env(safe-area-inset-left, 0px));
+    background: rgba(255, 255, 255, 0.92);
+    -webkit-backdrop-filter: saturate(1.6) blur(16px);
+    backdrop-filter: saturate(1.6) blur(16px);
+    border-top: 0.5px solid rgba(0, 0, 0, 0.16);
+  }
+
+  .app-shell__tab {
+    flex: 1 1 0;
+    min-width: 0;
+    height: var(--bf-tabbar-height, 3.35rem);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2rem;
+    padding: 0.35rem 0.1rem 0.25rem;
+    border: 0;
+    background: none;
+    color: #8e8e93;
+    font: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    transition: color 0.15s ease;
+  }
+
+  .app-shell__tab--active {
+    color: #1e3a8a;
+  }
+
+  .app-shell__tab:focus-visible {
+    outline: 2px solid #1e3a8a;
+    outline-offset: -4px;
+    border-radius: 12px;
+  }
+
+  .app-shell__tab-icon {
+    position: relative;
+    display: grid;
+    place-items: center;
+    height: 1.5rem;
+    transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .app-shell__tab:active .app-shell__tab-icon {
+    transform: scale(0.88);
+  }
+
+  .app-shell__tab-icon i {
+    font-size: 1.3rem;
+  }
+
+  .app-shell__tab-label {
+    max-width: 100%;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .app-shell__tab-badge {
+    position: absolute;
+    top: -0.3rem;
+    left: calc(50% + 0.35rem);
+    min-width: 1.05rem;
+    height: 1.05rem;
+    padding: 0 0.3rem;
+    border-radius: 980px;
+    background: #e5484d;
+    color: #ffffff;
+    font-size: 0.62rem;
+    font-weight: 700;
+    line-height: 1.05rem;
+    text-align: center;
+    box-shadow: 0 0 0 2px #ffffff;
+  }
+
+  .app-shell__tab-dot {
+    position: absolute;
+    top: -0.1rem;
+    left: calc(50% + 0.45rem);
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: #e5484d;
+    box-shadow: 0 0 0 2px #ffffff;
+  }
+
+  /* "Más": el menú completo sube desde abajo como hoja, por encima de las pestañas. */
+  .app-shell--tabbar .app-shell__sidebar {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 2.5rem);
+    padding: 1.6rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+    border: 0;
+    border-radius: 22px 22px 0 0;
+    box-shadow: 0 -12px 40px -12px rgba(15, 23, 42, 0.3);
+    transform: translate3d(0, 100%, 0);
+    transition:
+      transform 0.3s cubic-bezier(0.32, 0, 0.67, 0),
+      visibility 0s linear 0.3s;
+  }
+
+  .app-shell--tabbar .app-shell__sidebar.is-open {
+    transform: none;
+    transition:
+      transform 0.45s cubic-bezier(0.32, 0.72, 0, 1),
+      visibility 0s;
+  }
+
+  .app-shell--tabbar .app-shell__sidebar::before {
+    content: '';
+    position: absolute;
+    top: 0.5rem;
+    left: 50%;
+    width: 2.25rem;
+    height: 0.3rem;
+    border-radius: 999px;
+    background: rgba(60, 60, 67, 0.3);
+    transform: translateX(-50%);
+  }
+}
+
 @media (max-width: 720px) and (prefers-reduced-motion: reduce) {
   .app-shell__sidebar,
   .app-shell__sidebar.is-open,
+  .app-shell--tabbar .app-shell__sidebar,
+  .app-shell--tabbar .app-shell__sidebar.is-open,
   .app-shell__backdrop {
     transition-duration: 0.01ms;
   }

@@ -12,11 +12,13 @@ import 'primeicons/primeicons.css'
 import '@/shared/presentation/assets/bf-feedback.css'
 import '@/shared/presentation/assets/bf-segmented.css'
 import '@/shared/presentation/assets/bf-success.css'
+import '@/shared/presentation/assets/bf-native.css'
 import { vBfSeg } from '@/shared/presentation/directives/segmented.js'
 import { syncDocumentLocale } from '@/shared/application/syncDocumentLocale.js'
 import { storeLocale } from '@/shared/infrastructure/i18n/localePreference.js'
 import { startFirebaseAnalytics } from '@/iam/infrastructure/firebaseApp.js'
 import { hydratePreviewMockFromBrowser } from '@/shared/infrastructure/mock/hydratePreviewMock.js'
+import { setupNativeShell } from '@/shared/infrastructure/nativePlatform.js'
 
 // Aura trae esmeralda como color principal (bordes de foco verdes en inputs, selects y fechas de los
 // modales). Se reemplaza por el azul marino de la marca (#1e3a8a).
@@ -55,7 +57,7 @@ app.use(ToastService)
 app.use(ConfirmationService)
 app.directive('bf-seg', vBfSeg)
 
-hydratePreviewMockFromBrowser().finally(() => {
+Promise.allSettled([hydratePreviewMockFromBrowser(), setupNativeShell()]).finally(() => {
   app.mount('#app')
   startFirebaseAnalytics()
 })

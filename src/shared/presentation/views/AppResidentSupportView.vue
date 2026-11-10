@@ -2376,7 +2376,7 @@ function onAiSuggestion(kind) {
 
   .chat-shell {
     flex: none;
-    height: calc(100dvh - 2rem - var(--mobilebar-height, 0px));
+    height: calc(100dvh - 2rem - var(--mobilebar-height, 0px) - var(--shell-tabbar-space, 0px));
     min-height: 32rem;
   }
 

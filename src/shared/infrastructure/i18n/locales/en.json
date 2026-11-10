@@ -863,7 +863,21 @@
     "boardView": "Board view",
     "boardSummary": "Summary",
     "boardTeam": "Management team",
-    "activeBuilding": "Building"
+    "activeBuilding": "Building",
+    "tabs": {
+      "nav": "Main sections",
+      "more": "More",
+      "home": "Home",
+      "payments": "Payments",
+      "spaces": "Spaces",
+      "incidents": "Incidents",
+      "summary": "Summary",
+      "team": "Team",
+      "buildings": "Buildings",
+      "dashboard": "Home",
+      "finance": "Billing",
+      "information": "News"
+    }
   },
   "incidentStatusOpen": "Open",
   "incidentStatusInProgress": "In Progress",

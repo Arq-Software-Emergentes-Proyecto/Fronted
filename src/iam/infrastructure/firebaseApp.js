@@ -1,6 +1,7 @@
 import { initializeApp, getApps } from 'firebase/app'
 import { getAnalytics, isSupported } from 'firebase/analytics'
-import { getAuth } from 'firebase/auth'
+import { getAuth, indexedDBLocalPersistence, initializeAuth } from 'firebase/auth'
+import { Capacitor } from '@capacitor/core'
 import { getDatabase } from 'firebase/database'
 import { getFirestore } from 'firebase/firestore'
 import { getStorage } from 'firebase/storage'
@@ -51,8 +52,13 @@ export function getFirebaseApp() {
   return getApps()[0] ?? initializeApp(firebaseConfig)
 }
 
+let nativeAuth
 export function getFirebaseAuth() {
-  return getAuth(getFirebaseApp())
+  // Inside the native app (Capacitor) getAuth() hangs waiting for the browser popup/redirect
+  // resolver, so sign-in never resolves. Plain IndexedDB persistence without a resolver works.
+  if (!Capacitor.isNativePlatform()) return getAuth(getFirebaseApp())
+  nativeAuth ??= initializeAuth(getFirebaseApp(), { persistence: indexedDBLocalPersistence })
+  return nativeAuth
 }
 
 export function getFirebaseDb() {

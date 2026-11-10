@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">BuildingFex</string>
+    <string name="title_activity_main">BuildingFex</string>
+    <string name="package_name">com.buildingfex.app</string>
+    <string name="custom_url_scheme">com.buildingfex.app</string>
+</resources>

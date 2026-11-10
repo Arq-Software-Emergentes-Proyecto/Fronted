@@ -1,4 +1,5 @@
 import { signOut } from 'firebase/auth'
+import { Capacitor } from '@capacitor/core'
 import {
   getAccessToken,
   updateSessionToken,
@@ -96,5 +97,15 @@ export async function signOutFirebase() {
     await signOut(getFirebaseAuth())
   } catch {
     // sin sesión de Firebase o sin red: la sesión local ya se borró
+  }
+  // App nativa: cerrar también la cuenta de Google del SDK nativo, para que el próximo login
+  // vuelva a mostrar el selector de cuentas.
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication')
+      await FirebaseAuthentication.signOut()
+    } catch {
+      // nunca entró con Google nativo
+    }
   }
 }

@@ -1,5 +1,6 @@
-import { GoogleAuthProvider, getAuth, signInWithPopup } from 'firebase/auth'
-import { getFirebaseApp } from './firebaseApp.js'
+import { GoogleAuthProvider, signInWithCredential, signInWithPopup } from 'firebase/auth'
+import { Capacitor } from '@capacitor/core'
+import { getFirebaseAuth } from './firebaseApp.js'
 
 function googleError(code, message) {
   const error = new Error(message ?? code)
@@ -34,7 +35,7 @@ function mapFirebaseError(error) {
 
 /** Fuerza refresh para incluir custom claims recién escritos por el Admin SDK. */
 export async function refreshFirebaseIdToken() {
-  const auth = getAuth(getFirebaseApp())
+  const auth = getFirebaseAuth()
   const user = auth.currentUser
   if (!user) {
     throw googleError('GOOGLE_UNAVAILABLE', 'No hay sesión Firebase activa.')
@@ -42,12 +43,40 @@ export async function refreshFirebaseIdToken() {
   return user.getIdToken(true)
 }
 
+function selectAccountProvider() {
+  const provider = new GoogleAuthProvider()
+  provider.setCustomParameters({ prompt: 'select_account' })
+  return provider
+}
+
+/**
+ * Native app (Capacitor): popups don't exist in the WebView, so the native Google sheet signs in
+ * and its ID token is handed to the Firebase JS SDK. The JS user then works as on the web
+ * (getIdToken, refresh, sign-out).
+ */
+async function signInWithNativeGoogle(auth) {
+  const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication')
+  let native
+  try {
+    native = await FirebaseAuthentication.signInWithGoogle({ skipNativeAuth: true })
+  } catch (error) {
+    // iOS: "The user canceled the sign-in flow." · Android: GetCredentialCancellationException
+    if (/cancel/i.test(`${error?.code ?? ''} ${error?.message ?? ''}`)) {
+      throw googleError('GOOGLE_CANCELLED')
+    }
+    throw error
+  }
+  const idToken = native?.credential?.idToken
+  if (!idToken) throw googleError('GOOGLE_UNAVAILABLE', 'Google no devolvió un ID token.')
+  return signInWithCredential(auth, GoogleAuthProvider.credential(idToken))
+}
+
 export async function signInWithGoogle() {
   try {
-    const auth = getAuth(getFirebaseApp())
-    const provider = new GoogleAuthProvider()
-    provider.setCustomParameters({ prompt: 'select_account' })
-    const result = await signInWithPopup(auth, provider)
+    const auth = getFirebaseAuth()
+    const result = Capacitor.isNativePlatform()
+      ? await signInWithNativeGoogle(auth)
+      : await signInWithPopup(auth, selectAccountProvider())
     const email = String(result.user?.email ?? '').trim()
     if (!email) {
       throw googleError('GOOGLE_PROFILE')

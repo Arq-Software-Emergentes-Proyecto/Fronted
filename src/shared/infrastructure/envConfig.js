@@ -47,3 +47,14 @@ function resolveApiBaseUrl() {
 }
 
 export const API_BASE_URL = resolveApiBaseUrl()
+
+/**
+ * Origin for links that leave the app (invites, Mercado Pago return URLs).
+ * In the native build (Capacitor) the page origin is capacitor://localhost, so
+ * VITE_PUBLIC_WEB_URL points those links at the public web app instead.
+ */
+export function publicWebOrigin() {
+  const configured = String(import.meta.env.VITE_PUBLIC_WEB_URL ?? '').trim().replace(/\/$/, '')
+  if (configured) return configured
+  return typeof window !== 'undefined' ? window.location.origin : ''
+}

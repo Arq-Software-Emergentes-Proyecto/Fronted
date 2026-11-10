@@ -27,6 +27,11 @@ const TITLE_KEYS = {
   [AppRouteNames.APP_RESIDENT_SUPPORT]: 'resident.navSupport',
 }
 
+/** Clave i18n del nombre de una vista privada (título de la barra superior en la app nativa). */
+export function pageTitleKey(routeName) {
+  return TITLE_KEYS[routeName] ?? null
+}
+
 function robotsTag() {
   let tag = document.head.querySelector('meta[name="robots"]')
   if (!tag) {

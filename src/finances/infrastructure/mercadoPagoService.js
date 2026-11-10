@@ -5,6 +5,7 @@
  */
 
 import { apiClient } from '@/shared/infrastructure/api/apiClient.js'
+import { publicWebOrigin } from '@/shared/infrastructure/envConfig.js'
 import { getActiveDataOwnerId } from '@/shared/infrastructure/api/ownerTenant.js'
 import { checkoutReturnUrl } from '@/shared/infrastructure/mercadoPagoCheckoutClient.js'
 import { AppPaths } from '@/shared/domain/appRoutes.js'
@@ -29,7 +30,7 @@ export async function checkoutMaintenanceFees({ residentId, payerEmail } = {}) {
   }
 
   const ownerId = getActiveDataOwnerId()
-  const frontendBaseUrl = typeof window !== 'undefined' ? window.location.origin : undefined
+  const frontendBaseUrl = publicWebOrigin() || undefined
 
   // The API snapshots the pending items + total and builds the reference; 400/403 (nothing pending,
   // forbidden) reach the UI as they are.

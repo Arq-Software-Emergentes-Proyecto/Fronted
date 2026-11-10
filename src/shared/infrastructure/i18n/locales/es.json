@@ -863,7 +863,21 @@
     "boardView": "Vista de la junta",
     "boardSummary": "Resumen",
     "boardTeam": "Equipo de gestión",
-    "activeBuilding": "Edificio"
+    "activeBuilding": "Edificio",
+    "tabs": {
+      "nav": "Secciones principales",
+      "more": "Más",
+      "home": "Inicio",
+      "payments": "Pagos",
+      "spaces": "Áreas",
+      "incidents": "Incidencias",
+      "summary": "Resumen",
+      "team": "Equipo",
+      "buildings": "Edificios",
+      "dashboard": "Inicio",
+      "finance": "Cobros",
+      "information": "Avisos"
+    }
   },
   "incidentStatusOpen": "Abierta",
   "incidentStatusInProgress": "En progreso",

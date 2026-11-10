@@ -1,3 +1,4 @@
+import { publicWebOrigin } from '@/shared/infrastructure/envConfig.js'
 const MAINTENANCE_PENDING_KEY = 'bf.mp.maintenance'
 const SUBSCRIPTION_PENDING_KEY = 'bf.mp.subscription'
 
@@ -24,7 +25,7 @@ export const MpPendingKeys = {
 }
 
 export function checkoutReturnUrl(path, params) {
-  const url = new URL(path, window.location.origin)
+  const url = new URL(path, publicWebOrigin())
   Object.entries(params || {}).forEach(([key, value]) => {
     if (value != null && String(value).length) url.searchParams.set(key, String(value))
   })

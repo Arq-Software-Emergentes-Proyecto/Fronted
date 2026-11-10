@@ -1,4 +1,5 @@
 <script setup>
+import { publicWebOrigin } from '@/shared/infrastructure/envConfig.js'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Dialog from 'primevue/dialog'
@@ -47,7 +48,7 @@ const ERROR_KEYS = {
 
 function inviteLink(token) {
   if (!token || typeof window === 'undefined') return ''
-  return `${window.location.origin}${AppPaths.MEMBER_INVITE.replace(':token', token)}`
+  return `${publicWebOrigin()}${AppPaths.MEMBER_INVITE.replace(':token', token)}`
 }
 
 function roleLabel(role) {
