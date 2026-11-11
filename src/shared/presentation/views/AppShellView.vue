@@ -6,6 +6,7 @@ import Toast from 'primevue/toast'
 import { useToast } from 'primevue/usetoast'
 import SkipLink from '../components/SkipLink.vue'
 import BfConfirmDialog from '../components/BfConfirmDialog.vue'
+import CommandPalette from '../components/CommandPalette.vue'
 import { AppRouteNames } from '@/shared/domain/appRoutes.js'
 import { getActiveBuildingRole, useSession } from '@/iam/application/sessionStore.js'
 import { loadAccessibleBuildings, switchBuilding } from '@/iam/application/buildingWorkspace.js'
@@ -24,7 +25,7 @@ import { IncidentRealtimeEvent } from '@/incidents/domain/model/incidentConstant
 import { USE_NATIVE_CHROME } from '@/shared/infrastructure/nativePlatform.js'
 import { pageTitleKey } from '@/shared/presentation/router/pageMeta.js'
 
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const { isResident, isReadOnly, clearSession, state: sessionState } = useSession()
@@ -310,6 +311,79 @@ function toggleAppLocale() {
   locale.value = locale.value === 'es' ? 'en' : 'es'
 }
 
+// Buscador global (⌘K en Mac, Ctrl+K en el resto): secciones del menú, acciones frecuentes y residentes.
+const isPaletteOpen = ref(false)
+const paletteShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'
+
+const paletteCommands = computed(() => {
+  const page = (item) => ({
+    id: `page-${item.key}`,
+    group: 'pages',
+    label: item.label,
+    icon: item.icon,
+    keywords: te(`palette.keywords.${item.key}`) ? t(`palette.keywords.${item.key}`) : '',
+    current: item.routeName === route.name,
+    to: { name: item.routeName },
+  })
+  const action = (id, label, icon, to) => ({ id: `action-${id}`, group: 'actions', label, icon, to })
+
+  const roleActions = isResident.value
+    ? [
+        action('pay', t('resident.quickPay'), 'pi pi-wallet', { name: AppRouteNames.APP_RESIDENT_FINANCE }),
+        action('reserve', t('resident.quickReserve'), 'pi pi-calendar-plus', { name: AppRouteNames.APP_RESIDENT_SERVICES }),
+        action('report', t('resident.quickIncident'), 'pi pi-flag', { name: AppRouteNames.APP_RESIDENT_INCIDENTS }),
+        action('assistant', t('resident.quickAssistant'), 'pi pi-sparkles', { name: AppRouteNames.APP_RESIDENT_SUPPORT }),
+      ]
+    : isBoardView.value
+      ? []
+      : [
+          action('receipts', t('dashboard.quickGenerate'), 'pi pi-receipt', { name: AppRouteNames.APP_FINANCE }),
+          action('announcement', t('dashboard.quickAnnouncement'), 'pi pi-megaphone', { name: AppRouteNames.APP_INFORMATION }),
+          action('escalated', t('palette.actionEscalated'), 'pi pi-exclamation-triangle', {
+            name: AppRouteNames.APP_INCIDENTS,
+            query: { filter: 'escalated' },
+          }),
+        ]
+
+  return [
+    ...[...appNavPrimaryItems.value, ...appNavAdministrativeItems.value].map(page),
+    page({ key: 'settings', label: t('app.settings'), icon: 'pi pi-cog', routeName: AppRouteNames.APP_SETTINGS }),
+    ...roleActions,
+    {
+      id: 'action-language',
+      group: 'actions',
+      label: t('palette.actionLanguage'),
+      icon: 'pi pi-language',
+      keywords: t('palette.keywords.language'),
+      run: toggleAppLocale,
+    },
+    {
+      id: 'action-logout',
+      group: 'actions',
+      label: t('app.logout'),
+      icon: 'pi pi-sign-out',
+      keywords: t('palette.keywords.logout'),
+      danger: true,
+      run: onLogout,
+    },
+  ]
+})
+
+function openPalette() {
+  // En el celular el menú es un panel modal: se cierra antes para no dejar dos capas abiertas.
+  closeMenu({ restoreFocus: false })
+  isPaletteOpen.value = true
+}
+
+function onPaletteShortcut(event) {
+  if (event.key?.toLowerCase() !== 'k' || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
+  // Con un diálogo abierto (formularios, confirmaciones) el atajo no lo tapa.
+  if (!isPaletteOpen.value && document.querySelector('.p-dialog-mask')) return
+  event.preventDefault()
+  if (isPaletteOpen.value) isPaletteOpen.value = false
+  else openPalette()
+}
+
 // Celular: el menú lateral se abre como panel flotante desde el botón de tres rayas.
 const MOBILE_QUERY = '(max-width: 720px)'
 const isMobile = ref(false)
@@ -398,7 +472,7 @@ function closeMenu({ restoreFocus = true } = {}) {
 }
 
 function onMenuKeydown(event) {
-  if (!isMenuOpen.value) return
+  if (!isMenuOpen.value || isPaletteOpen.value) return
   if (event.key === 'Escape') {
     closeMenu()
     return
@@ -435,11 +509,13 @@ onMounted(() => {
   syncMobile()
   mobileQuery.addEventListener('change', syncMobile)
   document.addEventListener('keydown', onMenuKeydown)
+  document.addEventListener('keydown', onPaletteShortcut)
 })
 
 onBeforeUnmount(() => {
   mobileQuery?.removeEventListener('change', syncMobile)
   document.removeEventListener('keydown', onMenuKeydown)
+  document.removeEventListener('keydown', onPaletteShortcut)
   document.documentElement.classList.remove('bf-menu-open', 'bf-has-tabbar')
 })
 </script>
@@ -474,6 +550,11 @@ onBeforeUnmount(() => {
       </template>
     </Toast>
     <BfConfirmDialog />
+    <CommandPalette
+      v-model:open="isPaletteOpen"
+      :commands="paletteCommands"
+      :search-residents="!isResident && !isBoardView"
+    />
     <header class="app-shell__mobilebar">
       <p v-if="showTabBar" class="app-shell__mobilebar-title">{{ pageTitle }}</p>
       <button
@@ -567,6 +648,18 @@ onBeforeUnmount(() => {
               aria-hidden="true"
             >EN</span>
           </span>
+        </button>
+
+        <button
+          type="button"
+          class="app-shell__search"
+          aria-haspopup="dialog"
+          :aria-keyshortcuts="paletteShortcut === '⌘K' ? 'Meta+K' : 'Control+K'"
+          @click="openPalette"
+        >
+          <i class="pi pi-search" aria-hidden="true" />
+          <span class="app-shell__search-label">{{ t('palette.trigger') }}</span>
+          <kbd class="app-shell__search-kbd" aria-hidden="true">{{ paletteShortcut }}</kbd>
         </button>
       </header>
 
@@ -682,7 +775,9 @@ onBeforeUnmount(() => {
       role="main"
       tabindex="-1"
     >
-      <RouterView />
+      <RouterView v-slot="{ Component }">
+        <component :is="Component" :key="route.name" class="app-shell__page" />
+      </RouterView>
     </main>
     <nav v-if="showTabBar" class="app-shell__tabbar" :aria-label="t('app.tabs.nav')">
       <RouterLink
@@ -796,7 +891,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1rem;
+  gap: 0.55rem;
   width: 100%;
 }
 
@@ -1016,7 +1111,7 @@ onBeforeUnmount(() => {
 .app-shell__divider {
   height: 1px;
   background: var(--shell-border);
-  margin: 1.125rem 0 0.875rem;
+  margin: 0.7rem 0 0.65rem;
   flex-shrink: 0;
   width: 100%;
   max-width: 11.25rem;
@@ -1056,7 +1151,7 @@ onBeforeUnmount(() => {
   gap: 0.35rem;
   width: 100%;
   max-width: 11.25rem;
-  margin-bottom: 0.875rem;
+  margin-bottom: 0.7rem;
 }
 
 .app-shell__building-select-wrap,
@@ -1373,6 +1468,83 @@ onBeforeUnmount(() => {
   border-radius: 999px;
 }
 
+.app-shell__search {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  max-width: 11.25rem;
+  min-height: 2rem;
+  margin: 0;
+  padding: 0 0.4rem 0 0.7rem;
+  box-sizing: border-box;
+  border: 1px solid var(--shell-border);
+  border-radius: 12px;
+  background: #fbfbfd;
+  color: var(--shell-muted);
+  font: inherit;
+  font-size: 0.78rem;
+  letter-spacing: -0.01em;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.app-shell__search .pi {
+  font-size: 0.78rem;
+}
+
+.app-shell__search-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.app-shell__search-kbd {
+  flex-shrink: 0;
+  padding: 0.18rem 0.4rem;
+  border-radius: 7px;
+  border: 1px solid var(--shell-border);
+  background: #fff;
+  color: var(--shell-muted);
+  font-family: inherit;
+  font-size: 0.64rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.app-shell__search:hover {
+  background: #fff;
+  border-color: #d2d2d7;
+  color: var(--shell-text);
+}
+
+.app-shell__search:focus-visible {
+  outline: var(--apple-focus-ring, 2px solid var(--apple-blue));
+  outline-offset: 2px;
+}
+
+/* Cada vista entra con un fundido corto al cambiar de sección. */
+.app-shell__page {
+  animation: app-shell-page-in 0.24s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* Sin teclado físico el atajo no aplica. */
+@media (max-width: 720px) {
+  .app-shell__search-kbd {
+    display: none;
+  }
+}
+
+@keyframes app-shell-page-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+  }
+}
+
 .app-shell__lang-switch-btn:focus {
   outline: none;
 }
@@ -1384,6 +1556,14 @@ onBeforeUnmount(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .app-shell__page {
+    animation: none;
+  }
+
+  .app-shell__search {
+    transition: none;
+  }
+
   .app-shell__segment-pill,
   .app-shell__nav-pill {
     transition-duration: 0.01ms;

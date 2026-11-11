@@ -1,6 +1,7 @@
 ﻿<script setup>
 import { onMounted, ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import InputNumber from 'primevue/inputnumber'
 import Dialog from 'primevue/dialog'
 import Paginator from 'primevue/paginator'
@@ -104,7 +105,15 @@ const chargeJustSaved = ref(false)
 const isChargeRegistered = computed(() => Boolean(selectedCharge.value) && !chargeJustSaved.value)
 const isReceiptsModalOpen = ref(false)
 const extraCharges = ref([])
-const residentsSearch = ref('')
+// `?q=` llega del buscador global (⌘K) al elegir a un residente: la tabla abre ya filtrada.
+const route = useRoute()
+const residentsSearch = ref(String(route.query.q ?? ''))
+watch(
+  () => route.query.q,
+  (q) => {
+    if (q != null) residentsSearch.value = String(q)
+  },
+)
 const selectedResidentId = ref('')
 const extraForm = ref({
   title: '',

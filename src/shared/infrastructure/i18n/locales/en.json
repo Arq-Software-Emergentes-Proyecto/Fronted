@@ -2534,5 +2534,48 @@
     "errorOwner": "You already own this condominium.",
     "errorWrongPassword": "An account with this email already exists: enter its password.",
     "errorGeneric": "The invitation could not be accepted. Try again."
+  },
+  "palette": {
+    "title": "Search BuildingFex",
+    "trigger": "Search",
+    "placeholder": "Search for a section or an action…",
+    "placeholderWithResidents": "Search for a section, an action or a resident…",
+    "close": "Close search",
+    "results": "Results",
+    "current": "You are here",
+    "open": "Open",
+    "run": "Run",
+    "openCollections": "View billing",
+    "emptyTitle": "No results for “{query}”",
+    "emptyHint": "Try the name of a section, such as “Billing” or “Incidents”.",
+    "hintNavigate": "Navigate",
+    "hintSelect": "Select",
+    "hintClose": "Close",
+    "floor": "Floor {floor}",
+    "department": "Apt. {department}",
+    "actionEscalated": "View escalated incidents",
+    "actionLanguage": "Switch language to Spanish",
+    "group": {
+      "pages": "Go to",
+      "actions": "Actions",
+      "residents": "Residents"
+    },
+    "keywords": {
+      "dashboard": "home overview summary",
+      "advancedManagement": "apartments units neighbors common areas",
+      "import": "files rules import pdf",
+      "finance": "fees receipts payments debt billing",
+      "generation": "qr guests visitors passes",
+      "incidents": "reports maintenance issues problems",
+      "team": "staff shifts tasks workers",
+      "information": "announcements notices news",
+      "residentHelp": "chat help questions assistant",
+      "collectionsManagementExpenses": "expenses income budget",
+      "access": "permissions invitations members",
+      "buildings": "condos portfolio",
+      "settings": "profile account plan subscription password",
+      "language": "language english español spanish",
+      "logout": "sign out exit"
+    }
   }
 }

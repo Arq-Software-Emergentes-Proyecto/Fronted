@@ -1601,10 +1601,10 @@ const chartOptions = ref({
   list-style: none;
   margin: 0;
   padding: 0;
-  /* Una sola fila de pills; cada una toma el ancho de su texto y el espacio libre se reparte. */
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, auto);
+  /* Pills en fila: cada una toma el ancho de su texto, el espacio libre se reparte y, si no caben
+     todas, pasan a otra fila en vez de cortar el texto. */
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.6rem;
 }
 
@@ -1612,6 +1612,9 @@ const chartOptions = ref({
   --agenda-ink: #1e3a8a;
   --agenda-bg: #e8eefc;
   --agenda-badge: #1e3a8a;
+  flex: 1 1 auto;
+  /* Tope de ancho: una pill sola en la última fila no se estira de lado a lado. */
+  max-width: 24rem;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -1742,8 +1745,11 @@ const chartOptions = ref({
 /* ---------- Responsive ---------- */
 @media (max-width: 1180px) {
   .agenda__grid {
-    grid-auto-flow: row;
+    display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .agenda-item {
+    max-width: none;
   }
   .dash-hero {
     padding-right: 1.6rem;

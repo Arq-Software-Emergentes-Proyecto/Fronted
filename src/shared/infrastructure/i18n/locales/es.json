@@ -2534,5 +2534,48 @@
     "errorOwner": "Ya eres el dueño de este condominio.",
     "errorWrongPassword": "Ya existe una cuenta con este correo: escribe su contraseña.",
     "errorGeneric": "No se pudo aceptar la invitación. Inténtalo de nuevo."
+  },
+  "palette": {
+    "title": "Buscar en BuildingFex",
+    "trigger": "Buscar",
+    "placeholder": "Busca una sección o una acción…",
+    "placeholderWithResidents": "Busca una sección, una acción o un residente…",
+    "close": "Cerrar buscador",
+    "results": "Resultados",
+    "current": "Estás aquí",
+    "open": "Abrir",
+    "run": "Ejecutar",
+    "openCollections": "Ver cobros",
+    "emptyTitle": "Sin resultados para «{query}»",
+    "emptyHint": "Prueba con el nombre de una sección, como «Cobros» o «Incidencias».",
+    "hintNavigate": "Navegar",
+    "hintSelect": "Seleccionar",
+    "hintClose": "Cerrar",
+    "floor": "Piso {floor}",
+    "department": "Dept. {department}",
+    "actionEscalated": "Ver incidencias escaladas",
+    "actionLanguage": "Cambiar idioma a inglés",
+    "group": {
+      "pages": "Ir a",
+      "actions": "Acciones",
+      "residents": "Residentes"
+    },
+    "keywords": {
+      "dashboard": "inicio resumen home",
+      "advancedManagement": "departamentos vecinos áreas comunes",
+      "import": "archivos reglamento importar pdf",
+      "finance": "cuotas recibos pagos deuda morosidad",
+      "generation": "qr invitados visitas pases",
+      "incidents": "reportes averías mantenimiento problemas",
+      "team": "personal turnos tareas trabajadores",
+      "information": "anuncios avisos noticias",
+      "residentHelp": "chat ayuda consultas asistente",
+      "collectionsManagementExpenses": "egresos ingresos presupuesto",
+      "access": "permisos invitaciones miembros",
+      "buildings": "condominios portafolio",
+      "settings": "perfil cuenta plan suscripción contraseña",
+      "language": "idioma english español",
+      "logout": "salir"
+    }
   }
 }
