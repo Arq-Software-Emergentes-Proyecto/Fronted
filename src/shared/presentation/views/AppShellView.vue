@@ -241,6 +241,13 @@ const activeAppNavPrimaryIndex = computed(() =>
 
 const isAppNavPrimaryPillVisible = computed(() => activeAppNavPrimaryIndex.value >= 0)
 
+// El grupo "Administrativo" lleva la misma pill deslizante que el grupo de arriba.
+const activeAppNavAdministrativeIndex = computed(() =>
+  appNavAdministrativeItems.value.findIndex((item) => item.routeName === route.name),
+)
+
+const isAppNavAdministrativePillVisible = computed(() => activeAppNavAdministrativeIndex.value >= 0)
+
 // RF024: aviso en tiempo real de nuevas incidencias al admin (SignalR /hubs/support).
 let stopIncidentToasts = () => {}
 
@@ -720,7 +727,15 @@ onBeforeUnmount(() => {
           <template v-if="appNavAdministrativeItems.length">
             <div class="app-shell__nav-split" role="presentation" />
             <p class="app-shell__nav-group-label">{{ t('app.sidebarAdministrative') }}</p>
-            <div class="app-shell__nav-track app-shell__nav-track--simple">
+            <div
+              class="app-shell__nav-track"
+              :style="{ '--nav-pill-index': activeAppNavAdministrativeIndex }"
+            >
+              <span
+                class="app-shell__nav-pill"
+                :class="{ 'app-shell__nav-pill--hidden': !isAppNavAdministrativePillVisible }"
+                aria-hidden="true"
+              />
               <RouterLink
                 v-for="item in appNavAdministrativeItems"
                 :key="item.key"
@@ -1299,12 +1314,6 @@ onBeforeUnmount(() => {
 .app-shell__nav-link--active {
   color: var(--shell-text);
   font-weight: 700;
-}
-
-/* Lista simple (sin pill deslizante): el activo lleva su propio fondo. */
-.app-shell__nav-track--simple .app-shell__nav-link--active {
-  background: #ffffff;
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.07);
 }
 
 .app-shell__nav-link-icon {
